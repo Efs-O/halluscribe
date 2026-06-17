@@ -1,0 +1,31 @@
+[package]
+name = "halluscribe"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Local-first AI session scribe — reads Claude Code, Codex and Continue JSONL files, summarises them with Gemma 4, and archives human-readable session logs to ~/.halluscribe/"
+authors = ["EFS.O"]
+homepage = "https://github.com/Efs-O/halluscribe"
+repository = "https://github.com/Efs-O/halluscribe"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri                = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell   = "2"
+tauri-plugin-process = "2"
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+reqwest    = { version = "0.12", features = ["blocking", "json"] }
+rusqlite   = { version = "0.31", features = ["bundled"] }
+which      = "6"
+chrono     = { version = "0.4", features = ["clock", "std"], default-features = false }
+
+[dev-dependencies]
+tempfile = "3"

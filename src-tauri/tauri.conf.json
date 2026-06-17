@@ -1,0 +1,52 @@
+{
+  "productName": "HalluScribe",
+  "version": "0.1.0",
+  "identifier": "com.halluscribe.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:6420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "HalluScribe",
+        "width": 1100,
+        "height": 780,
+        "minWidth": 860,
+        "minHeight": 620,
+        "resizable": true,
+        "maximizable": true,
+        "decorations": false,
+        "skipTaskbar": false,
+        "alwaysOnTop": false,
+        "visible": true,
+        "center": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self' http://localhost:6420 ws://localhost:6420; script-src 'self' 'unsafe-eval' http://localhost:6420; style-src 'self' 'unsafe-inline' http://localhost:6420; img-src 'self' asset: data: http://localhost:6420; font-src 'self' data: http://localhost:6420; connect-src 'self' ipc: http://ipc.localhost http://localhost:6420 ws://localhost:6420; object-src 'none'; frame-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": {},
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": {
+        "upgradeCode": "B9C1D2E3-F4A5-6078-BCDE-F01234567891"
+      }
+    }
+  }
+}

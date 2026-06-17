@@ -1,0 +1,61 @@
+# Rust
+target/
+
+# Node / frontend
+node_modules/
+dist/
+.svelte-kit/
+
+# Tauri generated files
+src-tauri/gen/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
+
+# Claude Code project instructions (contains local machine paths)
+CLAUDE.md
+
+# Internal agent coordination files
+.coordination/
+.claude/
+
+# Local test/dev data (contains personal session data — never commit)
+_local_sensitive_dev_data/
+
+# Reference-only HalluMeter source copies — not imported, not compiled
+reference/
+
+# Internal planning / design / audit docs — kept locally, not for the public repo
+docs/internal/
+
+# Personal chat export files used for local testing
+# (no quotes — .gitignore treats spaces literally; quotes break the match)
+chatgpt chats/
+claude chats/
+gemini chats/
+
+# Windows system files
+Microsoft/
+
+# Dev result logs
+*.txt

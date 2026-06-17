@@ -1,0 +1,123 @@
+/* HalluScribe - SessionList styles. */
+.container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.container.dragging {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.left {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  transition: flex 0.2s;
+}
+
+.left.narrow { flex: 0 0 35%; }
+
+.right {
+  flex: 0 0 65%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 12px;
+  outline: none;
+}
+
+.search-input:focus,
+.fill-input:focus { border-color: var(--muted); }
+
+.fill-label,
+.fill-sep {
+  font-size: 13px;
+  color: var(--dim);
+  flex-shrink: 0;
+}
+
+.fill-input {
+  width: 72px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.btn-nav {
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 12px;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  border: 1px solid var(--border);
+  color: var(--dim);
+}
+
+.btn-nav:hover:not(:disabled) {
+  border-color: var(--text);
+  color: var(--text);
+}
+
+.btn-nav:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.empty {
+  padding: 32px 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.page-info {
+  font-size: 13px;
+  color: var(--muted);
+}

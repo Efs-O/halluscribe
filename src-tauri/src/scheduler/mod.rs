@@ -1,0 +1,13 @@
+// HalluScribe - nightly sweep scheduler.
+// Scans recent JSONL sessions, deduplicates against the archive, and runs
+// sequential Gemma inference for each new session.
+// force=true bypasses the time-window check ("Run Now" user action).
+// No concurrent inference - one session at a time, always.
+
+mod helpers;
+mod runner;
+mod tests;
+mod types;
+
+pub use runner::run_sweep;
+pub use types::{SweepConfig, SweepProgress, SweepResult};

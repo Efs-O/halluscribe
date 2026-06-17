@@ -1,0 +1,44 @@
+use crate::gemma::InferenceBackend;
+use crate::settings::HalluScribeSettings;
+use serde::Serialize;
+use std::path::PathBuf;
+
+/// Configuration for one sweep pass.
+/// Phase 6 (Settings) will wrap this; for now callers construct it directly.
+pub struct SweepConfig {
+    pub archive_dir: PathBuf,
+    pub backend: InferenceBackend,
+    pub settings: HalluScribeSettings,
+    pub ctx_size: u32,
+    pub max_tokens: u32,
+    pub min_fill_pct: f64,
+    pub lookback_secs: u64,
+    pub force: bool,
+    pub schedule_time: String,
+    /// Date (`YYYY-MM-DD`, local) of the last successful sweep, copied from
+    /// settings. Used by the catch-up scheduler to run at most once per day.
+    pub last_sweep_date: String,
+}
+
+/// Emitted after each session is processed during a sweep.
+#[derive(Debug, Clone, Serialize)]
+pub struct SweepProgress {
+    pub current: usize,
+    pub total: usize,
+    pub session_id: String,
+    pub status: String,
+}
+
+/// Outcome of one sweep pass.
+#[derive(Debug, Default)]
+pub struct SweepResult {
+    pub ran: bool,
+    /// True when the sweep was refused because another inference job
+    /// (a concurrent sweep, briefing, chat, or embedding run) held the
+    /// process-wide inference lock. Distinct from a quiet out-of-window skip.
+    pub busy: bool,
+    pub processed: u32,
+    pub skipped: u32,
+    pub deferred: u32,
+    pub errors: Vec<String>,
+}

@@ -1,0 +1,318 @@
+// HalluScribe - settings persistence and runtime conversion tests.
+#[cfg(test)]
+#[allow(clippy::module_inception)]
+mod tests {
+    use super::super::{load_settings, save_settings, BackendKind, HalluScribeSettings};
+    use crate::gemma::InferenceBackend;
+    use std::{fs, path::PathBuf};
+    use tempfile::TempDir;
+
+    fn tmp() -> TempDir {
+        tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn defaults_are_sane() {
+        let settings = HalluScribeSettings::default();
+        assert!(!settings.always_on_top);
+        assert_eq!(settings.backend, BackendKind::LlamaCpp);
+        assert_eq!(settings.ollama_model, "gemma4:26b");
+        assert!(settings.ollama_api_key.is_empty());
+        assert!(settings.tavily_api_key.is_empty());
+        assert_eq!(settings.summary_min_fill_pct, 50.0);
+        assert_eq!(settings.schedule_time, "02:00");
+        assert_eq!(settings.lookback_hours, 24);
+        assert_eq!(settings.gpu_layers, -1);
+        assert_eq!(settings.ctx_size, 0);
+        assert_eq!(settings.max_tokens, 0);
+    }
+
+    #[test]
+    fn load_returns_defaults_when_file_absent() {
+        let dir = tmp();
+        let settings = load_settings(dir.path());
+        assert_eq!(settings.schedule_time, "02:00");
+    }
+
+    #[test]
+    fn load_partial_json_merges_defaults() {
+        let dir = tmp();
+        fs::write(
+            dir.path().join("settings.json"),
+            r#"{"schedule_time": "03:15", "ollama_model": "gemma4:12b"}"#,
+        )
+        .unwrap();
+        let settings = load_settings(dir.path());
+        assert_eq!(settings.schedule_time, "03:15");
+        assert_eq!(settings.ollama_model, "gemma4:12b");
+        assert_eq!(settings.summary_min_fill_pct, 50.0);
+        assert_eq!(settings.ctx_size, 0);
+        assert_eq!(settings.max_tokens, 0);
+    }
+
+    #[test]
+    fn load_malformed_json_returns_defaults() {
+        let dir = tmp();
+        fs::write(dir.path().join("settings.json"), "not json at all").unwrap();
+        let settings = load_settings(dir.path());
+        assert_eq!(settings.schedule_time, "02:00");
+    }
+
+    #[test]
+    fn save_and_reload_round_trips() {
+        let dir = tmp();
+        let settings = HalluScribeSettings {
+            schedule_time: "05:30".to_string(),
+            always_on_top: true,
+            ollama_model: "gemma4:12b".to_string(),
+            ollama_api_key: "ollama-key".to_string(),
+            tavily_api_key: "tavily-key".to_string(),
+            ..Default::default()
+        };
+        save_settings(dir.path(), &settings).unwrap();
+        let reloaded = load_settings(dir.path());
+        assert_eq!(reloaded.schedule_time, "05:30");
+        assert!(reloaded.always_on_top);
+        assert_eq!(reloaded.ollama_model, "gemma4:12b");
+        assert_eq!(reloaded.ollama_api_key, "ollama-key");
+        assert_eq!(reloaded.tavily_api_key, "tavily-key");
+    }
+
+    #[test]
+    fn load_legacy_schedule_hour_migrates_to_top_of_hour() {
+        let dir = tmp();
+        fs::write(dir.path().join("settings.json"), r#"{"schedule_time": 4}"#).unwrap();
+        let settings = load_settings(dir.path());
+        assert_eq!(settings.schedule_time, "04:00");
+    }
+
+    #[test]
+    fn save_creates_dir_if_absent() {
+        let dir = tmp();
+        let nested = dir.path().join("deep").join("nested");
+        let settings = HalluScribeSettings::default();
+        save_settings(&nested, &settings).unwrap();
+        assert!(nested.join("settings.json").exists());
+    }
+
+    #[test]
+    fn backend_kind_serializes_lowercase() {
+        let a = serde_json::to_string(&BackendKind::LlamaCpp).unwrap();
+        let b = serde_json::to_string(&BackendKind::Ollama).unwrap();
+        assert_eq!(a, "\"llamacpp\"");
+        assert_eq!(b, "\"ollama\"");
+    }
+
+    #[test]
+    fn backend_kind_deserializes_from_lowercase() {
+        let a: BackendKind = serde_json::from_str("\"llamacpp\"").unwrap();
+        let b: BackendKind = serde_json::from_str("\"ollama\"").unwrap();
+        assert_eq!(a, BackendKind::LlamaCpp);
+        assert_eq!(b, BackendKind::Ollama);
+    }
+
+    #[test]
+    fn llamacpp_returns_none_when_bin_empty() {
+        let settings = HalluScribeSettings {
+            backend: BackendKind::LlamaCpp,
+            llama_server_bin: String::new(),
+            gemma_model_path: "/models/gemma.gguf".to_string(),
+            ..Default::default()
+        };
+        assert!(settings.to_inference_backend().is_none());
+    }
+
+    #[test]
+    fn llamacpp_returns_none_when_model_empty() {
+        let settings = HalluScribeSettings {
+            backend: BackendKind::LlamaCpp,
+            llama_server_bin: "/usr/bin/llama-server".to_string(),
+            gemma_model_path: String::new(),
+            ..Default::default()
+        };
+        assert!(settings.to_inference_backend().is_none());
+    }
+
+    #[test]
+    fn llamacpp_returns_some_when_both_set() {
+        let settings = HalluScribeSettings {
+            backend: BackendKind::LlamaCpp,
+            llama_server_bin: "/usr/bin/llama-server".to_string(),
+            gemma_model_path: "/models/gemma.gguf".to_string(),
+            gpu_layers: 35,
+            llama_server_port: 8080,
+            ..Default::default()
+        };
+        let backend = settings.to_inference_backend().unwrap();
+        assert!(matches!(
+            backend,
+            InferenceBackend::LlamaCpp {
+                port: 8080,
+                gpu_layers: 35,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn ollama_always_returns_some() {
+        let settings = HalluScribeSettings {
+            backend: BackendKind::Ollama,
+            ..Default::default()
+        };
+        let backend = settings.to_inference_backend().unwrap();
+        assert!(matches!(backend, InferenceBackend::Ollama { .. }));
+    }
+
+    #[test]
+    fn sweep_config_none_when_llamacpp_bin_empty() {
+        let settings = HalluScribeSettings {
+            backend: BackendKind::LlamaCpp,
+            llama_server_bin: String::new(),
+            ..Default::default()
+        };
+        assert!(settings
+            .to_sweep_config(PathBuf::from("/tmp/hs"), false)
+            .is_none());
+    }
+
+    #[test]
+    fn sweep_config_none_when_scheduled_processing_disabled() {
+        let settings = HalluScribeSettings {
+            backend: BackendKind::Ollama,
+            scheduled_processing_enabled: false,
+            ctx_size: 65_536,
+            max_tokens: 32_768,
+            ..Default::default()
+        };
+        assert!(settings
+            .to_sweep_config(PathBuf::from("/tmp/hs"), false)
+            .is_none());
+    }
+
+    #[test]
+    fn force_sweep_ignores_scheduled_processing_toggle() {
+        let settings = HalluScribeSettings {
+            backend: BackendKind::Ollama,
+            scheduled_processing_enabled: false,
+            ctx_size: 65_536,
+            max_tokens: 32_768,
+            ..Default::default()
+        };
+        assert!(settings
+            .to_sweep_config(PathBuf::from("/tmp/hs"), true)
+            .is_some());
+    }
+
+    #[test]
+    fn first_run_defaults_to_true() {
+        assert!(HalluScribeSettings::default().first_run);
+    }
+
+    #[test]
+    fn first_run_true_overrides_lookback_to_unlimited() {
+        let settings = HalluScribeSettings {
+            backend: BackendKind::Ollama,
+            first_run: true,
+            lookback_hours: 24,
+            ctx_size: 65_536,
+            max_tokens: 32_768,
+            ..Default::default()
+        };
+        let cfg = settings
+            .to_sweep_config(PathBuf::from("/tmp/hs"), false)
+            .unwrap();
+        assert_eq!(cfg.lookback_secs, u64::MAX);
+    }
+
+    #[test]
+    fn first_run_false_uses_lookback_hours() {
+        let settings = HalluScribeSettings {
+            backend: BackendKind::Ollama,
+            first_run: false,
+            lookback_hours: 48,
+            ctx_size: 65_536,
+            max_tokens: 32_768,
+            ..Default::default()
+        };
+        let cfg = settings
+            .to_sweep_config(PathBuf::from("/tmp/hs"), false)
+            .unwrap();
+        assert_eq!(cfg.lookback_secs, 48 * 3600);
+    }
+
+    #[test]
+    fn phase8_defaults_require_runtime_limits_to_be_set() {
+        let settings = HalluScribeSettings::default();
+        assert_eq!(settings.ctx_size, 0);
+        assert_eq!(settings.max_tokens, 0);
+        assert_eq!(settings.briefing_window_hours, 2);
+    }
+
+    #[test]
+    fn phase8_fields_round_trip() {
+        let dir = tmp();
+        let settings = HalluScribeSettings {
+            ctx_size: 65_536,
+            max_tokens: 24_576,
+            briefing_window_hours: 12,
+            ..Default::default()
+        };
+        save_settings(dir.path(), &settings).unwrap();
+        let reloaded = load_settings(dir.path());
+        assert_eq!(reloaded.ctx_size, 65_536);
+        assert_eq!(reloaded.max_tokens, 24_576);
+        assert_eq!(reloaded.briefing_window_hours, 12);
+    }
+
+    #[test]
+    fn phase8_fields_default_when_absent_from_json() {
+        let dir = tmp();
+        fs::write(
+            dir.path().join("settings.json"),
+            r#"{"schedule_time": "04:00"}"#,
+        )
+        .unwrap();
+        let settings = load_settings(dir.path());
+        assert!(!settings.always_on_top);
+        assert_eq!(settings.ctx_size, 0);
+        assert_eq!(settings.max_tokens, 0);
+        assert_eq!(settings.briefing_window_hours, 2);
+        assert!(settings.ollama_api_key.is_empty());
+        assert!(settings.tavily_api_key.is_empty());
+    }
+
+    #[test]
+    fn sweep_config_propagates_force_and_schedule_time() {
+        let settings = HalluScribeSettings {
+            backend: BackendKind::Ollama,
+            first_run: false,
+            schedule_time: "03:45".to_string(),
+            summary_min_fill_pct: 60.0,
+            lookback_hours: 48,
+            ctx_size: 65_536,
+            max_tokens: 32_768,
+            ..Default::default()
+        };
+        let cfg = settings
+            .to_sweep_config(PathBuf::from("/tmp/hs"), true)
+            .unwrap();
+        assert!(cfg.force);
+        assert_eq!(cfg.schedule_time, "03:45");
+        assert_eq!(cfg.min_fill_pct, 60.0);
+        assert_eq!(cfg.lookback_secs, 48 * 3600);
+    }
+
+    #[test]
+    fn generation_limits_require_non_zero_values() {
+        let settings = HalluScribeSettings::default();
+        assert!(settings.generation_limits().is_err());
+
+        let configured = HalluScribeSettings {
+            ctx_size: 65_536,
+            max_tokens: 32_768,
+            ..Default::default()
+        };
+        assert_eq!(configured.generation_limits().unwrap(), (65_536, 32_768));
+    }
+}
