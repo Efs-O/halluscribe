@@ -1,10 +1,26 @@
-# HalluScribe
+<p align="center">
+  <img src="assets/banner.svg" alt="HalluScribe" width="640">
+</p>
+
+<h1 align="center">HalluScribe</h1>
 
 > Turn every AI coding session into a searchable, human-readable log — fully local, zero API cost.
 
 HalluScribe reads the session files written by Claude Code, Codex, Continue, Forge, ChatGPT, Claude.ai, and Gemini, summarises them with a **local model** (Gemma 4 by default), and saves structured Markdown archives to disk. A configurable nightly sweep runs automatically — no real-time hooks, no cloud calls, no data leaves the machine.
 
 Pair it with **[HalluMeter](https://github.com/Efs-O/hallumeter)** for real-time context-window risk monitoring during active sessions.
+
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="assets/screenshots/archive.png" alt="Searchable session archive" width="820">
+</p>
+
+| Briefing &amp; chat | Settings |
+|---|---|
+| ![Briefing and chat](assets/screenshots/briefing.png) | ![Settings](assets/screenshots/settings.png) |
 
 ---
 

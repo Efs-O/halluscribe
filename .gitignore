@@ -48,6 +48,9 @@ reference/
 # Internal planning / design / audit docs — kept locally, not for the public repo
 docs/internal/
 
+# Raw/unblurred screenshot originals — contain real session data, never commit
+assets/screenshots/_raw/
+
 # Personal chat export files used for local testing
 # (no quotes — .gitignore treats spaces literally; quotes break the match)
 chatgpt chats/
