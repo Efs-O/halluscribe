@@ -7,6 +7,7 @@ mod content;
 mod filtering;
 mod params;
 
+pub(crate) use content::body_contains;
 pub use params::SearchParams;
 
 use crate::archive::{read_sessions, IndexEntry};
@@ -23,7 +24,7 @@ pub fn search_sessions_in_scope(
     params: &SearchParams,
     allowed_ids: Option<&HashSet<String>>,
 ) -> Vec<IndexEntry> {
-    let limit = params.limit.unwrap_or(10).min(20);
+    let limit = params.limit.unwrap_or(20).min(30);
     let mut sessions = read_sessions(archive_dir);
     sessions.sort_by_key(|s| std::cmp::Reverse(s.date.clone()));
     sessions
@@ -33,7 +34,7 @@ pub fn search_sessions_in_scope(
                 .map(|ids| ids.contains(&entry.id))
                 .unwrap_or(true)
         })
-        .filter(|entry| filtering::matches_params(entry, params))
+        .filter(|entry| filtering::matches_params(archive_dir, entry, params))
         .take(limit)
         .collect()
 }

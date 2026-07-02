@@ -13,6 +13,6 @@ pub struct SearchParams {
     pub project: Option<String>,
     /// Tool filter: "claude_code", "codex", "continue", "forge", or any substring.
     pub tool: Option<String>,
-    /// Max results returned (default 10, hard-capped at 20).
+    /// Max results returned (default 20, hard-capped at 30).
     pub limit: Option<usize>,
 }

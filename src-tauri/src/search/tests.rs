@@ -248,9 +248,9 @@ fn limit_is_respected() {
 }
 
 #[test]
-fn limit_capped_at_20() {
+fn limit_capped_at_30() {
     let dir = tmp();
-    let entries: Vec<_> = (0u8..25)
+    let entries: Vec<_> = (0u8..35)
         .map(|i| {
             (
                 Box::leak(i.to_string().into_boxed_str()) as &str,
@@ -268,7 +268,59 @@ fn limit_capped_at_20() {
             ..Default::default()
         },
     );
-    assert_eq!(results.len(), 20);
+    assert_eq!(results.len(), 30);
+}
+
+#[test]
+fn query_matches_md_body_when_not_in_metadata() {
+    let dir = tmp();
+    make_index(
+        dir.path(),
+        &[("a", "Unrelated title", "2026-04-15", "Claude Code")],
+    );
+    // "password" is absent from title/error_tags/topic_tags; it lives only in the body.
+    let md_path = dir
+        .path()
+        .join("sessions/proj/2026-04-15/12-00-00-claudecode-sweep.md");
+    fs::create_dir_all(md_path.parent().unwrap()).unwrap();
+    fs::write(
+        &md_path,
+        "# Notes\n\nRotated the database PASSWORD after the leak.",
+    )
+    .unwrap();
+
+    let results = search_sessions(
+        dir.path(),
+        &SearchParams {
+            query: Some("password".into()),
+            ..Default::default()
+        },
+    );
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].id, "a");
+}
+
+#[test]
+fn query_absent_from_metadata_and_body_returns_nothing() {
+    let dir = tmp();
+    make_index(
+        dir.path(),
+        &[("a", "Unrelated title", "2026-04-15", "Claude Code")],
+    );
+    let md_path = dir
+        .path()
+        .join("sessions/proj/2026-04-15/12-00-00-claudecode-sweep.md");
+    fs::create_dir_all(md_path.parent().unwrap()).unwrap();
+    fs::write(&md_path, "# Notes\n\nNothing sensitive here.").unwrap();
+
+    let results = search_sessions(
+        dir.path(),
+        &SearchParams {
+            query: Some("password".into()),
+            ..Default::default()
+        },
+    );
+    assert!(results.is_empty());
 }
 
 #[test]

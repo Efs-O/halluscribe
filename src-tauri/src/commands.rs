@@ -459,7 +459,7 @@ pub(crate) fn send_chat_message(
         // any other inference job. Released before the chat turn re-acquires.
         let scope_ids = {
             let _inference_guard = crate::infer_lock::try_acquire().ok_or(BUSY_MESSAGE)?;
-            retrieval::semantic_scope_ids(&dir, &settings, latest_user_query, 5, allowed_ids)?
+            retrieval::semantic_scope_ids(&dir, &settings, latest_user_query, 12, allowed_ids)?
         };
         Some(scope_ids)
     } else {

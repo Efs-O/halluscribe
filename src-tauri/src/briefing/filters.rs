@@ -2,7 +2,6 @@
 
 use super::prompt::{build_content, build_header, session_datetime};
 use crate::archive::{read_sessions, IndexEntry};
-use std::fs;
 use std::path::Path;
 
 #[derive(Clone)]
@@ -131,8 +130,5 @@ fn keyword_matches(entry: &IndexEntry, archive_dir: &Path, keyword: &str) -> boo
     if index_haystack.contains(&kw_lower) {
         return true;
     }
-    let md_path = archive_dir.join(&entry.archive_path);
-    fs::read_to_string(&md_path)
-        .map(|md| md.to_lowercase().contains(&kw_lower))
-        .unwrap_or(false)
+    crate::search::body_contains(archive_dir, entry, &kw_lower)
 }

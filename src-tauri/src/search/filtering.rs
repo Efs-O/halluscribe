@@ -1,8 +1,15 @@
+// HalluScribe - search predicate helpers: match an IndexEntry against SearchParams.
+
 use super::SearchParams;
 use crate::archive::IndexEntry;
+use std::path::Path;
 
-pub(super) fn matches_params(entry: &IndexEntry, params: &SearchParams) -> bool {
-    matches_query(entry, params)
+pub(super) fn matches_params(
+    archive_dir: &Path,
+    entry: &IndexEntry,
+    params: &SearchParams,
+) -> bool {
+    matches_query(archive_dir, entry, params)
         && matches_date_from(entry, params)
         && matches_date_to(entry, params)
         && matches_tags(entry, params)
@@ -10,7 +17,7 @@ pub(super) fn matches_params(entry: &IndexEntry, params: &SearchParams) -> bool 
         && matches_tool(entry, params)
 }
 
-fn matches_query(entry: &IndexEntry, params: &SearchParams) -> bool {
+fn matches_query(archive_dir: &Path, entry: &IndexEntry, params: &SearchParams) -> bool {
     let Some(query) = params.query.as_ref() else {
         return true;
     };
@@ -26,7 +33,9 @@ fn matches_query(entry: &IndexEntry, params: &SearchParams) -> bool {
         .iter()
         .any(|tag| tag.to_lowercase().contains(&query_lc));
 
-    in_title || in_error || in_topic
+    // Cheap metadata checks first; fall back to reading the .md body only when
+    // none matched, so a keyword that appears only in the summary is still found.
+    in_title || in_error || in_topic || super::body_contains(archive_dir, entry, &query_lc)
 }
 
 fn matches_date_from(entry: &IndexEntry, params: &SearchParams) -> bool {
