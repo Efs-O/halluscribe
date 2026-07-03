@@ -1,10 +1,12 @@
 // HalluScribe - profile distiller map step: batch sessions into an evidence
 // block and extract candidate facts via a `save_profile_facts` tool call.
 
+use super::scope::ProfileScope;
 use super::types::{ProfileFact, ProfileSection};
 use super::ProfileError;
 use crate::archive::IndexEntry;
 use serde_json::Value;
+use std::borrow::Cow;
 use std::fs;
 use std::path::Path;
 
@@ -27,6 +29,21 @@ highlights). Call save_profile_facts with up to 10 facts drawn ONLY from the evi
 provided. Every fact must include the session id(s) it is grounded in in `evidence`. Do \
 not invent facts not supported by the text.";
 
+/// Appended to `MAP_SYSTEM_PROMPT` only for the Personal scope (Phase 2c):
+/// this scope's sources include personal chat exports, so the map step
+/// should also capture non-work facts into `personal_context`.
+const PERSONAL_MAP_EXTRA: &str = " Also extract personal facts — interests, life context, \
+and non-work preferences — into the personal_context section.";
+
+/// The map step's system prompt for `scope`. Work is byte-identical to the
+/// original single-profile prompt; Personal appends one instruction sentence.
+fn map_system_prompt(scope: ProfileScope) -> Cow<'static, str> {
+    match scope {
+        ProfileScope::Work => Cow::Borrowed(MAP_SYSTEM_PROMPT),
+        ProfileScope::Personal => Cow::Owned(format!("{MAP_SYSTEM_PROMPT}{PERSONAL_MAP_EXTRA}")),
+    }
+}
+
 /// Generic inference entry point the map/reduce steps call through: given a
 /// system prompt, user content, and tool schema, run one completion and
 /// return the parsed tool-call arguments. Production wires this to a warm
@@ -37,13 +54,14 @@ pub type ToolCallFn<'a> =
 pub(super) fn distill_batch(
     archive_dir: &Path,
     batch: &[&IndexEntry],
+    scope: ProfileScope,
     tool_call: &ToolCallFn,
 ) -> Result<Vec<ProfileFact>, ProfileError> {
     let user_content = build_evidence_block(archive_dir, batch);
     let result = tool_call(
-        MAP_SYSTEM_PROMPT,
+        &map_system_prompt(scope),
         &user_content,
-        &save_profile_facts_tool(),
+        &save_profile_facts_tool(scope),
         MAP_MAX_TOKENS,
     )?;
     parse_facts(&result)
@@ -89,7 +107,12 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
 }
 
-fn save_profile_facts_tool() -> Value {
+fn save_profile_facts_tool(scope: ProfileScope) -> Value {
+    let section_keys: Vec<&'static str> = scope
+        .sections()
+        .iter()
+        .map(ProfileSection::as_str)
+        .collect();
     serde_json::json!({
         "type": "function",
         "function": {
@@ -106,10 +129,7 @@ fn save_profile_facts_tool() -> Value {
                             "properties": {
                                 "section": {
                                     "type": "string",
-                                    "enum": [
-                                        "identity", "projects", "conventions",
-                                        "recurring_problems", "communication_style", "timeline"
-                                    ]
+                                    "enum": section_keys
                                 },
                                 "fact": { "type": "string" },
                                 "evidence": {
@@ -218,7 +238,7 @@ mod tests {
         let batch = vec![&e];
         let tool_call: &ToolCallFn =
             &|_sys, _user, _tool, _max| Ok(ok_facts_response("conventions"));
-        let facts = distill_batch(&dir, &batch, tool_call).unwrap();
+        let facts = distill_batch(&dir, &batch, ProfileScope::Work, tool_call).unwrap();
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].section, ProfileSection::Conventions);
         assert_eq!(facts[0].evidence, vec!["s1".to_string()]);
@@ -232,7 +252,7 @@ mod tests {
         let batch = vec![&e];
         let tool_call: &ToolCallFn =
             &|_sys, _user, _tool, _max| Ok(serde_json::json!({"not_facts": true}));
-        let error = distill_batch(&dir, &batch, tool_call).unwrap_err();
+        let error = distill_batch(&dir, &batch, ProfileScope::Work, tool_call).unwrap_err();
         assert!(error.to_string().contains("missing facts array"));
     }
 
@@ -274,5 +294,39 @@ mod tests {
         assert!(block.contains("Project: proj"));
         assert!(block.contains("ECONNRESET"));
         assert!(block.contains("rust"));
+    }
+
+    #[test]
+    fn work_map_prompt_is_byte_identical_to_original() {
+        assert_eq!(map_system_prompt(ProfileScope::Work), MAP_SYSTEM_PROMPT);
+    }
+
+    #[test]
+    fn personal_map_prompt_adds_personal_context_instruction() {
+        let prompt = map_system_prompt(ProfileScope::Personal);
+        assert!(prompt.starts_with(MAP_SYSTEM_PROMPT));
+        assert!(prompt.contains("personal_context"));
+    }
+
+    #[test]
+    fn work_tool_schema_excludes_personal_context_section() {
+        let tool = save_profile_facts_tool(ProfileScope::Work);
+        let enum_values = tool["function"]["parameters"]["properties"]["facts"]["items"]
+            ["properties"]["section"]["enum"]
+            .as_array()
+            .unwrap();
+        assert_eq!(enum_values.len(), 6);
+        assert!(!enum_values.iter().any(|v| v == "personal_context"));
+    }
+
+    #[test]
+    fn personal_tool_schema_includes_personal_context_section() {
+        let tool = save_profile_facts_tool(ProfileScope::Personal);
+        let enum_values = tool["function"]["parameters"]["properties"]["facts"]["items"]
+            ["properties"]["section"]["enum"]
+            .as_array()
+            .unwrap();
+        assert_eq!(enum_values.len(), 7);
+        assert!(enum_values.iter().any(|v| v == "personal_context"));
     }
 }

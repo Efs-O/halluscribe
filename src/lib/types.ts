@@ -186,11 +186,15 @@ export interface RedactionOutcome {
   backup_path: string;
 }
 
+/** Which of the two profiles (Phase 2c) an operation targets. */
+export type ProfileScope = "work" | "personal";
+
 /** Emitted by `profile-progress` events during a profile refresh. */
 export interface ProfileProgressPayload {
   current: number;
   total: number;
   stage: "mapping" | "merging" | "writing";
+  scope: ProfileScope;
 }
 
 /** Emitted by the `profile-done` event when a profile refresh finishes. */
@@ -199,4 +203,5 @@ export interface ProfileDonePayload {
   session_count: number;
   facts_count: number;
   errors: string[];
+  scope: ProfileScope;
 }

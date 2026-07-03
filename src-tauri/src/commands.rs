@@ -498,7 +498,9 @@ pub(crate) fn send_chat_message(
     let tavily_api_key = settings.tavily_api_key.trim().to_string();
     let web_search_available =
         web_search_enabled && (!ollama_api_key.is_empty() || !tavily_api_key.is_empty());
-    let user_profile = profile::read_profile_md(&dir);
+    // Chat shares the Work profile by default (Phase 2c sharing rule):
+    // Personal is for the user's own companion-agent use, not the coding chat.
+    let user_profile = profile::read_profile_md(&dir, profile::ProfileScope::Work);
     let mut final_messages = vec![serde_json::json!({
         "role": "system",
         "content": build_chat_system_prompt(&ChatPromptContext {

@@ -5,6 +5,7 @@
 // the old value.
 
 use super::distill::ToolCallFn;
+use super::scope::ProfileScope;
 use super::types::{ProfileFact, ProfileSection, ProfileSections};
 use super::ProfileError;
 use serde_json::Value;
@@ -47,6 +48,7 @@ with the condensed text.";
 /// its raw bullets) are appended to `warnings`; only the final merge call can
 /// fail the reduce.
 pub fn run_reduce(
+    scope: ProfileScope,
     previous_profile_md: Option<&str>,
     facts: &[ProfileFact],
     tool_call: &ToolCallFn,
@@ -55,10 +57,10 @@ pub fn run_reduce(
     let mut section_inputs = ProfileSections::default();
     let mut total_len = 0usize;
     let mut serialized_by_section: Vec<(ProfileSection, String)> = Vec::new();
-    for section in ProfileSection::ALL {
-        let serialized = serialize_section_facts(section, facts);
+    for section in scope.sections() {
+        let serialized = serialize_section_facts(*section, facts);
         total_len += serialized.len();
-        serialized_by_section.push((section, serialized));
+        serialized_by_section.push((*section, serialized));
     }
 
     let needs_consolidation = total_len > CONSOLIDATION_THRESHOLD_CHARS;
@@ -74,14 +76,14 @@ pub fn run_reduce(
         section_inputs.set(section, text);
     }
 
-    let user_content = build_merge_user_content(previous_profile_md, &section_inputs);
+    let user_content = build_merge_user_content(scope, previous_profile_md, &section_inputs);
     let result = tool_call(
         MERGE_SYSTEM_PROMPT,
         &user_content,
-        &save_user_profile_tool(),
+        &save_user_profile_tool(scope),
         FINAL_MAX_TOKENS,
     )?;
-    parse_sections(&result)
+    parse_sections(scope, &result)
 }
 
 /// Consolidate one section's bullet list chunk by chunk so each call's output
@@ -170,6 +172,7 @@ fn serialize_section_facts(section: ProfileSection, facts: &[ProfileFact]) -> St
 }
 
 fn build_merge_user_content(
+    scope: ProfileScope,
     previous_profile_md: Option<&str>,
     sections: &ProfileSections,
 ) -> String {
@@ -179,8 +182,8 @@ fn build_merge_user_content(
             parts.push(format!("Previous profile.md:\n{previous}"));
         }
     }
-    for section in ProfileSection::ALL {
-        let text = sections.get(section);
+    for section in scope.sections() {
+        let text = sections.get(*section);
         if !text.is_empty() {
             parts.push(format!(
                 "New candidate facts for {}:\n{}",
@@ -196,7 +199,18 @@ fn build_merge_user_content(
     }
 }
 
-fn save_user_profile_tool() -> Value {
+/// The `save_user_profile` tool schema for `scope`: one required string
+/// property per section in the scope's skeleton.
+fn save_user_profile_tool(scope: ProfileScope) -> Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    for section in scope.sections() {
+        properties.insert(
+            section.as_str().to_string(),
+            serde_json::json!({"type": "string"}),
+        );
+        required.push(section.as_str());
+    }
     serde_json::json!({
         "type": "function",
         "function": {
@@ -204,18 +218,8 @@ fn save_user_profile_tool() -> Value {
             "description": "Save the merged user profile, one field per fixed section.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "identity": { "type": "string" },
-                    "projects": { "type": "string" },
-                    "conventions": { "type": "string" },
-                    "recurring_problems": { "type": "string" },
-                    "communication_style": { "type": "string" },
-                    "timeline": { "type": "string" }
-                },
-                "required": [
-                    "identity", "projects", "conventions",
-                    "recurring_problems", "communication_style", "timeline"
-                ]
+                "properties": Value::Object(properties),
+                "required": required
             }
         }
     })
@@ -238,201 +242,17 @@ fn save_section_consolidated_tool() -> Value {
     })
 }
 
-fn parse_sections(value: &Value) -> Result<ProfileSections, ProfileError> {
+fn parse_sections(scope: ProfileScope, value: &Value) -> Result<ProfileSections, ProfileError> {
     let mut sections = ProfileSections::default();
-    for section in ProfileSection::ALL {
+    for section in scope.sections() {
         let text = value[section.as_str()].as_str().ok_or_else(|| {
             ProfileError::BadToolCall(format!("missing section field: {}", section.as_str()))
         })?;
-        sections.set(section, text.to_string());
+        sections.set(*section, text.to_string());
     }
     Ok(sections)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    fn fact(section: ProfileSection, text: &str, date: &str) -> ProfileFact {
-        ProfileFact {
-            section,
-            fact: text.to_string(),
-            evidence: vec!["s1".to_string()],
-            date: date.to_string(),
-        }
-    }
-
-    fn canned_sections_response() -> Value {
-        serde_json::json!({
-            "identity": "Rust/Tauri developer.",
-            "projects": "HalluScribe [s1]",
-            "conventions": "",
-            "recurring_problems": "",
-            "communication_style": "",
-            "timeline": ""
-        })
-    }
-
-    #[test]
-    fn run_reduce_assembles_sections_from_fake_tool_call() {
-        let facts = vec![fact(
-            ProfileSection::Projects,
-            "Building HalluScribe.",
-            "2026-06-01",
-        )];
-        let tool_call: &ToolCallFn = &|_sys, _user, _tool, _max| Ok(canned_sections_response());
-        let sections = run_reduce(None, &facts, tool_call, &mut Vec::new()).unwrap();
-        assert_eq!(sections.identity, "Rust/Tauri developer.");
-        assert_eq!(sections.projects, "HalluScribe [s1]");
-    }
-
-    #[test]
-    fn run_reduce_passes_previous_profile_into_user_content() {
-        let facts = vec![fact(
-            ProfileSection::Identity,
-            "Uses Windows.",
-            "2026-06-01",
-        )];
-        let seen_previous = std::sync::Mutex::new(String::new());
-        let tool_call: &ToolCallFn = &|_sys, user, _tool, _max| {
-            *seen_previous.lock().unwrap() = user.to_string();
-            Ok(canned_sections_response())
-        };
-        run_reduce(
-            Some("# User Profile — old"),
-            &facts,
-            tool_call,
-            &mut Vec::new(),
-        )
-        .unwrap();
-        assert!(seen_previous
-            .lock()
-            .unwrap()
-            .contains("# User Profile — old"));
-    }
-
-    #[test]
-    fn oversized_facts_trigger_chunked_consolidation_before_final_merge() {
-        // 100 realistic-length facts (~70K chars total) in a single section:
-        // past the 60K threshold, so consolidation must run — and in several
-        // bounded chunks, not one unbounded call.
-        let facts: Vec<ProfileFact> = (0..100)
-            .map(|i| {
-                fact(
-                    ProfileSection::RecurringProblems,
-                    &format!("problem {i}: {}", "x".repeat(680)),
-                    "2026-06-01",
-                )
-            })
-            .collect();
-        let consolidate_calls = AtomicUsize::new(0);
-        let max_input_len = AtomicUsize::new(0);
-        let tool_call: &ToolCallFn = &|_sys, user, tool, _max| {
-            let name = tool["function"]["name"].as_str().unwrap_or("");
-            if name == "save_section_consolidated" {
-                consolidate_calls.fetch_add(1, Ordering::SeqCst);
-                max_input_len.fetch_max(user.len(), Ordering::SeqCst);
-                Ok(serde_json::json!({"consolidated": "condensed problem list [s1]"}))
-            } else {
-                Ok(canned_sections_response())
-            }
-        };
-        let sections = run_reduce(None, &facts, tool_call, &mut Vec::new()).unwrap();
-        assert!(
-            consolidate_calls.load(Ordering::SeqCst) >= 10,
-            "expected many bounded chunks, got {}",
-            consolidate_calls.load(Ordering::SeqCst)
-        );
-        // No consolidate call may see more than one chunk of bullets (plus
-        // the short prompt preamble).
-        assert!(max_input_len.load(Ordering::SeqCst) < CONSOLIDATE_CHUNK_CHARS + 200);
-        assert_eq!(sections.identity, "Rust/Tauri developer.");
-    }
-
-    #[test]
-    fn failed_consolidate_chunk_keeps_raw_facts_and_warns() {
-        let facts = vec![fact(
-            ProfileSection::RecurringProblems,
-            &"x".repeat(70_000),
-            "2026-06-01",
-        )];
-        let merge_input = std::sync::Mutex::new(String::new());
-        let tool_call: &ToolCallFn = &|_sys, user, tool, _max| {
-            let name = tool["function"]["name"].as_str().unwrap_or("");
-            if name == "save_section_consolidated" {
-                Err(ProfileError::BadToolCall("truncated".to_string()))
-            } else {
-                *merge_input.lock().unwrap() = user.to_string();
-                Ok(canned_sections_response())
-            }
-        };
-        let mut warnings = Vec::new();
-        let sections = run_reduce(None, &facts, tool_call, &mut warnings).unwrap();
-        // Reduce still completes; every failed chunk is reported and its raw
-        // bullets flow into the final merge input.
-        assert_eq!(sections.identity, "Rust/Tauri developer.");
-        assert!(!warnings.is_empty());
-        assert!(
-            warnings[0].contains("kept raw facts"),
-            "got: {}",
-            warnings[0]
-        );
-        assert!(merge_input.lock().unwrap().contains("xxxx"));
-    }
-
-    #[test]
-    fn chunk_lines_splits_on_line_boundaries() {
-        let text = (0..10)
-            .map(|i| format!("- fact {i} {}", "y".repeat(50)))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let chunks = chunk_lines(&text, 150);
-        assert!(chunks.len() > 1);
-        for chunk in &chunks {
-            assert!(chunk.len() <= 150);
-            assert!(chunk.starts_with("- fact"));
-        }
-        assert_eq!(chunks.join("\n"), text);
-    }
-
-    #[test]
-    fn chunk_lines_oversized_single_line_is_own_chunk() {
-        let text = format!("short\n{}\nshort2", "z".repeat(500));
-        let chunks = chunk_lines(&text, 100);
-        assert_eq!(chunks.len(), 3);
-        assert_eq!(chunks[0], "short");
-        assert_eq!(chunks[2], "short2");
-    }
-
-    #[test]
-    fn small_facts_skip_consolidation() {
-        let facts = vec![fact(ProfileSection::Identity, "Short fact.", "2026-06-01")];
-        let call_count = AtomicUsize::new(0);
-        let tool_call: &ToolCallFn = &|_sys, _user, _tool, _max| {
-            call_count.fetch_add(1, Ordering::SeqCst);
-            Ok(canned_sections_response())
-        };
-        run_reduce(None, &facts, tool_call, &mut Vec::new()).unwrap();
-        assert_eq!(call_count.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn parse_sections_errors_on_missing_field() {
-        let value = serde_json::json!({"identity": "x"});
-        let error = parse_sections(&value).unwrap_err();
-        assert!(matches!(error, ProfileError::BadToolCall(_)));
-    }
-
-    #[test]
-    fn serialize_section_facts_orders_newest_first() {
-        let facts = vec![
-            fact(ProfileSection::Timeline, "old", "2026-01-01"),
-            fact(ProfileSection::Timeline, "new", "2026-06-01"),
-        ];
-        let serialized = serialize_section_facts(ProfileSection::Timeline, &facts);
-        let new_pos = serialized.find("new").unwrap();
-        let old_pos = serialized.find("old").unwrap();
-        assert!(new_pos < old_pos);
-    }
-}
+#[path = "merge_tests.rs"]
+mod tests;

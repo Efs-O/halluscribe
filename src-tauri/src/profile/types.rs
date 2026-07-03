@@ -2,8 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The fixed six-section skeleton every profile.md uses, per
-/// docs/internal/PERSONA_PROTOCOL_PLAN.md Phase 2.
+/// The fixed section skeleton profile.md uses, per
+/// docs/internal/PERSONA_PROTOCOL_PLAN.md Phase 2 (and Phase 2c for
+/// `PersonalContext`, which only the Personal scope's skeleton includes —
+/// see `ProfileScope::sections()` in `profile/scope.rs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileSection {
@@ -13,16 +15,21 @@ pub enum ProfileSection {
     RecurringProblems,
     CommunicationStyle,
     Timeline,
+    PersonalContext,
 }
 
 impl ProfileSection {
-    pub const ALL: [ProfileSection; 6] = [
+    /// Every section across both scopes, for serde/round-trip purposes.
+    /// Pipeline code that must respect a scope's skeleton uses
+    /// `ProfileScope::sections()` instead.
+    pub const ALL: [ProfileSection; 7] = [
         Self::Identity,
         Self::Projects,
         Self::Conventions,
         Self::RecurringProblems,
         Self::CommunicationStyle,
         Self::Timeline,
+        Self::PersonalContext,
     ];
 
     /// Stable machine-readable key, also used as the tool-call enum value and
@@ -35,6 +42,7 @@ impl ProfileSection {
             Self::RecurringProblems => "recurring_problems",
             Self::CommunicationStyle => "communication_style",
             Self::Timeline => "timeline",
+            Self::PersonalContext => "personal_context",
         }
     }
 
@@ -47,6 +55,7 @@ impl ProfileSection {
             Self::RecurringProblems => "Recurring Problems",
             Self::CommunicationStyle => "Communication Style",
             Self::Timeline => "Timeline Highlights",
+            Self::PersonalContext => "Interests & Life Context",
         }
     }
 
@@ -58,6 +67,7 @@ impl ProfileSection {
             "recurring_problems" => Some(Self::RecurringProblems),
             "communication_style" => Some(Self::CommunicationStyle),
             "timeline" => Some(Self::Timeline),
+            "personal_context" => Some(Self::PersonalContext),
             _ => None,
         }
     }
@@ -84,6 +94,7 @@ pub struct ProfileSections {
     pub recurring_problems: String,
     pub communication_style: String,
     pub timeline: String,
+    pub personal_context: String,
 }
 
 impl ProfileSections {
@@ -95,6 +106,7 @@ impl ProfileSections {
             ProfileSection::RecurringProblems => &self.recurring_problems,
             ProfileSection::CommunicationStyle => &self.communication_style,
             ProfileSection::Timeline => &self.timeline,
+            ProfileSection::PersonalContext => &self.personal_context,
         }
     }
 
@@ -106,6 +118,7 @@ impl ProfileSections {
             ProfileSection::RecurringProblems => self.recurring_problems = value,
             ProfileSection::CommunicationStyle => self.communication_style = value,
             ProfileSection::Timeline => self.timeline = value,
+            ProfileSection::PersonalContext => self.personal_context = value,
         }
     }
 }

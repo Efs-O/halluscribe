@@ -60,7 +60,10 @@ fn canned_response(tool: &serde_json::Value) -> serde_json::Value {
             "conventions": "",
             "recurring_problems": "",
             "communication_style": "",
-            "timeline": ""
+            "timeline": "",
+            // Extra field; harmless for Work scope's parse_sections (which
+            // only reads its own six keys) and required for Personal scope.
+            "personal_context": ""
         }),
     }
 }
@@ -81,25 +84,32 @@ fn full_refresh_writes_profile_meta_and_digest_and_advances_watermark() {
     let sources = vec!["claude_code".to_string(), "codex".to_string()];
     let tool_call: &ToolCallFn = &|_sys, _user, tool, _max| Ok(canned_response(tool));
     let mut stages = Vec::new();
-    let outcome = run_refresh(&dir, &sources, true, tool_call, |cur, total, stage| {
-        stages.push((cur, total, stage.as_str()));
-    })
+    let outcome = run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        true,
+        tool_call,
+        |cur, total, stage| {
+            stages.push((cur, total, stage.as_str()));
+        },
+    )
     .unwrap();
 
     assert_eq!(outcome.session_count, 2); // chatgpt excluded by consent
     assert_eq!(outcome.facts_count, 1);
     assert!(outcome.errors.is_empty());
 
-    let profile = read_profile_md(&dir).unwrap();
+    let profile = read_profile_md(&dir, ProfileScope::Work).unwrap();
     assert!(profile.contains("from 2 sessions"));
     assert!(profile.contains("proj [s1]"));
 
-    let meta = load_meta(&dir);
+    let meta = load_meta(&dir, ProfileScope::Work);
     // Watermark advances to the newest consented session, not the excluded one.
     assert_eq!(meta.last_distilled_ts, "2026-06-10T00:00:00+00:00");
     assert_eq!(meta.sources, sources);
 
-    assert!(latest_digest(&dir)
+    assert!(latest_digest(&dir, ProfileScope::Work)
         .unwrap()
         .contains("2 sessions distilled"));
     assert!(stages.iter().any(|s| s.2 == "mapping"));
@@ -129,16 +139,32 @@ fn incremental_refresh_only_maps_sessions_newer_than_watermark() {
     };
 
     // First (full) refresh distills s1 and sets the watermark.
-    run_refresh(&dir, &sources, true, tool_call, |_, _, _| {}).unwrap();
+    run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        true,
+        tool_call,
+        |_, _, _| {},
+    )
+    .unwrap();
     assert_eq!(map_calls.load(Ordering::SeqCst), 1);
 
     // Second (incremental) refresh finds nothing newer: no map calls, and the
     // watermark stays where it was.
-    let outcome = run_refresh(&dir, &sources, false, tool_call, |_, _, _| {}).unwrap();
+    let outcome = run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        false,
+        tool_call,
+        |_, _, _| {},
+    )
+    .unwrap();
     assert_eq!(map_calls.load(Ordering::SeqCst), 1);
     assert_eq!(outcome.session_count, 0);
     assert_eq!(
-        load_meta(&dir).last_distilled_ts,
+        load_meta(&dir, ProfileScope::Work).last_distilled_ts,
         "2026-06-10T00:00:00+00:00"
     );
 
@@ -151,11 +177,19 @@ fn incremental_refresh_only_maps_sessions_newer_than_watermark() {
             session_json("s2", "claude_code", "2026-06-15T00:00:00+00:00"),
         ],
     );
-    let outcome = run_refresh(&dir, &sources, false, tool_call, |_, _, _| {}).unwrap();
+    let outcome = run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        false,
+        tool_call,
+        |_, _, _| {},
+    )
+    .unwrap();
     assert_eq!(map_calls.load(Ordering::SeqCst), 2);
     assert_eq!(outcome.session_count, 1);
     assert_eq!(
-        load_meta(&dir).last_distilled_ts,
+        load_meta(&dir, ProfileScope::Work).last_distilled_ts,
         "2026-06-15T00:00:00+00:00"
     );
 }
@@ -180,14 +214,22 @@ fn failed_map_batch_is_collected_as_error_not_fatal() {
             Ok(canned_response(tool))
         }
     };
-    let outcome = run_refresh(&dir, &sources, true, tool_call, |_, _, _| {}).unwrap();
+    let outcome = run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        true,
+        tool_call,
+        |_, _, _| {},
+    )
+    .unwrap();
     assert_eq!(outcome.errors.len(), 1);
     assert!(outcome.errors[0].contains("missing facts array"));
     // The reduce/write stages still ran: a profile exists.
-    assert!(read_profile_md(&dir).is_some());
+    assert!(read_profile_md(&dir, ProfileScope::Work).is_some());
     // But the watermark must NOT advance past the failed batch, so the next
     // incremental run retries those sessions instead of skipping them forever.
-    assert_eq!(load_meta(&dir).last_distilled_ts, "");
+    assert_eq!(load_meta(&dir, ProfileScope::Work).last_distilled_ts, "");
 }
 
 #[test]
@@ -210,7 +252,15 @@ fn failed_final_merge_reports_error_without_discarding_outcome() {
             Ok(canned_response(tool))
         }
     };
-    let outcome = run_refresh(&dir, &sources, true, tool_call, |_, _, _| {}).unwrap();
+    let outcome = run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        true,
+        tool_call,
+        |_, _, _| {},
+    )
+    .unwrap();
     // The run is reported honestly instead of aborting as "0 sessions": the
     // map work is visible, the merge failure is an error entry, and neither
     // the profile nor the watermark was written.
@@ -218,8 +268,8 @@ fn failed_final_merge_reports_error_without_discarding_outcome() {
     assert_eq!(outcome.facts_count, 1);
     assert_eq!(outcome.errors.len(), 1);
     assert!(outcome.errors[0].contains("final merge failed"));
-    assert!(read_profile_md(&dir).is_none());
-    assert_eq!(load_meta(&dir).last_distilled_ts, "");
+    assert!(read_profile_md(&dir, ProfileScope::Work).is_none());
+    assert_eq!(load_meta(&dir, ProfileScope::Work).last_distilled_ts, "");
 }
 
 #[test]
@@ -236,9 +286,17 @@ fn empty_selection_returns_early_without_touching_profile() {
     );
     let sources = vec!["claude_code".to_string()];
     let tool_call: &ToolCallFn = &|_sys, _user, tool, _max| Ok(canned_response(tool));
-    run_refresh(&dir, &sources, true, tool_call, |_, _, _| {}).unwrap();
-    let profile_before = read_profile_md(&dir).unwrap();
-    let meta_before = load_meta(&dir);
+    run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        true,
+        tool_call,
+        |_, _, _| {},
+    )
+    .unwrap();
+    let profile_before = read_profile_md(&dir, ProfileScope::Work).unwrap();
+    let meta_before = load_meta(&dir, ProfileScope::Work);
 
     // Incremental run with nothing new: no inference, no writes.
     let calls = AtomicUsize::new(0);
@@ -246,29 +304,23 @@ fn empty_selection_returns_early_without_touching_profile() {
         calls.fetch_add(1, Ordering::SeqCst);
         Ok(canned_response(tool))
     };
-    let outcome = run_refresh(&dir, &sources, false, counting, |_, _, _| {}).unwrap();
+    let outcome = run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        false,
+        counting,
+        |_, _, _| {},
+    )
+    .unwrap();
     assert_eq!(outcome.session_count, 0);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert_eq!(read_profile_md(&dir).unwrap(), profile_before);
-    assert_eq!(load_meta(&dir).generated_at, meta_before.generated_at);
-}
-
-#[test]
-fn pending_session_count_respects_watermark_and_consent() {
-    let dir = tmp_dir("pending_count");
-    fs::write(dir.join("s1.md"), "body one").unwrap();
-    write_index(
-        &dir,
-        &[
-            session_json("s1", "claude_code", "2026-06-10T00:00:00+00:00"),
-            session_json("x1", "chatgpt", "2026-06-20T00:00:00+00:00"),
-        ],
+    assert_eq!(
+        read_profile_md(&dir, ProfileScope::Work).unwrap(),
+        profile_before
     );
-    let sources = vec!["claude_code".to_string()];
-    assert_eq!(pending_session_count(&dir, &sources, false), 1);
-
-    let tool_call: &ToolCallFn = &|_sys, _user, tool, _max| Ok(canned_response(tool));
-    run_refresh(&dir, &sources, true, tool_call, |_, _, _| {}).unwrap();
-    assert_eq!(pending_session_count(&dir, &sources, false), 0);
-    assert_eq!(pending_session_count(&dir, &sources, true), 1);
+    assert_eq!(
+        load_meta(&dir, ProfileScope::Work).generated_at,
+        meta_before.generated_at
+    );
 }

@@ -1,16 +1,25 @@
-<!-- HalluScribe — PROFILE view: distilled profile.md + latest weekly digest. -->
+<!-- HalluScribe — PROFILE view: distilled profile.md + latest weekly digest,
+     per scope (Work / Personal — Persona Protocol Phase 2c). -->
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onDestroy, onMount } from "svelte";
-  import type { ProfileDonePayload, ProfileProgressPayload } from "../../lib/types";
+  import { firstLine, restOfFile, stageLabel } from "../../lib/profile";
+  import type { ProfileDonePayload, ProfileProgressPayload, ProfileScope } from "../../lib/types";
+  import ProfileScopeTabs from "./ProfileScopeTabs.svelte";
 
+  let scope = $state<ProfileScope>("work");
   let profile = $state<string | null>(null);
   let digest = $state<string | null>(null);
   let loading = $state(true);
   let loadError = $state<string | null>(null);
 
-  let running = $state(false);
+  // The scope currently holding the shared inference lock, or null when idle.
+  // Buttons disable off this (the lock is global — only one job runs at a
+  // time across both scopes), independent of which scope is being viewed.
+  let busyScope = $state<ProfileScope | null>(null);
+  let running = $derived(busyScope !== null);
+  // Progress only renders for the scope currently being viewed.
   let progress = $state<ProfileProgressPayload | null>(null);
   let resultNote = $state<string | null>(null);
   let resultIsError = $state(false);
@@ -19,27 +28,12 @@
 
   let unlistenFns: UnlistenFn[] = [];
 
-  function stageLabel(p: ProfileProgressPayload): string {
-    if (p.stage === "merging") return "Merging…";
-    if (p.stage === "writing") return "Writing…";
-    return `Mapping batch ${p.current} of ${p.total}…`;
-  }
-
-  function firstLine(text: string): string {
-    return text.split("\n", 1)[0] ?? "";
-  }
-
-  function restOfFile(text: string): string {
-    const idx = text.indexOf("\n");
-    return idx === -1 ? "" : text.slice(idx + 1).replace(/^\n+/, "");
-  }
-
   async function loadProfile() {
     loading = true;
     loadError = null;
     try {
-      profile = await invoke<string | null>("get_profile");
-      digest = await invoke<string | null>("get_latest_digest");
+      profile = await invoke<string | null>("get_profile", { scope });
+      digest = await invoke<string | null>("get_latest_digest", { scope });
     } catch (e) {
       loadError = String(e);
     } finally {
@@ -47,17 +41,28 @@
     }
   }
 
+  function selectScope(next: ProfileScope) {
+    if (scope === next) return;
+    scope = next;
+    progress = null;
+    resultNote = null;
+    resultIsError = false;
+    confirmingFullRebuild = false;
+    digestOpen = false;
+    void loadProfile();
+  }
+
   async function startRefresh(full: boolean) {
     if (running) return;
     confirmingFullRebuild = false;
-    running = true;
+    busyScope = scope;
     progress = null;
     resultNote = null;
     resultIsError = false;
     try {
-      await invoke("run_profile_refresh", { full });
+      await invoke("run_profile_refresh", { full, scope });
     } catch (e) {
-      running = false;
+      busyScope = null;
       resultNote = String(e);
       resultIsError = true;
     }
@@ -73,16 +78,20 @@
 
     unlistenFns.push(
       await listen<ProfileProgressPayload>("profile-progress", (ev) => {
-        running = true;
-        progress = ev.payload;
+        busyScope = ev.payload.scope;
+        if (ev.payload.scope === scope) {
+          progress = ev.payload;
+        }
       }),
     );
 
     unlistenFns.push(
       await listen<ProfileDonePayload>("profile-done", (ev) => {
-        running = false;
-        progress = null;
         const payload = ev.payload;
+        // The lock is released regardless of which scope is being viewed.
+        busyScope = null;
+        if (payload.scope !== scope) return;
+        progress = null;
         if (payload.busy) {
           resultNote = "Another model job is running — try again later.";
           resultIsError = true;
@@ -106,6 +115,8 @@
 </script>
 
 <div class="panel">
+  <ProfileScopeTabs active={scope} onselect={selectScope} />
+
   <div class="panel-header">
     <span class="zone-label">PROFILE</span>
     <div class="panel-actions">
@@ -152,6 +163,9 @@
     {:else if !profile}
       <div class="empty-state">
         <p>No profile has been built yet — run a full build to distill facts from your archived sessions into a persistent profile.</p>
+        {#if scope === "personal"}
+          <p class="hint">Personal includes chat exports (ChatGPT/Claude.ai/Gemini), in addition to your coding tools.</p>
+        {/if}
         <button class="btn-primary" onclick={requestFullRebuild} disabled={running}>Build profile</button>
         {#if confirmingFullRebuild}
           <div class="confirm-row">
@@ -279,6 +293,12 @@
     max-width: 520px;
     color: var(--muted);
     font-size: 14px;
+  }
+
+  .empty-state .hint {
+    font-size: 12px;
+    color: var(--dim);
+    margin: -6px 0 0;
   }
 
   .generated-line {

@@ -3,6 +3,7 @@
 // weekly digest.
 
 use crate::app_support::archive_dir;
+use crate::profile::ProfileScope;
 use crate::{gemma, profile, settings};
 use serde::Serialize;
 use serde_json::Value;
@@ -13,6 +14,7 @@ struct ProfileProgressPayload {
     current: usize,
     total: usize,
     stage: String,
+    scope: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -21,15 +23,28 @@ struct ProfileDonePayload {
     session_count: usize,
     facts_count: usize,
     errors: Vec<String>,
+    scope: String,
 }
 
-/// Run a profile refresh in a background thread. `full=true` ignores the
-/// watermark (complete rebuild); `false` distills only sessions newer than
-/// `profile_meta.json`'s watermark. Emits `profile-progress` events
-/// `{ current, total, stage }` while running and one `profile-done` event
-/// `{ busy, session_count, facts_count, errors }` when finished.
+/// Parse the `scope` command argument ("work" | "personal").
+fn parse_scope(scope: &str) -> Result<ProfileScope, String> {
+    ProfileScope::from_key(scope).ok_or_else(|| format!("unknown profile scope: {scope}"))
+}
+
+/// Run a profile refresh for `scope` ("work" | "personal") in a background
+/// thread. `full=true` ignores the watermark (complete rebuild); `false`
+/// distills only sessions newer than that scope's `profile_meta.json`
+/// watermark. Emits `profile-progress` events `{ current, total, stage,
+/// scope }` while running and one `profile-done` event `{ busy,
+/// session_count, facts_count, errors, scope }` when finished — the `scope`
+/// field lets the UI ignore events for a scope other than the one displayed.
 #[tauri::command]
-pub(crate) fn run_profile_refresh(app: tauri::AppHandle, full: bool) -> Result<(), String> {
+pub(crate) fn run_profile_refresh(
+    app: tauri::AppHandle,
+    full: bool,
+    scope: String,
+) -> Result<(), String> {
+    let profile_scope = parse_scope(&scope)?;
     let dir = archive_dir(&app)?;
     let settings = settings::load_settings(&dir);
     let backend = settings
@@ -46,6 +61,7 @@ pub(crate) fn run_profile_refresh(app: tauri::AppHandle, full: bool) -> Result<(
                 "profile-done",
                 ProfileDonePayload {
                     busy: true,
+                    scope: scope.clone(),
                     ..Default::default()
                 },
             );
@@ -55,8 +71,14 @@ pub(crate) fn run_profile_refresh(app: tauri::AppHandle, full: bool) -> Result<(
         // Skip the model load entirely when an incremental run has nothing new
         // to distill (checked under the lock so a concurrent sweep can't be
         // mid-write while we count).
-        if profile::pending_session_count(&dir, &profile_sources, full) == 0 {
-            let _ = app.emit("profile-done", ProfileDonePayload::default());
+        if profile::pending_session_count(&dir, profile_scope, &profile_sources, full) == 0 {
+            let _ = app.emit(
+                "profile-done",
+                ProfileDonePayload {
+                    scope: scope.clone(),
+                    ..Default::default()
+                },
+            );
             return;
         }
 
@@ -69,6 +91,7 @@ pub(crate) fn run_profile_refresh(app: tauri::AppHandle, full: bool) -> Result<(
                     "profile-done",
                     ProfileDonePayload {
                         errors: vec![format!("failed to start model: {error}")],
+                        scope: scope.clone(),
                         ..Default::default()
                     },
                 );
@@ -92,8 +115,10 @@ pub(crate) fn run_profile_refresh(app: tauri::AppHandle, full: bool) -> Result<(
         };
 
         let app_progress = app.clone();
+        let progress_scope = scope.clone();
         let result = profile::run_refresh(
             &dir,
+            profile_scope,
             &profile_sources,
             full,
             &tool_call,
@@ -104,6 +129,7 @@ pub(crate) fn run_profile_refresh(app: tauri::AppHandle, full: bool) -> Result<(
                         current,
                         total,
                         stage: stage.as_str().to_string(),
+                        scope: progress_scope.clone(),
                     },
                 );
             },
@@ -116,9 +142,11 @@ pub(crate) fn run_profile_refresh(app: tauri::AppHandle, full: bool) -> Result<(
                 session_count: outcome.session_count,
                 facts_count: outcome.facts_count,
                 errors: outcome.errors,
+                scope: scope.clone(),
             },
             Err(error) => ProfileDonePayload {
                 errors: vec![error.to_string()],
+                scope: scope.clone(),
                 ..Default::default()
             },
         };
@@ -127,16 +155,23 @@ pub(crate) fn run_profile_refresh(app: tauri::AppHandle, full: bool) -> Result<(
     Ok(())
 }
 
-/// Return the distilled profile.md content, or None if no profile exists yet.
+/// Return the distilled profile.md content for `scope`, or None if no
+/// profile exists yet.
 #[tauri::command]
-pub(crate) fn get_profile(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub(crate) fn get_profile(app: tauri::AppHandle, scope: String) -> Result<Option<String>, String> {
+    let profile_scope = parse_scope(&scope)?;
     let dir = archive_dir(&app)?;
-    Ok(profile::read_profile_md(&dir))
+    Ok(profile::read_profile_md(&dir, profile_scope))
 }
 
-/// Return the newest weekly digest content, or None if none exists yet.
+/// Return the newest weekly digest content for `scope`, or None if none
+/// exists yet.
 #[tauri::command]
-pub(crate) fn get_latest_digest(app: tauri::AppHandle) -> Result<Option<String>, String> {
+pub(crate) fn get_latest_digest(
+    app: tauri::AppHandle,
+    scope: String,
+) -> Result<Option<String>, String> {
+    let profile_scope = parse_scope(&scope)?;
     let dir = archive_dir(&app)?;
-    Ok(profile::latest_digest(&dir))
+    Ok(profile::latest_digest(&dir, profile_scope))
 }

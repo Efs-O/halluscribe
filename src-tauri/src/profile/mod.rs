@@ -4,14 +4,16 @@
 
 mod distill;
 mod merge;
+mod scope;
 mod select;
 mod types;
 mod writer;
 
 pub use distill::ToolCallFn;
+pub use scope::{sources_for_scope, ProfileScope};
 pub use select::{select_sources, BATCH_SIZE};
 pub use types::{ProfileFact, ProfileMeta, ProfileSection, ProfileSections};
-pub use writer::{latest_digest, load_meta, read_profile_md};
+pub use writer::{latest_digest, load_meta, migrate_legacy_profile_layout, read_profile_md};
 
 use crate::archive::{self, IndexEntry};
 use crate::gemma::GemmaError;
@@ -83,9 +85,15 @@ pub struct RefreshOutcome {
     pub errors: Vec<String>,
 }
 
-/// Run one profile refresh: select consented (and, if incremental, unwatermarked)
-/// sessions, map them into facts, reduce facts into profile sections, then write
-/// profile.md, profile_meta.json, and this week's digest.
+/// Run one profile refresh for `scope`: select consented (and, if
+/// incremental, unwatermarked) sessions, map them into facts, reduce facts
+/// into profile sections, then write `profile/<scope>/profile.md`,
+/// `profile_meta.json`, and this week's digest.
+///
+/// `profile_sources` is the user's raw `settings.profile_sources` list; the
+/// scope's effective source list (Personal adds the chat-export providers —
+/// see `scope::sources_for_scope`) is derived here and recorded in
+/// `profile_meta.json`'s `sources` field.
 ///
 /// `tool_call` is the caller's inference entry point (wraps a warm
 /// `gemma::ToolSession` in production, a canned closure in tests) so this
@@ -93,12 +101,14 @@ pub struct RefreshOutcome {
 /// at each map batch and once per reduce/write stage.
 pub fn run_refresh(
     archive_dir: &Path,
+    scope: ProfileScope,
     profile_sources: &[String],
     full: bool,
     tool_call: &ToolCallFn,
     mut on_progress: impl FnMut(usize, usize, Stage),
 ) -> Result<RefreshOutcome, ProfileError> {
-    let meta = writer::load_meta(archive_dir);
+    let effective_sources = scope::sources_for_scope(profile_sources, scope);
+    let meta = writer::load_meta(archive_dir, scope);
     let watermark = if full || meta.last_distilled_ts.is_empty() {
         None
     } else {
@@ -106,7 +116,7 @@ pub fn run_refresh(
     };
 
     let entries = archive::read_sessions(archive_dir);
-    let selected = select::select_sources(&entries, profile_sources, watermark);
+    let selected = select::select_sources(&entries, &effective_sources, watermark);
     // Nothing new to distill: leave profile.md, the meta, and the digests
     // untouched rather than re-merging the old profile against zero facts.
     if selected.is_empty() {
@@ -119,29 +129,34 @@ pub fn run_refresh(
     let mut errors = Vec::new();
     for (idx, batch) in batches.iter().enumerate() {
         on_progress(idx + 1, total_batches, Stage::Mapping);
-        match distill::distill_batch(archive_dir, batch, tool_call) {
+        match distill::distill_batch(archive_dir, batch, scope, tool_call) {
             Ok(mut facts) => all_facts.append(&mut facts),
             Err(error) => errors.push(error.to_string()),
         }
     }
 
     on_progress(1, 1, Stage::Merging);
-    let previous_md = writer::read_profile_md(archive_dir);
+    let previous_md = writer::read_profile_md(archive_dir, scope);
     // A failed merge must not discard the outcome (and with it the collected
     // map-batch errors): record it, skip the write, and keep the watermark so
     // the next run retries — the UI then shows every error, not a bare abort.
-    let sections =
-        match merge::run_reduce(previous_md.as_deref(), &all_facts, tool_call, &mut errors) {
-            Ok(sections) => sections,
-            Err(error) => {
-                errors.push(format!("final merge failed: {error}"));
-                return Ok(RefreshOutcome {
-                    session_count: selected.len(),
-                    facts_count: all_facts.len(),
-                    errors,
-                });
-            }
-        };
+    let sections = match merge::run_reduce(
+        scope,
+        previous_md.as_deref(),
+        &all_facts,
+        tool_call,
+        &mut errors,
+    ) {
+        Ok(sections) => sections,
+        Err(error) => {
+            errors.push(format!("final merge failed: {error}"));
+            return Ok(RefreshOutcome {
+                session_count: selected.len(),
+                facts_count: all_facts.len(),
+                errors,
+            });
+        }
+    };
 
     on_progress(1, 1, Stage::Writing);
     let newest_ts = newest_timestamp(&selected).unwrap_or(&meta.last_distilled_ts);
@@ -156,11 +171,11 @@ pub fn run_refresh(
             newest_ts.to_string()
         },
         session_count: selected.len(),
-        sources: profile_sources.to_vec(),
+        sources: effective_sources,
         facts_count: all_facts.len(),
     };
-    writer::write_profile(archive_dir, &sections, &new_meta)?;
-    writer::write_digest(archive_dir, &selected, &all_facts, Utc::now())?;
+    writer::write_profile(archive_dir, scope, &sections, &new_meta)?;
+    writer::write_digest(archive_dir, scope, &selected, &all_facts, Utc::now())?;
 
     Ok(RefreshOutcome {
         session_count: selected.len(),
@@ -169,17 +184,24 @@ pub fn run_refresh(
     })
 }
 
-/// How many sessions the next refresh would distill. Lets the command skip
-/// loading a model at all when an incremental run has nothing new.
-pub fn pending_session_count(archive_dir: &Path, profile_sources: &[String], full: bool) -> usize {
-    let meta = writer::load_meta(archive_dir);
+/// How many sessions the next refresh of `scope` would distill. Lets the
+/// command skip loading a model at all when an incremental run has nothing
+/// new.
+pub fn pending_session_count(
+    archive_dir: &Path,
+    scope: ProfileScope,
+    profile_sources: &[String],
+    full: bool,
+) -> usize {
+    let effective_sources = scope::sources_for_scope(profile_sources, scope);
+    let meta = writer::load_meta(archive_dir, scope);
     let watermark = if full || meta.last_distilled_ts.is_empty() {
         None
     } else {
         Some(meta.last_distilled_ts.as_str())
     };
     let entries = archive::read_sessions(archive_dir);
-    select::select_sources(&entries, profile_sources, watermark).len()
+    select::select_sources(&entries, &effective_sources, watermark).len()
 }
 
 fn newest_timestamp<'a>(selected: &[&'a IndexEntry]) -> Option<&'a str> {
@@ -195,3 +217,7 @@ fn newest_timestamp<'a>(selected: &[&'a IndexEntry]) -> Option<&'a str> {
 #[cfg(test)]
 #[path = "refresh_tests.rs"]
 mod refresh_tests;
+
+#[cfg(test)]
+#[path = "refresh_scope_tests.rs"]
+mod refresh_scope_tests;
