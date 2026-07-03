@@ -58,13 +58,14 @@ pub(crate) fn execute_tool(
                 project: args["project"].as_str().map(str::to_string),
                 tool: args["tool"].as_str().map(str::to_string),
                 limit: args["limit"].as_u64().map(|n| n as usize),
+                offset: args["offset"].as_u64().map(|n| n as usize),
             };
             let allowed_ids = match &runtime.chat_scope {
                 ChatScope::ArchiveWide => None,
                 ChatScope::AllowedSessionIds(ids) => Some(ids),
             };
-            let results = search::search_sessions_in_scope(archive_dir, &params, allowed_ids);
-            serde_json::to_string_pretty(&results).unwrap_or_default()
+            let page = search::search_sessions_page(archive_dir, &params, allowed_ids);
+            serde_json::to_string_pretty(&page).unwrap_or_default()
         }
         "read_session" => {
             let id = args["session_id"].as_str().unwrap_or("");
@@ -89,7 +90,7 @@ fn search_sessions_tool() -> Value {
         "type": "function",
         "function": {
             "name": "search_sessions",
-            "description": "Search the session archive. Returns metadata rows only.",
+            "description": "Search the session archive (matches title, tags, and summary body). Returns a JSON object: {searched, total_matches, returned, offset, results}. 'searched' is how many sessions were examined (the whole archive scope for this chat); 'total_matches' is how many of them matched the query; 'results' is only one page of metadata rows (at most 'limit', default 20, max 30). When asked how many sessions you searched, report 'searched' (not 'total_matches'). When total_matches is greater than returned there are more matches than shown - do not claim you have seen them all; page through them by re-calling with an increasing 'offset'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -99,7 +100,8 @@ fn search_sessions_tool() -> Value {
                     "tags":      { "type": "array", "items": { "type": "string" } },
                     "project":   { "type": "string" },
                     "tool":      { "type": "string" },
-                    "limit":     { "type": "integer" }
+                    "limit":     { "type": "integer", "description": "Max rows per page (default 20, capped at 30)" },
+                    "offset":    { "type": "integer", "description": "Number of leading matches to skip; use with limit to page through all matches when total_matches exceeds returned" }
                 }
             }
         }

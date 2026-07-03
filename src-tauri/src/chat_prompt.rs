@@ -35,6 +35,7 @@ pub(crate) fn build_chat_system_prompt(context: &ChatPromptContext) -> String {
          Tool strategy:\n\
          - For questions about the user's past sessions, bugs, decisions, code history, projects, or implementation details, use archive tools first.\n\
          - Start with `search_sessions` using a relevant keyword query.\n\
+         - `search_sessions` returns `{{searched, total_matches, returned, offset, results}}`. `searched` is how many sessions were examined (the whole archive scope); `total_matches` is how many matched the query; `results` is only one capped page. If the user asks how many sessions you searched, answer with `searched` (not `total_matches`). When `total_matches` is greater than `returned`, there are more matches than you have seen: never state or imply you searched every session or found them all. Report the real numbers (e.g. \"Searched 1368 sessions; 147 matched; showing the 30 newest\") and, when completeness matters, page through the rest by re-calling with an increasing `offset` before concluding.\n\
          - If that returns no useful hits, call `search_sessions` with no query to list recent sessions, then use `read_session` on the most relevant sessions.\n\
          - Never stop after one empty archive search when archive evidence is needed.\n\
          - For current external facts, releases, APIs, documentation, or news, use `web_search` and `web_fetch` before answering when those tools are available.\n\
@@ -102,6 +103,18 @@ mod tests {
         });
         assert!(prompt.contains("only allowed evidence source is the user's session archive"));
         assert!(!prompt.contains("two evidence sources"));
+    }
+
+    #[test]
+    fn archive_prompt_warns_against_false_completeness() {
+        let prompt = build_chat_system_prompt(&ChatPromptContext {
+            web_search_available: false,
+            has_images: false,
+            search_mode: SearchModePrompt::Archive,
+            scope_size: None,
+        });
+        assert!(prompt.contains("total_matches"));
+        assert!(prompt.contains("never state or imply you searched every session"));
     }
 
     #[test]

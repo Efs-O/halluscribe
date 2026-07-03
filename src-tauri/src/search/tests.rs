@@ -272,6 +272,83 @@ fn limit_capped_at_30() {
 }
 
 #[test]
+fn page_reports_true_total_and_pages_via_offset() {
+    let dir = tmp();
+    let entries: Vec<_> = (0u8..35)
+        .map(|i| {
+            (
+                Box::leak(i.to_string().into_boxed_str()) as &str,
+                "Auth work",
+                "2026-04-15",
+                "Claude Code",
+            )
+        })
+        .collect();
+    make_index(dir.path(), &entries);
+
+    // First page: default size 20, but the total is the full 35 matches.
+    let page = search_sessions_page(
+        dir.path(),
+        &SearchParams {
+            query: Some("auth".into()),
+            ..Default::default()
+        },
+        None,
+    );
+    assert_eq!(page.searched, 35);
+    assert_eq!(page.total_matches, 35);
+    assert_eq!(page.returned, 20);
+    assert_eq!(page.offset, 0);
+    assert_eq!(page.results.len(), 20);
+
+    // Second page via offset: remaining 5, total still reported as 35.
+    let page2 = search_sessions_page(
+        dir.path(),
+        &SearchParams {
+            query: Some("auth".into()),
+            offset: Some(30),
+            ..Default::default()
+        },
+        None,
+    );
+    assert_eq!(page2.total_matches, 35);
+    assert_eq!(page2.returned, 5);
+    assert_eq!(page2.offset, 30);
+}
+
+#[test]
+fn page_searched_counts_full_scope_even_when_few_match() {
+    let dir = tmp();
+    // 10 sessions in scope; only 2 mention the query term.
+    let mut entries: Vec<(&str, &str, &str, &str)> = (0u8..8)
+        .map(|i| {
+            (
+                Box::leak(i.to_string().into_boxed_str()) as &str,
+                "Unrelated",
+                "2026-04-15",
+                "Claude Code",
+            )
+        })
+        .collect();
+    entries.push(("m1", "ftp password rotate", "2026-04-15", "Claude Code"));
+    entries.push(("m2", "old ftp password note", "2026-04-15", "Claude Code"));
+    make_index(dir.path(), &entries);
+
+    let page = search_sessions_page(
+        dir.path(),
+        &SearchParams {
+            query: Some("ftp password".into()),
+            ..Default::default()
+        },
+        None,
+    );
+    // "searched" is the whole scope; "total_matches" is the matching subset.
+    assert_eq!(page.searched, 10);
+    assert_eq!(page.total_matches, 2);
+    assert_eq!(page.returned, 2);
+}
+
+#[test]
 fn query_matches_md_body_when_not_in_metadata() {
     let dir = tmp();
     make_index(

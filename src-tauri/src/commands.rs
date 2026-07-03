@@ -138,6 +138,7 @@ pub(crate) fn search_sessions(
         project,
         tool,
         limit,
+        offset: None,
     };
     Ok(search::search_sessions(&dir, &params))
 }

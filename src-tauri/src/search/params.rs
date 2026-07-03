@@ -15,4 +15,7 @@ pub struct SearchParams {
     pub tool: Option<String>,
     /// Max results returned (default 20, hard-capped at 30).
     pub limit: Option<usize>,
+    /// Number of leading matches to skip before the returned page (default 0).
+    /// Used with `limit` to paginate through matches larger than one page.
+    pub offset: Option<usize>,
 }
