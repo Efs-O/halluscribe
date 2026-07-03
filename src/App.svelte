@@ -10,6 +10,7 @@
   import RunNowButton from "./components/RunNowButton.svelte";
   import BriefingPanel from "./components/briefing/BriefingPanel.svelte";
   import SessionList from "./components/sessions/SessionList.svelte";
+  import ProfilePanel from "./components/profile/ProfilePanel.svelte";
   import SettingsForm from "./components/settings/SettingsForm.svelte";
   import { appendAssistantToken } from "./lib/chatTurns";
   import type {
@@ -30,7 +31,7 @@
     WebSearchStatus,
   } from "./lib/types";
 
-  type Tab = "briefing" | "sessions" | "settings";
+  type Tab = "briefing" | "sessions" | "profile" | "settings";
   let activeTab = $state<Tab>("briefing");
   let ctxVisible = $state(false);
   let ctxX = $state(0);
@@ -558,6 +559,8 @@
       />
     {:else if activeTab === "sessions"}
       <SessionList onSendToBriefing={sendSelectedSessionsToBriefing} />
+    {:else if activeTab === "profile"}
+      <ProfilePanel />
     {:else}
       <SettingsForm
         initialSettings={settingsSnapshot}

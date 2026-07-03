@@ -5,6 +5,7 @@ mod app_state;
 mod app_support;
 mod chat_prompt;
 mod commands;
+mod commands_profile;
 mod infer_lock;
 mod llama_runtime;
 mod recorded_sessions;
@@ -14,6 +15,7 @@ pub mod briefing;
 pub mod core;
 pub mod gemma;
 pub mod preprocessor;
+pub mod profile;
 pub mod readers;
 pub mod retrieval;
 pub mod scanner;
@@ -25,12 +27,13 @@ use app_state::{BriefingCancel, ChatCancel, SweepCancel};
 use app_support::{archive_dir, clear_first_run, record_sweep_date, sweep_config};
 use chrono::{Datelike, Local, Timelike};
 use commands::{
-    cancel_briefing, cancel_chat, cancel_sweep, delete_sessions, get_raw_session_total,
-    get_recent_sessions, get_settings, get_stats, read_session, rebuild_session_embeddings,
-    run_briefing, save_recorded_chat_session, save_settings, search_sessions,
-    search_sessions_fulltext, search_sessions_semantic, send_chat_message, trigger_sweep,
-    validate_ollama_api_key,
+    apply_redaction, cancel_briefing, cancel_chat, cancel_sweep, delete_sessions,
+    get_raw_session_total, get_recent_sessions, get_settings, get_stats, preview_redaction,
+    read_session, rebuild_session_embeddings, run_briefing, save_recorded_chat_session,
+    save_settings, search_sessions, search_sessions_fulltext, search_sessions_semantic,
+    send_chat_message, trigger_sweep, validate_ollama_api_key,
 };
+use commands_profile::{get_latest_digest, get_profile, run_profile_refresh};
 use std::sync::{atomic::AtomicBool, Arc};
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem};
@@ -221,6 +224,11 @@ pub fn run() {
             delete_sessions,
             cancel_sweep,
             rebuild_session_embeddings,
+            preview_redaction,
+            apply_redaction,
+            run_profile_refresh,
+            get_profile,
+            get_latest_digest,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

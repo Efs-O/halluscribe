@@ -333,6 +333,30 @@ pub(crate) fn delete_sessions(
     Ok(deleted)
 }
 
+/// Preview a redaction: count occurrences and show excerpts, without writing anything.
+#[tauri::command]
+pub(crate) fn preview_redaction(
+    app: tauri::AppHandle,
+    session_id: String,
+    find: String,
+) -> Result<archive::RedactionPreview, String> {
+    let dir = archive_dir(&app)?;
+    archive::preview_redaction(&dir, &session_id, &find).map_err(|error| error.to_string())
+}
+
+/// Apply a redaction to a session's archived body, backing up the original and
+/// persisting the rule so it survives future re-sweeps of this session.
+#[tauri::command]
+pub(crate) fn apply_redaction(
+    app: tauri::AppHandle,
+    session_id: String,
+    find: String,
+    replace: String,
+) -> Result<archive::RedactionOutcome, String> {
+    let dir = archive_dir(&app)?;
+    archive::apply_redaction(&dir, &session_id, &find, &replace).map_err(|error| error.to_string())
+}
+
 /// Rebuild semantic embeddings for all archived sessions.
 #[tauri::command]
 pub(crate) async fn rebuild_session_embeddings(

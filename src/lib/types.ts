@@ -173,3 +173,30 @@ export interface ChatUsagePayload {
 }
 
 export type WebSearchStatus = "ready" | "missing-api-key" | "unsupported-backend" | "loading";
+
+/** Result of previewing a redaction before applying it. */
+export interface RedactionPreview {
+  occurrences: number;
+  excerpts: string[];
+}
+
+/** Result of applying a redaction to an archived session body. */
+export interface RedactionOutcome {
+  replacements: number;
+  backup_path: string;
+}
+
+/** Emitted by `profile-progress` events during a profile refresh. */
+export interface ProfileProgressPayload {
+  current: number;
+  total: number;
+  stage: "mapping" | "merging" | "writing";
+}
+
+/** Emitted by the `profile-done` event when a profile refresh finishes. */
+export interface ProfileDonePayload {
+  busy: boolean;
+  session_count: number;
+  facts_count: number;
+  errors: string[];
+}

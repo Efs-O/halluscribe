@@ -44,7 +44,12 @@ pub(crate) fn save_session_summary_tool() -> Value {
     })
 }
 
-pub(crate) fn parse_openai_tool_args(value: &Value) -> Result<GemmaOutput, GemmaError> {
+/// Extract and parse the raw tool-call arguments from an OpenAI-shaped
+/// (`/v1/chat/completions`) response, without assuming which tool was called.
+/// Shared by `parse_openai_tool_args` (session summaries) and the generic
+/// `ToolSession` used by the profile distiller, which supplies its own tool
+/// schema and interprets the returned `Value` itself.
+pub(crate) fn extract_openai_tool_args(value: &Value) -> Result<Value, GemmaError> {
     let args_raw = value["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
         .as_str()
         .ok_or_else(|| {
@@ -56,21 +61,42 @@ pub(crate) fn parse_openai_tool_args(value: &Value) -> Result<GemmaOutput, Gemma
                 &preview[..preview.len().min(200)]
             ))
         })?;
-    let args: Value = serde_json::from_str(args_raw)
-        .map_err(|e| GemmaError::BadToolCall(format!("arguments parse error: {e}")))?;
-    parse_tool_args(&args)
+    serde_json::from_str(args_raw).map_err(|e| {
+        let truncated = value["choices"][0]["finish_reason"].as_str() == Some("length");
+        let hint = if truncated {
+            " (completion hit max_tokens — the tool-call JSON was cut off; raise the per-call token budget)"
+        } else {
+            ""
+        };
+        GemmaError::BadToolCall(format!("arguments parse error: {e}{hint}"))
+    })
 }
 
-pub(crate) fn parse_ollama_tool_args(value: &Value) -> Result<GemmaOutput, GemmaError> {
+pub(crate) fn parse_openai_tool_args(value: &Value) -> Result<GemmaOutput, GemmaError> {
+    parse_tool_args(&extract_openai_tool_args(value)?)
+}
+
+/// Ollama counterpart to `extract_openai_tool_args`: pulls the raw tool-call
+/// arguments out of an `/api/chat` response.
+pub(crate) fn extract_ollama_tool_args(value: &Value) -> Result<Value, GemmaError> {
     let args = &value["message"]["tool_calls"][0]["function"]["arguments"];
     if args.is_null() {
         let preview = value["message"]["content"].as_str().unwrap_or("");
+        let hint = if value["done_reason"].as_str() == Some("length") {
+            " (completion hit max_tokens — the tool call was cut off; raise the per-call token budget)"
+        } else {
+            ""
+        };
         return Err(GemmaError::BadToolCall(format!(
-            "tool_calls absent; content preview: {}",
+            "tool_calls absent{hint}; content preview: {}",
             &preview[..preview.len().min(200)]
         )));
     }
-    parse_tool_args(args)
+    Ok(args.clone())
+}
+
+pub(crate) fn parse_ollama_tool_args(value: &Value) -> Result<GemmaOutput, GemmaError> {
+    parse_tool_args(&extract_ollama_tool_args(value)?)
 }
 
 fn parse_tool_args(args: &Value) -> Result<GemmaOutput, GemmaError> {
@@ -180,6 +206,51 @@ mod tests {
             parse_tool_args(&args),
             Err(GemmaError::EmptyResponse)
         ));
+    }
+
+    #[test]
+    fn openai_truncated_arguments_report_max_tokens_hint() {
+        let value = serde_json::json!({
+            "choices": [{
+                "finish_reason": "length",
+                "message": {
+                    "tool_calls": [{
+                        "function": { "arguments": "{\"facts\": [{\"fact\": \"cut off mid-str" }
+                    }]
+                }
+            }]
+        });
+        let error = extract_openai_tool_args(&value).unwrap_err();
+        let msg = error.to_string();
+        assert!(msg.contains("arguments parse error"), "got: {msg}");
+        assert!(msg.contains("hit max_tokens"), "got: {msg}");
+    }
+
+    #[test]
+    fn openai_bad_arguments_without_length_have_no_hint() {
+        let value = serde_json::json!({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "tool_calls": [{
+                        "function": { "arguments": "not json at all" }
+                    }]
+                }
+            }]
+        });
+        let msg = extract_openai_tool_args(&value).unwrap_err().to_string();
+        assert!(!msg.contains("hit max_tokens"), "got: {msg}");
+    }
+
+    #[test]
+    fn ollama_missing_tool_call_reports_max_tokens_hint_on_length() {
+        let value = serde_json::json!({
+            "done_reason": "length",
+            "message": { "content": "partial prose output" }
+        });
+        let msg = extract_ollama_tool_args(&value).unwrap_err().to_string();
+        assert!(msg.contains("tool_calls absent"), "got: {msg}");
+        assert!(msg.contains("hit max_tokens"), "got: {msg}");
     }
 
     #[test]

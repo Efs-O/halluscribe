@@ -1,6 +1,6 @@
 // HalluScribe - llama.cpp subprocess lifecycle and request handling for Gemma.
 
-use super::schema::{parse_openai_tool_args, save_session_summary_tool};
+use super::schema::{extract_openai_tool_args, parse_openai_tool_args, save_session_summary_tool};
 use super::{GemmaError, GemmaOutput, INFER_TIMEOUT, STARTUP_TIMEOUT_SECS, TEMPERATURE};
 use crate::llama_runtime::{self, ServerWaitError};
 use serde_json::Value;
@@ -59,6 +59,26 @@ impl LlamaServer {
             max_tokens,
             system_prompt,
             transcript,
+        )
+    }
+
+    /// Run one completion against an arbitrary caller-supplied tool schema,
+    /// returning the raw parsed tool-call arguments. Used by the profile
+    /// distiller's map/reduce steps, which do not share `save_session_summary`.
+    pub(crate) fn infer_tool(
+        &self,
+        max_tokens: u32,
+        system_prompt: &str,
+        user_content: &str,
+        tool: &Value,
+    ) -> Result<Value, GemmaError> {
+        call_tool(
+            self.port,
+            &self.model_name,
+            max_tokens,
+            system_prompt,
+            user_content,
+            tool,
         )
     }
 }
@@ -173,4 +193,34 @@ fn call(
         .json()
         .map_err(|e| GemmaError::Http(e.to_string()))?;
     parse_openai_tool_args(&value)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn call_tool(
+    port: u16,
+    model_name: &str,
+    max_tokens: u32,
+    system_prompt: &str,
+    user_content: &str,
+    tool: &Value,
+) -> Result<Value, GemmaError> {
+    let payload = serde_json::json!({
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_content}
+        ],
+        "tools": [tool],
+        "temperature": TEMPERATURE,
+        "max_tokens": max_tokens,
+        "stream": false
+    });
+    let value: Value = reqwest::blocking::Client::new()
+        .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
+        .json(&payload)
+        .timeout(INFER_TIMEOUT)
+        .send()?
+        .json()
+        .map_err(|e| GemmaError::Http(e.to_string()))?;
+    extract_openai_tool_args(&value)
 }

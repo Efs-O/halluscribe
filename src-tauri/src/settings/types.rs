@@ -78,6 +78,25 @@ pub struct HalluScribeSettings {
     pub ctx_size: u32,
     pub max_tokens: u32,
     pub briefing_window_hours: u32,
+    /// Provider keys (see `ChatProvider::provider_key`) whose sessions the
+    /// profile distiller may read. Default: coding/chat tools in, personal
+    /// chat exports (ChatGPT, Claude.ai, Gemini) out — per the Persona
+    /// Protocol plan's consent decision.
+    pub profile_sources: Vec<String>,
+}
+
+fn default_profile_sources() -> Vec<String> {
+    [
+        "claude_code",
+        "codex",
+        "forge",
+        "continue",
+        "halluscribe_gemma_chat",
+        "ollama_chat",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
 }
 
 impl Default for HalluScribeSettings {
@@ -111,6 +130,7 @@ impl Default for HalluScribeSettings {
             ctx_size: 0,
             max_tokens: 0,
             briefing_window_hours: 2,
+            profile_sources: default_profile_sources(),
         }
     }
 }

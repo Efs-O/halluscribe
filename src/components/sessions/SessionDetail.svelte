@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { displayFillPct, shortDate, timeFromSession } from "../../lib/format";
   import type { IndexEntry } from "../../lib/types";
+  import SessionRedactPanel from "./SessionRedactPanel.svelte";
 
   interface Props {
     session: IndexEntry;
@@ -38,12 +39,18 @@
   let createdLabel = $derived(`${shortDate(session.date)} ${sessionTime}`.trim());
   let updatedLabel = $derived(formatTimestamp(session.updated_at) || "—");
 
-  $effect(() => {
+  let redactOpen = $state(false);
+
+  function loadContent() {
     content = null;
     error = null;
     invoke<string>("read_session", { sessionId: session.id })
       .then((c) => { content = c; })
       .catch((e) => { error = String(e); });
+  }
+
+  $effect(() => {
+    loadContent();
   });
 </script>
 
@@ -66,8 +73,16 @@
         <span class="meta-value">{updatedLabel}</span>
       </div>
     </div>
-    <button class="close-btn btn" onclick={onclose}>× close</button>
+    <div class="header-actions">
+      <button class="redact-toggle-btn btn" onclick={() => (redactOpen = !redactOpen)}>Redact…</button>
+      <button class="close-btn btn" onclick={onclose}>× close</button>
+    </div>
   </div>
+  <SessionRedactPanel
+    sessionId={session.id}
+    bind:open={redactOpen}
+    onApplied={loadContent}
+  />
   <div class="panel-body selectable">
     {#if error}
       <p class="err">{error}</p>
@@ -152,7 +167,14 @@
     color: var(--dim);
   }
 
-  .close-btn { font-size: 13px; }
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .close-btn, .redact-toggle-btn { font-size: 13px; }
 
   .panel-body {
     flex: 1;

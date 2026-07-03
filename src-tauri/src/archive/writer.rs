@@ -1,6 +1,7 @@
 // HalluScribe - markdown archive writer and archive-specific tests.
 
 use super::index::append_index;
+use super::redact::{apply_rules, rules_for_session};
 use super::{ArchiveError, IndexEntry, SessionMeta};
 use crate::gemma::{GemmaOutput, SessionType};
 use chrono::{DateTime, Utc};
@@ -36,7 +37,14 @@ pub fn write_session(
         output.title.clone()
     };
 
-    fs::write(&abs, build_markdown(&title, meta, output, now))?;
+    let markdown = build_markdown(&title, meta, output, now);
+    let rules = rules_for_session(archive_dir, &meta.id);
+    let markdown = if rules.is_empty() {
+        markdown
+    } else {
+        apply_rules(&markdown, &rules)
+    };
+    fs::write(&abs, markdown)?;
 
     append_index(
         archive_dir,
