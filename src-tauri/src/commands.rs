@@ -6,7 +6,7 @@ use crate::app_support::{
 };
 use crate::chat_prompt::{build_chat_system_prompt, ChatPromptContext, SearchModePrompt};
 use crate::recorded_sessions::{SaveRecordedChatRequest, SaveRecordedChatResult};
-use crate::{archive, briefing, retrieval, scheduler, search, settings};
+use crate::{archive, briefing, profile, retrieval, scheduler, search, settings};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -498,6 +498,7 @@ pub(crate) fn send_chat_message(
     let tavily_api_key = settings.tavily_api_key.trim().to_string();
     let web_search_available =
         web_search_enabled && (!ollama_api_key.is_empty() || !tavily_api_key.is_empty());
+    let user_profile = profile::read_profile_md(&dir);
     let mut final_messages = vec![serde_json::json!({
         "role": "system",
         "content": build_chat_system_prompt(&ChatPromptContext {
@@ -511,6 +512,7 @@ pub(crate) fn send_chat_message(
                 briefing::tools::ChatScope::AllowedSessionIds(ids) => Some(ids.len()),
                 briefing::tools::ChatScope::ArchiveWide => None,
             },
+            profile: user_profile,
         })
     })];
     final_messages.extend(json_messages);
