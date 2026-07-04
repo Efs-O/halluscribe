@@ -29,6 +29,13 @@
   let confirmingFullRebuild = $state(false);
   let digestOpen = $state(false);
 
+  // Persona Pack export (Work scope only — personal chat exports never leave
+  // the machine, matching the MCP get_profile privacy rule).
+  let includeRaw = $state(false);
+  let exporting = $state(false);
+  let exportNote = $state<string | null>(null);
+  let exportIsError = $state(false);
+
   let unlistenFns: UnlistenFn[] = [];
 
   async function loadProfile() {
@@ -52,7 +59,32 @@
     resultIsError = false;
     confirmingFullRebuild = false;
     digestOpen = false;
+    exportNote = null;
+    exportIsError = false;
     void loadProfile();
+  }
+
+  async function exportPack() {
+    if (exporting || running) return;
+    exporting = true;
+    exportNote = null;
+    exportIsError = false;
+    try {
+      const r = await invoke<{
+        path: string;
+        session_count: number;
+        digest_count: number;
+        raw_count: number;
+        includes_raw: boolean;
+      }>("export_persona_pack", { includeRaw });
+      exportNote = `Exported ${r.session_count} sessions${r.includes_raw ? ` + ${r.raw_count} raw` : ""} → ${r.path}`;
+      exportIsError = false;
+    } catch (e) {
+      exportNote = String(e);
+      exportIsError = true;
+    } finally {
+      exporting = false;
+    }
   }
 
   async function startRefresh(full: boolean) {
@@ -153,6 +185,15 @@
           <button class="btn" onclick={() => (confirmingFullRebuild = false)}>Cancel</button>
         </span>
       {/if}
+      {#if scope === "work" && profile}
+        <label class="raw-toggle" title="Raw transcripts are the un-redacted source — only include when you trust the recipient.">
+          <input type="checkbox" bind:checked={includeRaw} disabled={exporting} />
+          <span>incl. raw</span>
+        </label>
+        <button class="btn" onclick={exportPack} disabled={exporting || running} title="Export the Work profile + archive as a shareable Persona Pack zip">
+          {exporting ? "Exporting…" : "Export Pack"}
+        </button>
+      {/if}
     </div>
   </div>
 
@@ -170,6 +211,10 @@
 
   {#if resultNote}
     <p class="note" class:err={resultIsError}>{resultNote}</p>
+  {/if}
+
+  {#if exportNote}
+    <p class="note" class:err={exportIsError}>{exportNote}</p>
   {/if}
 
   <div class="panel-body selectable">
@@ -247,6 +292,15 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .raw-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--dim);
+    cursor: pointer;
   }
 
   .confirm-text {

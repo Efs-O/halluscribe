@@ -4,7 +4,7 @@
 
 use crate::app_support::archive_dir;
 use crate::profile::ProfileScope;
-use crate::{gemma, profile, settings};
+use crate::{gemma, pack, profile, settings};
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Mutex;
@@ -221,4 +221,65 @@ pub(crate) fn get_latest_digest(
     let profile_scope = parse_scope(&scope)?;
     let dir = archive_dir(&app)?;
     Ok(profile::latest_digest(&dir, profile_scope))
+}
+
+/// What a Persona Pack export produced, returned to the UI.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct PackResult {
+    path: String,
+    session_count: usize,
+    digest_count: usize,
+    raw_count: usize,
+    includes_raw: bool,
+}
+
+/// Export the Work Persona Pack to `<archive>/exports/<user>-persona-<date>.zip`
+/// and return the written path. Always Work scope (personal chat exports never
+/// leave the machine). `include_raw` opts the un-redacted raw transcripts in.
+#[tauri::command]
+pub(crate) fn export_persona_pack(
+    app: tauri::AppHandle,
+    include_raw: bool,
+) -> Result<PackResult, String> {
+    let dir = archive_dir(&app)?;
+    let settings = settings::load_settings(&dir);
+    let work_sources = profile::sources_for_scope(&settings.profile_sources, ProfileScope::Work);
+    let profile_md = profile::read_profile_md(&dir, ProfileScope::Work)
+        .ok_or_else(|| pack::PackError::NoProfile.to_string())?;
+    let digests = profile::all_digests(&dir, ProfileScope::Work);
+
+    let user = std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_default();
+    let now = chrono::Utc::now();
+    let dest = dir
+        .join("exports")
+        .join(pack::default_pack_name(&user, now));
+
+    let embedding_model = std::path::Path::new(&settings.embedding_model_path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    let summary = pack::export_persona_pack(
+        &dir,
+        &dest,
+        &work_sources,
+        &profile_md,
+        &digests,
+        include_raw,
+        env!("CARGO_PKG_VERSION"),
+        &embedding_model,
+        now,
+    )
+    .map_err(|error| error.to_string())?;
+
+    Ok(PackResult {
+        path: summary.path.to_string_lossy().into_owned(),
+        session_count: summary.session_count,
+        digest_count: summary.digest_count,
+        raw_count: summary.raw_count,
+        includes_raw: summary.includes_raw,
+    })
 }

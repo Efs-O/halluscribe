@@ -88,6 +88,30 @@ pub fn latest_digest(archive_dir: &Path, scope: ProfileScope) -> Option<String> 
     fs::read_to_string(dir.join(newest)).ok()
 }
 
+/// All `digest-*.md` for `scope` as `(filename, contents)` pairs, sorted by
+/// filename (chronological). Used by the Persona Pack export. Empty when none
+/// exist yet or the directory is unreadable.
+pub fn all_digests(archive_dir: &Path, scope: ProfileScope) -> Vec<(String, String)> {
+    let dir = scope_dir(archive_dir, scope);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("digest-") && name.ends_with(".md"))
+        .collect();
+    names.sort();
+    names
+        .into_iter()
+        .filter_map(|name| {
+            fs::read_to_string(dir.join(&name))
+                .ok()
+                .map(|contents| (name, contents))
+        })
+        .collect()
+}
+
 /// Write profile.md and profile_meta.json for `scope`.
 pub fn write_profile(
     archive_dir: &Path,

@@ -16,6 +16,7 @@ pub mod briefing;
 pub mod core;
 pub mod gemma;
 pub mod mcp;
+pub mod pack;
 pub mod preprocessor;
 pub mod profile;
 pub mod readers;
@@ -36,7 +37,8 @@ use commands::{
     send_chat_message, trigger_sweep, validate_ollama_api_key,
 };
 use commands_profile::{
-    get_latest_digest, get_profile, get_profile_refresh_status, run_profile_refresh,
+    export_persona_pack, get_latest_digest, get_profile, get_profile_refresh_status,
+    run_profile_refresh,
 };
 use std::sync::{atomic::AtomicBool, Arc};
 use tauri::image::Image;
@@ -240,6 +242,7 @@ pub fn run() {
             get_profile,
             get_latest_digest,
             get_profile_refresh_status,
+            export_persona_pack,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

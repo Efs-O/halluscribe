@@ -16,7 +16,9 @@ pub use pending::has_pending_facts;
 pub use scope::{sources_for_scope, ProfileScope};
 pub use select::{select_sources, BATCH_SIZE};
 pub use types::{ProfileFact, ProfileMeta, ProfileSection, ProfileSections};
-pub use writer::{latest_digest, load_meta, migrate_legacy_profile_layout, read_profile_md};
+pub use writer::{
+    all_digests, latest_digest, load_meta, migrate_legacy_profile_layout, read_profile_md,
+};
 
 use crate::archive::{self, IndexEntry};
 use crate::gemma::GemmaError;

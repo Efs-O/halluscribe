@@ -36,6 +36,7 @@ chrono     = { version = "0.4", features = ["clock", "std"], default-features = 
 rmcp       = { version = "2.1", features = ["transport-io"] }
 tokio      = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 zstd       = "0.13"
+zip        = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3"
