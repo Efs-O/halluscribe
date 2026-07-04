@@ -104,6 +104,9 @@ pub(crate) fn trigger_sweep(app: tauri::AppHandle) -> Result<(), String> {
         if !result.errors.is_empty() {
             message.push_str(&format!(", errors: {}", result.errors.len()));
         }
+        if result.flagged > 0 {
+            message.push_str(&format!(", possible secrets flagged: {}", result.flagged));
+        }
         let _ = app.emit("sweep-done", message);
     });
     Ok(())

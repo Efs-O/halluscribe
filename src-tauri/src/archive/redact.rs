@@ -1,7 +1,8 @@
 // HalluScribe - durable session redaction: ledger + apply/preview operations.
 
-use super::index::find_session;
+use super::index::{find_session, set_secret_flags};
 use super::ArchiveError;
+use crate::scanner::secrets::scan_for_secrets;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -203,7 +204,7 @@ pub fn apply_redaction(
     fs::write(&backup_path, &original)?;
 
     let updated = original.replace(find, replace);
-    fs::write(&md_path, updated)?;
+    fs::write(&md_path, &updated)?;
 
     let mut ledger = load_ledger(archive_dir);
     let rule = RedactionRule {
@@ -215,6 +216,12 @@ pub fn apply_redaction(
         ledger.rules.push(rule);
         save_rules(archive_dir, &ledger)?;
     }
+
+    // Redacting can remove (or, in principle, introduce) a flagged secret shape;
+    // re-scan and update the index immediately so the badge reflects reality
+    // without waiting for the next sweep. Runs after the ledger save so a
+    // failed index write can never leave a redaction without its durable rule.
+    set_secret_flags(archive_dir, session_id, scan_for_secrets(&updated))?;
 
     Ok(RedactionOutcome {
         replacements: occurrences,

@@ -207,6 +207,7 @@ mod tests {
             provider: "claude_code".to_string(),
             fill_estimated: false,
             transcript_hash: String::new(),
+            secret_flags: Vec::new(),
         }
     }
 

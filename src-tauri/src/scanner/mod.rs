@@ -7,6 +7,7 @@ mod claude;
 mod codex;
 mod continue_scan;
 mod forge;
+pub mod secrets;
 mod shared;
 mod tests;
 mod types;

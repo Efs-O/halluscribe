@@ -74,6 +74,11 @@
       </div>
     </div>
     <div class="header-actions">
+      {#if session.secret_flags?.length}
+        <span class="secret-notice">
+          Possible secrets detected: {session.secret_flags.join(", ")}
+        </span>
+      {/if}
       <button class="redact-toggle-btn btn" onclick={() => (redactOpen = !redactOpen)}>Redact…</button>
       <button class="close-btn btn" onclick={onclose}>× close</button>
     </div>
@@ -175,6 +180,12 @@
   }
 
   .close-btn, .redact-toggle-btn { font-size: 13px; }
+
+  .secret-notice {
+    color: var(--amber);
+    font-size: 12px;
+    white-space: nowrap;
+  }
 
   .panel-body {
     flex: 1;

@@ -170,7 +170,8 @@ fn apply_redaction_creates_backup_with_original_content() {
         &output_with_summary("ftp password: swordfish123"),
         fixed_now(),
     )
-    .unwrap();
+    .unwrap()
+    .path;
     let original = fs::read_to_string(&path).unwrap();
 
     let outcome = apply_redaction(&dir, "backup-session", "swordfish123", "[REDACTED]").unwrap();
@@ -192,7 +193,8 @@ fn apply_redaction_rewrites_file_and_persists_rule() {
         &output_with_summary("smtp password: correcthorse"),
         fixed_now(),
     )
-    .unwrap();
+    .unwrap()
+    .path;
 
     apply_redaction(&dir, "rewrite-session", "correcthorse", "[REDACTED]").unwrap();
 
@@ -267,9 +269,38 @@ fn redaction_survives_resweep_via_ledger() {
         &output_with_summary("ftp password is topsecret99 (again)"),
         fixed_now(),
     )
-    .unwrap();
+    .unwrap()
+    .path;
 
     let resweep_content = fs::read_to_string(&path).unwrap();
     assert!(!resweep_content.contains("topsecret99"));
     assert!(resweep_content.contains("[REDACTED]"));
+}
+
+#[test]
+fn apply_redaction_clears_secret_flags_after_rewrite() {
+    let dir = tmp_dir("secret_flags_clear");
+    let src = Path::new("/fake/secret-flags-session.jsonl");
+    let meta = sample_meta(src, "secret-flags-session");
+    let written = write_session(
+        &dir,
+        &meta,
+        &output_with_summary("password: hunter42secret99"),
+        fixed_now(),
+    )
+    .unwrap();
+    assert!(!written.secret_flags.is_empty());
+    let before = crate::archive::find_session(&dir, "secret-flags-session").unwrap();
+    assert!(!before.secret_flags.is_empty());
+
+    apply_redaction(
+        &dir,
+        "secret-flags-session",
+        "hunter42secret99",
+        "[REDACTED]",
+    )
+    .unwrap();
+
+    let after = crate::archive::find_session(&dir, "secret-flags-session").unwrap();
+    assert!(after.secret_flags.is_empty());
 }

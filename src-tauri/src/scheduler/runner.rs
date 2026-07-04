@@ -152,8 +152,11 @@ pub fn run_sweep(
         };
 
         match archive::write_session(&config.archive_dir, &meta, &output, Utc::now()) {
-            Ok(_) => {
+            Ok(written) => {
                 result.processed += 1;
+                if !written.secret_flags.is_empty() {
+                    result.flagged += 1;
+                }
                 written_ids.push(session.id.clone());
                 emit_progress(app, current, total, &session.id, "done");
             }

@@ -43,4 +43,12 @@ pub struct IndexEntry {
     pub fill_estimated: bool,
     #[serde(default)]
     pub transcript_hash: String,
+    #[serde(default)]
+    pub secret_flags: Vec<String>,
+}
+
+/// Result of writing one session's markdown + index entry to the archive.
+pub struct WrittenSession {
+    pub path: PathBuf,
+    pub secret_flags: Vec<String>,
 }

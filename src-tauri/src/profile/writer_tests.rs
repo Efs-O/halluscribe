@@ -29,6 +29,7 @@ fn entry(id: &str, project: &str, session_type: &str, tags: Vec<&str>) -> IndexE
         provider: "claude_code".to_string(),
         fill_estimated: false,
         transcript_hash: String::new(),
+        secret_flags: Vec::new(),
     }
 }
 

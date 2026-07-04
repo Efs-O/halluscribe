@@ -74,6 +74,26 @@ pub fn delete_sessions(archive_dir: &Path, ids: &[String]) -> Result<Vec<String>
     Ok(deleted)
 }
 
+/// Replace the `secret_flags` on the index entry matching `id`. No-op (Ok) if
+/// the id is not present in the index - used after a redaction rewrites a
+/// session so the badge clears/updates immediately, not just on next sweep.
+pub fn set_secret_flags(
+    archive_dir: &Path,
+    id: &str,
+    flags: Vec<String>,
+) -> Result<(), ArchiveError> {
+    let mut idx = load_index(archive_dir)?;
+    let Some(entry) = idx.sessions.iter_mut().find(|e| e.id == id) else {
+        return Ok(());
+    };
+    entry.secret_flags = flags;
+    fs::write(
+        archive_dir.join("index.json"),
+        serde_json::to_string_pretty(&idx)?,
+    )?;
+    Ok(())
+}
+
 pub(super) fn append_index(archive_dir: &Path, entry: IndexEntry) -> Result<(), ArchiveError> {
     fs::create_dir_all(archive_dir)?;
     let mut idx = load_index(archive_dir).unwrap_or_default();

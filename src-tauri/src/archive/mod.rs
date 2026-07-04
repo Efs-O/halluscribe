@@ -7,7 +7,7 @@ mod writer;
 
 use std::fmt;
 
-pub use types::{IndexEntry, SessionMeta};
+pub use types::{IndexEntry, SessionMeta, WrittenSession};
 
 #[derive(Debug)]
 pub enum ArchiveError {
@@ -40,6 +40,7 @@ impl From<serde_json::Error> for ArchiveError {
 
 pub use index::{
     archived_source_size, delete_sessions, find_session, is_archived, read_sessions, session_id,
+    set_secret_flags,
 };
 pub use redact::{
     apply_redaction, load_rules, preview_redaction, rules_for_session, RedactionOutcome,

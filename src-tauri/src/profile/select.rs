@@ -71,6 +71,7 @@ mod tests {
             archive_path: format!("sessions/proj/{id}.md"),
             source_jsonl: String::new(),
             source_size_bytes: 0,
+            secret_flags: Vec::new(),
             provider: provider.to_string(),
             fill_estimated: false,
             transcript_hash: String::new(),

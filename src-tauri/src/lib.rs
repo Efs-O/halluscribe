@@ -196,6 +196,12 @@ pub fn run() {
                             if !result.errors.is_empty() {
                                 message.push_str(&format!(", errors: {}", result.errors.len()));
                             }
+                            if result.flagged > 0 {
+                                message.push_str(&format!(
+                                    ", possible secrets flagged: {}",
+                                    result.flagged
+                                ));
+                            }
                             let _ = handle.emit("sweep-done", message);
                         }
                     }

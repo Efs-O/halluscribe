@@ -17,6 +17,7 @@ export interface IndexEntry {
   provider?: string;
   fill_estimated?: boolean;
   transcript_hash?: string;
+  secret_flags?: string[];
 }
 
 export interface SessionStats {

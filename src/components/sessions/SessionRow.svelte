@@ -40,7 +40,12 @@
   </span>
   <span class="date">{shortDate(session.date)}<span class="time">{time}</span></span>
   <span class="gap"></span>
-  <span class="title">{session.title}</span>
+  <span class="title">
+    {#if session.secret_flags?.length}
+      <span class="secret-badge" title={"Possible secrets: " + session.secret_flags.join(", ")}>⚠</span>
+    {/if}
+    {session.title}
+  </span>
   <span class="gap"></span>
   <span class="project muted">{session.project}</span>
   <span class="gap"></span>
@@ -116,6 +121,14 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-weight: 600;
+  }
+
+  .secret-badge {
+    display: inline-block;
+    color: var(--amber);
+    font-size: 11px;
+    margin-right: 6px;
+    line-height: 1;
   }
 
   .project,
