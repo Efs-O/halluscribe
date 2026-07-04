@@ -7,6 +7,7 @@ mod chat_prompt;
 mod commands;
 mod commands_profile;
 mod infer_lock;
+mod llama_pids;
 mod llama_runtime;
 mod recorded_sessions;
 

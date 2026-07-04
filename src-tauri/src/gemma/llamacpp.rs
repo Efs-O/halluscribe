@@ -35,11 +35,15 @@ impl LlamaServer {
             .and_then(|s| s.to_str())
             .unwrap_or("model")
             .to_string();
+        // Reap any llama-server this app orphaned on a prior hard-kill so it
+        // releases VRAM before we load a fresh model (OPS-1).
+        crate::llama_pids::reap_orphans();
         let mut child = spawn_server(&bin, model, port, gpu_layers, ctx_size)?;
         if let Err(error) = wait_for_server(port, &mut child) {
             let _ = child.kill();
             return Err(error);
         }
+        crate::llama_pids::register(child.id());
         Ok(Self {
             child,
             port,
@@ -85,7 +89,9 @@ impl LlamaServer {
 
 impl Drop for LlamaServer {
     fn drop(&mut self) {
+        let pid = self.child.id();
         let _ = self.child.kill();
+        crate::llama_pids::unregister(pid);
     }
 }
 

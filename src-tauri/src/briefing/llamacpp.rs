@@ -20,7 +20,9 @@ fn persistent_server() -> &'static Mutex<Option<Child>> {
 pub(crate) fn kill_server() {
     if let Ok(mut guard) = persistent_server().lock() {
         if let Some(child) = guard.as_mut() {
+            let pid = child.id();
             let _ = child.kill();
+            crate::llama_pids::unregister(pid);
         }
         *guard = None;
     }
@@ -49,6 +51,9 @@ pub(crate) fn stream(
         port
     } else {
         let free = llama_runtime::find_free_port(port);
+        // Reap a llama-server this app orphaned on a prior hard-kill so it frees
+        // VRAM before we load the chat model (OPS-1).
+        crate::llama_pids::reap_orphans();
         let mut child = spawn_server(
             bin,
             model,
@@ -62,6 +67,7 @@ pub(crate) fn stream(
             let _ = child.kill();
             return Err(e);
         }
+        crate::llama_pids::register(child.id());
         // Recover from a poisoned lock (a previous holder panicked) rather than
         // crashing this stream thread - matches kill_server's graceful handling.
         match persistent_server().lock() {
