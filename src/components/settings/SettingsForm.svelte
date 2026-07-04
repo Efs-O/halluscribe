@@ -318,6 +318,17 @@
         </label>
 
         <label class="row-label">
+          <span>Preserve raw transcripts</span>
+          <input type="checkbox" bind:checked={s.preserve_raw_transcripts} onchange={onToggle} />
+        </label>
+
+        <p class="field-note">
+          Keeps a compressed copy of each session's original transcript in <code>~/.halluscribe/raw/</code>
+          so raw detail survives after the source tool prunes its logs. Raw copies are the untouched
+          source — they are never redacted, and Persona Pack exports exclude them unless you opt in per-export.
+        </p>
+
+        <label class="row-label">
           <span>Sweep time (24-hour)</span>
           <div class="time-input" onfocusout={onScheduleTimeBlur}>
             <input

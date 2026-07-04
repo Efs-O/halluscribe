@@ -23,6 +23,7 @@ fn sample_meta(source: &Path) -> SessionMeta {
         session_timestamp: fixed_now(),
         updated_at: None,
         transcript_hash: "abc123".into(),
+        raw_path: None,
     }
 }
 
@@ -201,6 +202,7 @@ fn archived_source_size_stored_and_retrieved() {
         session_timestamp: fixed_now(),
         updated_at: None,
         transcript_hash: "hash".into(),
+        raw_path: None,
     };
     write_session(&dir, &meta, &sample_output(), fixed_now()).unwrap();
     let stored = archived_source_size(&dir, "session");

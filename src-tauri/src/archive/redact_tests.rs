@@ -30,6 +30,7 @@ fn sample_meta(source: &Path, id: &str) -> SessionMeta {
         session_timestamp: fixed_now(),
         updated_at: None,
         transcript_hash: "abc123".into(),
+        raw_path: None,
     }
 }
 

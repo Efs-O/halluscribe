@@ -73,6 +73,7 @@ pub fn write_session(
             fill_estimated: meta.fill_estimated,
             transcript_hash: meta.transcript_hash.clone(),
             secret_flags: secret_flags.clone(),
+            raw_path: meta.raw_path.clone().unwrap_or_default(),
         },
     )?;
 

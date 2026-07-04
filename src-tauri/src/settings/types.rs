@@ -83,6 +83,12 @@ pub struct HalluScribeSettings {
     /// chat exports (ChatGPT, Claude.ai, Gemini) out — per the Persona
     /// Protocol plan's consent decision.
     pub profile_sources: Vec<String>,
+    /// When on (default), the sweep keeps a compressed copy of each archived
+    /// session's original transcript at `<archive>/raw/<id>.jsonl.zst` so raw
+    /// detail survives even after the source tool prunes its own logs. Raw copies
+    /// are never redacted (they are the untouched source) and are excluded from
+    /// Persona Pack exports unless explicitly opted in per-export.
+    pub preserve_raw_transcripts: bool,
 }
 
 fn default_profile_sources() -> Vec<String> {
@@ -131,6 +137,7 @@ impl Default for HalluScribeSettings {
             max_tokens: 0,
             briefing_window_hours: 2,
             profile_sources: default_profile_sources(),
+            preserve_raw_transcripts: true,
         }
     }
 }

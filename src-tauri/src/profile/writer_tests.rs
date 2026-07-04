@@ -30,6 +30,7 @@ fn entry(id: &str, project: &str, session_type: &str, tags: Vec<&str>) -> IndexE
         fill_estimated: false,
         transcript_hash: String::new(),
         secret_flags: Vec::new(),
+        raw_path: String::new(),
     }
 }
 

@@ -23,6 +23,7 @@ fn entry(id: &str, archive_path: &str) -> IndexEntry {
         fill_estimated: false,
         transcript_hash: String::new(),
         secret_flags: Vec::new(),
+        raw_path: String::new(),
     }
 }
 

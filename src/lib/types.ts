@@ -57,6 +57,7 @@ export interface HalluScribeSettings {
   ctx_size: number;
   max_tokens: number;
   briefing_window_hours: number;
+  preserve_raw_transcripts: boolean;
 }
 
 /** Filters passed to run_briefing. Empty strings mean "no restriction". */

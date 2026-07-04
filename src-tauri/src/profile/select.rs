@@ -75,6 +75,7 @@ mod tests {
             provider: provider.to_string(),
             fill_estimated: false,
             transcript_hash: String::new(),
+            raw_path: String::new(),
         }
     }
 
