@@ -14,6 +14,7 @@ pub mod archive;
 pub mod briefing;
 pub mod core;
 pub mod gemma;
+pub mod mcp;
 pub mod preprocessor;
 pub mod profile;
 pub mod readers;

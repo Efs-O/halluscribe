@@ -81,6 +81,35 @@ Embeddings are computed locally using a second GGUF model and stored in `embeddi
 
 ---
 
+## MCP server
+
+`halluscribe-mcp` is a second, standalone binary (no Tauri runtime) that exposes your archive over the [Model Context Protocol](https://modelcontextprotocol.io/) via stdio JSON-RPC — so any MCP client (Claude Code, Codex, etc.) can query it directly. The point: give every future agent session memory of all previous ones, without re-explaining context that's already sitting in your archive.
+
+It is **strictly read-only** — four tools, no write/redact/delete surface:
+
+| Tool | What it returns |
+|---|---|
+| `search_sessions` | A paginated page of matching session index entries (title, tags, tool, date) |
+| `read_session` | The full redaction-applied Markdown body of one session, by id |
+| `get_profile` | The distilled Work profile (identity, projects, conventions, recurring problems, style, timeline) |
+| `get_digest` | The latest weekly digest for the Work profile |
+
+The Personal profile scope is never exposed over MCP — only Work, by design.
+
+Register it with a client:
+
+```bash
+claude mcp add halluscribe -- /path/to/halluscribe-mcp
+```
+
+By default it reads `~/.halluscribe`. Point it at a different archive with the `HALLUSCRIBE_DIR` environment variable:
+
+```bash
+HALLUSCRIBE_DIR=/path/to/archive claude mcp add halluscribe -- /path/to/halluscribe-mcp
+```
+
+---
+
 ## Inference backends
 
 | Backend | How it works |
