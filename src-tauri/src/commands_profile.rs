@@ -7,7 +7,39 @@ use crate::profile::ProfileScope;
 use crate::{gemma, profile, settings};
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::Mutex;
 use tauri::Emitter;
+
+/// Scope key ("work" | "personal") of the refresh currently running in its
+/// detached thread, or None when idle. Lets a remounting ProfilePanel (the
+/// component is destroyed on tab switch) rediscover an in-flight run.
+static REFRESH_SCOPE: Mutex<Option<String>> = Mutex::new(None);
+
+/// RAII marker for the running refresh: clears `REFRESH_SCOPE` on drop, so
+/// panics and early returns in the worker thread can never leave a stale
+/// "still running" status behind.
+struct RefreshScopeGuard;
+
+impl RefreshScopeGuard {
+    fn set(scope: &str) -> Self {
+        *lock_refresh_scope() = Some(scope.to_string());
+        Self
+    }
+}
+
+impl Drop for RefreshScopeGuard {
+    fn drop(&mut self) {
+        *lock_refresh_scope() = None;
+    }
+}
+
+fn lock_refresh_scope() -> std::sync::MutexGuard<'static, Option<String>> {
+    // A poisoned lock only means a panic between set and drop; the value is
+    // a plain Option<String>, always safe to reuse.
+    REFRESH_SCOPE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[derive(Debug, Clone, Serialize)]
 struct ProfileProgressPayload {
@@ -70,8 +102,11 @@ pub(crate) fn run_profile_refresh(
 
         // Skip the model load entirely when an incremental run has nothing new
         // to distill (checked under the lock so a concurrent sweep can't be
-        // mid-write while we count).
-        if profile::pending_session_count(&dir, profile_scope, &profile_sources, full) == 0 {
+        // mid-write while we count) — unless a pending-facts snapshot from a
+        // failed run exists, in which case the reduce must still run.
+        if profile::pending_session_count(&dir, profile_scope, &profile_sources, full) == 0
+            && !profile::has_pending_facts(&dir, profile_scope)
+        {
             let _ = app.emit(
                 "profile-done",
                 ProfileDonePayload {
@@ -81,6 +116,10 @@ pub(crate) fn run_profile_refresh(
             );
             return;
         }
+
+        // Published for `get_profile_refresh_status`; cleared on drop (RAII)
+        // so this thread can never leave a stale "running" status behind.
+        let _refresh_scope_guard = RefreshScopeGuard::set(&scope);
 
         // One warm model serves every map batch plus the reduce call, then is
         // unloaded when `session` drops at the end (sweep unload policy).
@@ -153,6 +192,14 @@ pub(crate) fn run_profile_refresh(
         let _ = app.emit("profile-done", payload);
     });
     Ok(())
+}
+
+/// The scope key ("work" | "personal") of a profile refresh currently
+/// running, or None when idle. Lets the PROFILE panel restore its busy state
+/// after being destroyed and remounted by a tab switch.
+#[tauri::command]
+pub(crate) fn get_profile_refresh_status() -> Option<String> {
+    lock_refresh_scope().clone()
 }
 
 /// Return the distilled profile.md content for `scope`, or None if no

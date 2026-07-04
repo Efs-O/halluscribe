@@ -1,10 +1,12 @@
 // HalluScribe - profile distiller reduce step: merge candidate facts (and the
-// previous profile.md, if any) into one prose block per section via a
-// `save_user_profile` tool call. Contradiction rule: recency wins, but the
-// merge prompt asks the model to note the change rather than silently drop
-// the old value.
+// previous profile.md, if any) into prose, one bounded `save_profile_section`
+// tool call PER section — never one giant all-sections call, whose output
+// exceeded any fixed token budget on large archives. Contradiction rule:
+// recency wins, but the merge prompt asks the model to note the change rather
+// than silently drop the old value.
 
 use super::distill::ToolCallFn;
+use super::parse_md::parse_profile_sections;
 use super::scope::ProfileScope;
 use super::types::{ProfileFact, ProfileSection, ProfileSections};
 use super::ProfileError;
@@ -24,19 +26,26 @@ const CONSOLIDATION_THRESHOLD_CHARS: usize = 60_000;
 /// session-id-dense JSON.
 const CONSOLIDATE_CHUNK_CHARS: usize = 6_000;
 
-// The final profile targets 3–5K tokens across six sections; budgets below
-// output size truncate the tool-call arguments mid-string.
-const FINAL_MAX_TOKENS: u32 = 8192;
+/// One section's merged prose fits this budget. History: the original
+/// all-sections call truncated mid-JSON at 8192 tokens on a full-archive run,
+/// so the merge became per-section at 4096 — which a fact-dense section
+/// ("conventions", Personal scope, 1377 sessions) then also overflowed at
+/// ~8.9K chars. 8192 for a single section's output leaves ample headroom.
+const SECTION_MAX_TOKENS: u32 = 8192;
 const CONSOLIDATE_MAX_TOKENS: u32 = 4096;
 
-const MERGE_SYSTEM_PROMPT: &str = "You maintain a durable profile of the user distilled from \
-their AI coding session archive. You are given the previous profile.md (if any) and new \
-candidate facts grouped by section, newest first. Call save_user_profile with one field per \
-section. Rules: recency wins on contradictions, but note the change (e.g. \"previously used \
-X, switched to Y around 2026-03\"). Every non-obvious claim must carry session-id references \
-like [abc-123] drawn ONLY from the evidence ids given to you - never invent an id. Keep each \
-section concise (a CV, not a diary). Projects unseen for more than 12 months belong in \
-Timeline, not Active Projects.";
+const SECTION_MERGE_SYSTEM_PROMPT: &str = "You maintain one section of a durable profile of \
+the user distilled from their AI session archive. You are given the section name, the \
+previous content of that section (if any), and new candidate facts, newest first. Call \
+save_profile_section with the merged prose for THIS section only. Rules: recency wins on \
+contradictions, but note the change (e.g. \"previously used X, switched to Y around \
+2026-03\"). Every non-obvious claim must carry session-id references like [abc-123] drawn \
+ONLY from the evidence ids given to you - never invent an id. Keep the section concise (a \
+CV, not a diary).";
+
+/// Appended to the user content for the Projects section only.
+const PROJECTS_SECTION_NOTE: &str = "Note: projects unseen for more than 12 months belong in \
+the Timeline section, not here — omit them.";
 
 const CONSOLIDATE_SYSTEM_PROMPT: &str = "You are compressing a long list of candidate facts for \
 one profile section into a shorter set of bullet lines, preserving every session-id reference \
@@ -44,9 +53,11 @@ in brackets. Do not drop distinct facts; merge near-duplicates. Call save_sectio
 with the condensed text.";
 
 /// Merge candidate facts (and the previous profile.md, if any) into one prose
-/// block per section. Non-fatal problems (a consolidate chunk falling back to
-/// its raw bullets) are appended to `warnings`; only the final merge call can
-/// fail the reduce.
+/// block per section, with one bounded model call per section that has new
+/// facts. Sections without new facts keep their previous text verbatim, with
+/// no model call. A failed section call falls back to previous text + raw
+/// bullets (recorded in `warnings`), so the reduce as a whole is effectively
+/// infallible; the `Result` return type is kept for signature compatibility.
 pub fn run_reduce(
     scope: ProfileScope,
     previous_profile_md: Option<&str>,
@@ -54,7 +65,8 @@ pub fn run_reduce(
     tool_call: &ToolCallFn,
     warnings: &mut Vec<String>,
 ) -> Result<ProfileSections, ProfileError> {
-    let mut section_inputs = ProfileSections::default();
+    let previous = parse_profile_sections(previous_profile_md.unwrap_or(""));
+
     let mut total_len = 0usize;
     let mut serialized_by_section: Vec<(ProfileSection, String)> = Vec::new();
     for section in scope.sections() {
@@ -62,28 +74,68 @@ pub fn run_reduce(
         total_len += serialized.len();
         serialized_by_section.push((*section, serialized));
     }
-
     let needs_consolidation = total_len > CONSOLIDATION_THRESHOLD_CHARS;
+
+    let mut merged = ProfileSections::default();
     for (section, serialized) in serialized_by_section {
+        let prev = previous.get(section);
         if serialized.is_empty() {
+            // No new candidate facts: keep the previous section text verbatim
+            // (empty string if none) without calling the model.
+            merged.set(section, prev.to_string());
             continue;
         }
-        let text = if needs_consolidation {
+        let bullets = if needs_consolidation {
             consolidate_section(section, &serialized, tool_call, warnings)
         } else {
             serialized
         };
-        section_inputs.set(section, text);
+        let text = match merge_section(section, prev, &bullets, tool_call) {
+            Ok(text) => text,
+            Err(error) => {
+                warnings.push(format!(
+                    "merge section {}: {error} (kept raw facts)",
+                    section.as_str()
+                ));
+                if prev.is_empty() {
+                    bullets
+                } else {
+                    format!("{prev}\n{bullets}")
+                }
+            }
+        };
+        merged.set(section, text);
     }
+    Ok(merged)
+}
 
-    let user_content = build_merge_user_content(scope, previous_profile_md, &section_inputs);
+/// One bounded merge call for one section: previous content + new bullets in,
+/// merged prose out via `save_profile_section`.
+fn merge_section(
+    section: ProfileSection,
+    previous: &str,
+    bullets: &str,
+    tool_call: &ToolCallFn,
+) -> Result<String, ProfileError> {
+    let mut user_content = format!(
+        "Section: {heading}\n\nPrevious content:\n{prev}\n\nNew candidate facts (newest first):\n{bullets}",
+        heading = section.heading(),
+        prev = if previous.is_empty() { "(none)" } else { previous },
+    );
+    if section == ProfileSection::Projects {
+        user_content.push_str("\n\n");
+        user_content.push_str(PROJECTS_SECTION_NOTE);
+    }
     let result = tool_call(
-        MERGE_SYSTEM_PROMPT,
+        SECTION_MERGE_SYSTEM_PROMPT,
         &user_content,
-        &save_user_profile_tool(scope),
-        FINAL_MAX_TOKENS,
+        &save_profile_section_tool(),
+        SECTION_MAX_TOKENS,
     )?;
-    parse_sections(scope, &result)
+    result["content"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| ProfileError::BadToolCall("missing content string".to_string()))
 }
 
 /// Consolidate one section's bullet list chunk by chunk so each call's output
@@ -171,55 +223,20 @@ fn serialize_section_facts(section: ProfileSection, facts: &[ProfileFact]) -> St
         .join("\n")
 }
 
-fn build_merge_user_content(
-    scope: ProfileScope,
-    previous_profile_md: Option<&str>,
-    sections: &ProfileSections,
-) -> String {
-    let mut parts = Vec::new();
-    if let Some(previous) = previous_profile_md {
-        if !previous.is_empty() {
-            parts.push(format!("Previous profile.md:\n{previous}"));
-        }
-    }
-    for section in scope.sections() {
-        let text = sections.get(*section);
-        if !text.is_empty() {
-            parts.push(format!(
-                "New candidate facts for {}:\n{}",
-                section.heading(),
-                text
-            ));
-        }
-    }
-    if parts.is_empty() {
-        "No new facts and no previous profile. Produce an empty profile.".to_string()
-    } else {
-        parts.join("\n\n---\n\n")
-    }
-}
-
-/// The `save_user_profile` tool schema for `scope`: one required string
-/// property per section in the scope's skeleton.
-fn save_user_profile_tool(scope: ProfileScope) -> Value {
-    let mut properties = serde_json::Map::new();
-    let mut required = Vec::new();
-    for section in scope.sections() {
-        properties.insert(
-            section.as_str().to_string(),
-            serde_json::json!({"type": "string"}),
-        );
-        required.push(section.as_str());
-    }
+/// The `save_profile_section` tool schema: one required string property with
+/// the merged prose for the current section.
+fn save_profile_section_tool() -> Value {
     serde_json::json!({
         "type": "function",
         "function": {
-            "name": "save_user_profile",
-            "description": "Save the merged user profile, one field per fixed section.",
+            "name": "save_profile_section",
+            "description": "Save the merged prose for the one profile section being maintained.",
             "parameters": {
                 "type": "object",
-                "properties": Value::Object(properties),
-                "required": required
+                "properties": {
+                    "content": { "type": "string" }
+                },
+                "required": ["content"]
             }
         }
     })
@@ -240,17 +257,6 @@ fn save_section_consolidated_tool() -> Value {
             }
         }
     })
-}
-
-fn parse_sections(scope: ProfileScope, value: &Value) -> Result<ProfileSections, ProfileError> {
-    let mut sections = ProfileSections::default();
-    for section in scope.sections() {
-        let text = value[section.as_str()].as_str().ok_or_else(|| {
-            ProfileError::BadToolCall(format!("missing section field: {}", section.as_str()))
-        })?;
-        sections.set(*section, text.to_string());
-    }
-    Ok(sections)
 }
 
 #[cfg(test)]

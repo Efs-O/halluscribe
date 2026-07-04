@@ -4,12 +4,15 @@
 
 mod distill;
 mod merge;
+mod parse_md;
+mod pending;
 mod scope;
 mod select;
 mod types;
 mod writer;
 
 pub use distill::ToolCallFn;
+pub use pending::has_pending_facts;
 pub use scope::{sources_for_scope, ProfileScope};
 pub use select::{select_sources, BATCH_SIZE};
 pub use types::{ProfileFact, ProfileMeta, ProfileSection, ProfileSections};
@@ -117,23 +120,82 @@ pub fn run_refresh(
 
     let entries = archive::read_sessions(archive_dir);
     let selected = select::select_sources(&entries, &effective_sources, watermark);
-    // Nothing new to distill: leave profile.md, the meta, and the digests
-    // untouched rather than re-merging the old profile against zero facts.
-    if selected.is_empty() {
-        return Ok(RefreshOutcome::default());
+
+    // A pending file only ever exists after a failed run: reuse its already
+    // mapped facts and skip re-mapping those sessions (correct recovery for
+    // both incremental and full runs). Corrupt file: warn and treat as absent.
+    let mut errors = Vec::new();
+    let resumed = match pending::load_pending(archive_dir, scope) {
+        Ok(Some(resumed)) => resumed,
+        Ok(None) => pending::PendingFacts::default(),
+        Err(warning) => {
+            errors.push(warning);
+            pending::PendingFacts::default()
+        }
+    };
+
+    // Nothing new to distill and nothing to recover: leave profile.md, the
+    // meta, and the digests untouched rather than re-merging the old profile
+    // against zero facts.
+    if selected.is_empty() && resumed.facts.is_empty() {
+        return Ok(RefreshOutcome {
+            errors,
+            ..Default::default()
+        });
     }
-    let batches = select::chunk_batches(&selected, select::BATCH_SIZE);
+
+    let to_map: Vec<&IndexEntry> = selected
+        .iter()
+        .filter(|entry| !resumed.session_ids.contains(&entry.id))
+        .copied()
+        .collect();
+    // Distinct sessions this run folds in: newly mapped plus recovered ones.
+    let covered_count = selected
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .chain(resumed.session_ids.iter().map(String::as_str))
+        .collect::<std::collections::HashSet<&str>>()
+        .len();
+    let batches = select::chunk_batches(&to_map, select::BATCH_SIZE);
+    // Progress totals count only the batches actually being mapped this run.
     let total_batches = batches.len().max(1);
 
-    let mut all_facts = Vec::new();
-    let mut errors = Vec::new();
+    let mut snapshot = pending::PendingFacts {
+        created_at: Utc::now().to_rfc3339(),
+        ..resumed
+    };
+    // Only a whole failed map batch leaves sessions undistilled; the warnings
+    // pushed into `errors` (skipped facts, fallbacks) must not be confused
+    // with it, or a benign warning would hold the watermark back forever.
+    let mut failed_batches = 0usize;
     for (idx, batch) in batches.iter().enumerate() {
         on_progress(idx + 1, total_batches, Stage::Mapping);
         match distill::distill_batch(archive_dir, batch, scope, tool_call) {
-            Ok(mut facts) => all_facts.append(&mut facts),
-            Err(error) => errors.push(error.to_string()),
+            Ok((mut facts, warnings)) => {
+                for warning in warnings {
+                    errors.push(format!("batch {}: {warning}", idx + 1));
+                }
+                snapshot.facts.append(&mut facts);
+                for entry in batch {
+                    snapshot.session_ids.push(entry.id.clone());
+                    let ts = entry_timestamp(entry);
+                    if ts > snapshot.last_ts.as_str() {
+                        snapshot.last_ts = ts.to_string();
+                    }
+                }
+                // Persist after every successful batch so a failed reduce (or
+                // an interrupted run) never costs the mapping work done so far.
+                if let Err(error) = pending::save_pending(archive_dir, scope, &snapshot) {
+                    errors.push(format!("failed to save pending facts: {error}"));
+                }
+            }
+            Err(error) => {
+                failed_batches += 1;
+                errors.push(error.to_string());
+            }
         }
     }
+    let all_facts = snapshot.facts;
 
     on_progress(1, 1, Stage::Merging);
     let previous_md = writer::read_profile_md(archive_dir, scope);
@@ -151,7 +213,7 @@ pub fn run_refresh(
         Err(error) => {
             errors.push(format!("final merge failed: {error}"));
             return Ok(RefreshOutcome {
-                session_count: selected.len(),
+                session_count: covered_count,
                 facts_count: all_facts.len(),
                 errors,
             });
@@ -159,26 +221,41 @@ pub fn run_refresh(
     };
 
     on_progress(1, 1, Stage::Writing);
-    let newest_ts = newest_timestamp(&selected).unwrap_or(&meta.last_distilled_ts);
+    // The recovered snapshot's last_ts participates in the watermark max, so
+    // sessions mapped by an earlier failed run still advance the watermark.
+    let newest_selected = newest_timestamp(&selected).unwrap_or("");
+    let newest_ts = if snapshot.last_ts.as_str() > newest_selected {
+        snapshot.last_ts.as_str()
+    } else {
+        newest_selected
+    };
     let new_meta = ProfileMeta {
         generated_at: Utc::now().to_rfc3339(),
         // A failed map batch left some selected sessions undistilled; keeping
         // the old watermark makes the next incremental run retry them instead
-        // of skipping them forever.
-        last_distilled_ts: if !errors.is_empty() || newest_ts.is_empty() {
+        // of skipping them forever. Non-fatal warnings in `errors` (skipped
+        // facts, merge fallbacks) left nothing undistilled and must advance it.
+        last_distilled_ts: if failed_batches > 0 || newest_ts.is_empty() {
             meta.last_distilled_ts.clone()
         } else {
             newest_ts.to_string()
         },
-        session_count: selected.len(),
+        session_count: covered_count,
         sources: effective_sources,
         facts_count: all_facts.len(),
     };
     writer::write_profile(archive_dir, scope, &sections, &new_meta)?;
     writer::write_digest(archive_dir, scope, &selected, &all_facts, Utc::now())?;
+    // The mapping run is safely folded into the written profile: the pending
+    // snapshot has served its purpose. When a batch failed the watermark was
+    // held back, so keep the snapshot too — the retry run then re-maps only
+    // the failed sessions instead of everything since the old watermark.
+    if failed_batches == 0 {
+        pending::clear_pending(archive_dir, scope);
+    }
 
     Ok(RefreshOutcome {
-        session_count: selected.len(),
+        session_count: covered_count,
         facts_count: all_facts.len(),
         errors,
     })
@@ -204,14 +281,19 @@ pub fn pending_session_count(
     select::select_sources(&entries, &effective_sources, watermark).len()
 }
 
+/// The timestamp used for watermark bookkeeping: `session_timestamp`
+/// (RFC3339, sortable lexicographically) with a fallback to the coarser
+/// `date` field for legacy entries that predate that column.
+fn entry_timestamp(entry: &IndexEntry) -> &str {
+    if !entry.session_timestamp.is_empty() {
+        entry.session_timestamp.as_str()
+    } else {
+        entry.date.as_str()
+    }
+}
+
 fn newest_timestamp<'a>(selected: &[&'a IndexEntry]) -> Option<&'a str> {
-    selected.first().map(|entry| {
-        if !entry.session_timestamp.is_empty() {
-            entry.session_timestamp.as_str()
-        } else {
-            entry.date.as_str()
-        }
-    })
+    selected.first().map(|entry| entry_timestamp(entry))
 }
 
 #[cfg(test)]
@@ -221,3 +303,7 @@ mod refresh_tests;
 #[cfg(test)]
 #[path = "refresh_scope_tests.rs"]
 mod refresh_scope_tests;
+
+#[cfg(test)]
+#[path = "refresh_pending_tests.rs"]
+mod refresh_pending_tests;

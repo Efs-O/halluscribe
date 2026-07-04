@@ -54,15 +54,8 @@ fn canned_response(tool: &serde_json::Value) -> serde_json::Value {
                 "date": "2026-06-01"
             }]
         }),
-        _ => serde_json::json!({
-            "identity": "Dev.",
-            "projects": "proj [s1]",
-            "conventions": "",
-            "recurring_problems": "",
-            "communication_style": "",
-            "timeline": "",
-            "personal_context": ""
-        }),
+        // Per-section merge (`save_profile_section`): one string back.
+        _ => serde_json::json!({ "content": "proj [s1]" }),
     }
 }
 

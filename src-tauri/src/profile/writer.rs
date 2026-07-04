@@ -13,6 +13,11 @@ use std::path::{Path, PathBuf};
 
 const HALLUSCRIBE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Body rendered for a section with no distilled content yet. Shared with
+/// `parse_md.rs`, which maps it back to an empty section on parse so the
+/// writer/parser pair round-trips.
+pub(super) const EMPTY_SECTION_PLACEHOLDER: &str = "_No facts distilled yet._";
+
 fn profile_dir(archive_dir: &Path) -> PathBuf {
     archive_dir.join("profile")
 }
@@ -20,7 +25,7 @@ fn profile_dir(archive_dir: &Path) -> PathBuf {
 /// The scope's directory, e.g. `<archive_dir>/profile/work/`. Runs the
 /// legacy-layout migration first (idempotent, cheap) so every read/write
 /// entry point sees the current layout regardless of call order.
-fn scope_dir(archive_dir: &Path, scope: ProfileScope) -> PathBuf {
+pub(super) fn scope_dir(archive_dir: &Path, scope: ProfileScope) -> PathBuf {
     migrate_legacy_profile_layout(archive_dir);
     profile_dir(archive_dir).join(scope.dir_name())
 }
@@ -118,7 +123,7 @@ fn build_profile_markdown(
         out.push_str(&format!("## {}\n\n", section.heading()));
         let body = sections.get(*section);
         let body = if body.is_empty() {
-            "_No facts distilled yet._"
+            EMPTY_SECTION_PLACEHOLDER
         } else {
             body
         };

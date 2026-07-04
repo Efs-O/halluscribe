@@ -54,17 +54,8 @@ fn canned_response(tool: &serde_json::Value) -> serde_json::Value {
                 "date": "2026-06-01"
             }]
         }),
-        _ => serde_json::json!({
-            "identity": "Dev.",
-            "projects": "proj [s1]",
-            "conventions": "",
-            "recurring_problems": "",
-            "communication_style": "",
-            "timeline": "",
-            // Extra field; harmless for Work scope's parse_sections (which
-            // only reads its own six keys) and required for Personal scope.
-            "personal_context": ""
-        }),
+        // Per-section merge (`save_profile_section`): one string back.
+        _ => serde_json::json!({ "content": "proj [s1]" }),
     }
 }
 
@@ -233,7 +224,7 @@ fn failed_map_batch_is_collected_as_error_not_fatal() {
 }
 
 #[test]
-fn failed_final_merge_reports_error_without_discarding_outcome() {
+fn failed_section_merge_falls_back_and_still_writes_profile() {
     let dir = tmp_dir("merge_error");
     fs::write(dir.join("s1.md"), "body one").unwrap();
     write_index(
@@ -246,7 +237,7 @@ fn failed_final_merge_reports_error_without_discarding_outcome() {
     );
     let sources = vec!["claude_code".to_string()];
     let tool_call: &ToolCallFn = &|_sys, _user, tool, _max| {
-        if tool["function"]["name"].as_str() == Some("save_user_profile") {
+        if tool["function"]["name"].as_str() == Some("save_profile_section") {
             Err(ProfileError::BadToolCall("truncated mid-JSON".to_string()))
         } else {
             Ok(canned_response(tool))
@@ -261,15 +252,26 @@ fn failed_final_merge_reports_error_without_discarding_outcome() {
         |_, _, _| {},
     )
     .unwrap();
-    // The run is reported honestly instead of aborting as "0 sessions": the
-    // map work is visible, the merge failure is an error entry, and neither
-    // the profile nor the watermark was written.
+    // The reduce no longer fails outright: the broken section keeps its raw
+    // bullet facts (warned), the profile IS written, and the map work is
+    // visible in the outcome. Every session WAS distilled, so the fallback
+    // warning must not hold the watermark back (that would re-map the whole
+    // selection on every future run just to retry one merge call).
     assert_eq!(outcome.session_count, 1);
     assert_eq!(outcome.facts_count, 1);
     assert_eq!(outcome.errors.len(), 1);
-    assert!(outcome.errors[0].contains("final merge failed"));
-    assert!(read_profile_md(&dir, ProfileScope::Work).is_none());
-    assert_eq!(load_meta(&dir, ProfileScope::Work).last_distilled_ts, "");
+    assert!(
+        outcome.errors[0].contains("merge section projects:")
+            && outcome.errors[0].contains("kept raw facts"),
+        "got: {}",
+        outcome.errors[0]
+    );
+    let profile = read_profile_md(&dir, ProfileScope::Work).unwrap();
+    assert!(profile.contains("Works on proj."));
+    assert_eq!(
+        load_meta(&dir, ProfileScope::Work).last_distilled_ts,
+        "2026-06-10T00:00:00+00:00"
+    );
 }
 
 #[test]

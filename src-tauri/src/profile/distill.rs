@@ -51,12 +51,14 @@ fn map_system_prompt(scope: ProfileScope) -> Cow<'static, str> {
 pub type ToolCallFn<'a> =
     dyn Fn(&str, &str, &Value, u32) -> Result<Value, ProfileError> + Send + Sync + 'a;
 
+/// Map one batch of sessions into candidate facts. Returns the facts plus
+/// non-fatal warnings (facts skipped for an unknown/out-of-scope section).
 pub(super) fn distill_batch(
     archive_dir: &Path,
     batch: &[&IndexEntry],
     scope: ProfileScope,
     tool_call: &ToolCallFn,
-) -> Result<Vec<ProfileFact>, ProfileError> {
+) -> Result<(Vec<ProfileFact>, Vec<String>), ProfileError> {
     let user_content = build_evidence_block(archive_dir, batch);
     let result = tool_call(
         &map_system_prompt(scope),
@@ -64,7 +66,7 @@ pub(super) fn distill_batch(
         &save_profile_facts_tool(scope),
         MAP_MAX_TOKENS,
     )?;
-    parse_facts(&result)
+    parse_facts(scope, &result)
 }
 
 fn build_evidence_block(archive_dir: &Path, batch: &[&IndexEntry]) -> String {
@@ -148,21 +150,51 @@ fn save_profile_facts_tool(scope: ProfileScope) -> Value {
     })
 }
 
-fn parse_facts(value: &Value) -> Result<Vec<ProfileFact>, ProfileError> {
+/// Resolve a model-emitted section key: exact key first, then a fixed alias
+/// table for the near-miss keys small models emit in practice.
+fn resolve_section(key: &str) -> Option<ProfileSection> {
+    ProfileSection::from_key(key).or_else(|| match key.to_lowercase().as_str() {
+        "preferences" | "convention" | "conventions_preferences" => {
+            Some(ProfileSection::Conventions)
+        }
+        "personal" | "interests" | "life_context" => Some(ProfileSection::PersonalContext),
+        "problems" | "recurring" => Some(ProfileSection::RecurringProblems),
+        "communication" | "style" => Some(ProfileSection::CommunicationStyle),
+        "project" | "active_projects" => Some(ProfileSection::Projects),
+        "context" => Some(ProfileSection::Identity),
+        "highlights" => Some(ProfileSection::Timeline),
+        _ => None,
+    })
+}
+
+/// Parse the map tool-call output tolerantly: a fact with an unknown or
+/// out-of-scope section is skipped with a warning (never fails the batch);
+/// a missing/invalid `fact` string still fails the batch, since that means
+/// the JSON itself was truncated or malformed.
+fn parse_facts(
+    scope: ProfileScope,
+    value: &Value,
+) -> Result<(Vec<ProfileFact>, Vec<String>), ProfileError> {
     let items = value["facts"]
         .as_array()
         .ok_or_else(|| ProfileError::BadToolCall("missing facts array".to_string()))?;
     let mut facts = Vec::new();
+    let mut warnings = Vec::new();
     for item in items.iter().take(MAX_FACTS_PER_BATCH) {
         let section_str = item["section"]
             .as_str()
             .ok_or_else(|| ProfileError::BadToolCall("fact missing string section".to_string()))?;
-        let section = ProfileSection::from_key(section_str)
-            .ok_or_else(|| ProfileError::BadToolCall(format!("unknown section: {section_str}")))?;
         let fact = item["fact"]
             .as_str()
             .ok_or_else(|| ProfileError::BadToolCall("fact missing string fact".to_string()))?
             .to_string();
+        let section = match resolve_section(section_str) {
+            Some(section) if scope.sections().contains(&section) => section,
+            _ => {
+                warnings.push(format!("skipped fact with unknown section '{section_str}'"));
+                continue;
+            }
+        };
         let evidence = item["evidence"]
             .as_array()
             .map(|arr| {
@@ -180,154 +212,9 @@ fn parse_facts(value: &Value) -> Result<Vec<ProfileFact>, ProfileError> {
             date,
         });
     }
-    Ok(facts)
+    Ok((facts, warnings))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    fn entry(id: &str, archive_path: &str) -> IndexEntry {
-        IndexEntry {
-            id: id.to_string(),
-            project: "proj".to_string(),
-            date: "2026-06-01".to_string(),
-            title: format!("Session {id}"),
-            tool: "Claude Code".to_string(),
-            fill_pct: 90.0,
-            session_timestamp: "2026-06-01T00:00:00+00:00".to_string(),
-            updated_at: String::new(),
-            session_type: "building".to_string(),
-            error_tags: vec!["ECONNRESET".to_string()],
-            topic_tags: vec!["rust".to_string()],
-            archive_path: archive_path.to_string(),
-            source_jsonl: String::new(),
-            source_size_bytes: 0,
-            provider: "claude_code".to_string(),
-            fill_estimated: false,
-            transcript_hash: String::new(),
-            secret_flags: Vec::new(),
-        }
-    }
-
-    fn tmp_dir(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("halluscribe_profile_distill_{name}"));
-        let _ = fs::remove_dir_all(&d);
-        fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    fn ok_facts_response(section: &str) -> Value {
-        serde_json::json!({
-            "facts": [
-                {
-                    "section": section,
-                    "fact": "Uses Rust and Tauri.",
-                    "evidence": ["s1"],
-                    "date": "2026-06-01"
-                }
-            ]
-        })
-    }
-
-    #[test]
-    fn distill_batch_parses_facts_from_fake_tool_call() {
-        let dir = tmp_dir("basic");
-        fs::write(dir.join("s1.md"), "session body").unwrap();
-        let e = entry("s1", "s1.md");
-        let batch = vec![&e];
-        let tool_call: &ToolCallFn =
-            &|_sys, _user, _tool, _max| Ok(ok_facts_response("conventions"));
-        let facts = distill_batch(&dir, &batch, ProfileScope::Work, tool_call).unwrap();
-        assert_eq!(facts.len(), 1);
-        assert_eq!(facts[0].section, ProfileSection::Conventions);
-        assert_eq!(facts[0].evidence, vec!["s1".to_string()]);
-    }
-
-    #[test]
-    fn distill_batch_surfaces_malformed_tool_call_as_error() {
-        let dir = tmp_dir("bad_json");
-        fs::write(dir.join("s1.md"), "body one").unwrap();
-        let e = entry("s1", "s1.md");
-        let batch = vec![&e];
-        let tool_call: &ToolCallFn =
-            &|_sys, _user, _tool, _max| Ok(serde_json::json!({"not_facts": true}));
-        let error = distill_batch(&dir, &batch, ProfileScope::Work, tool_call).unwrap_err();
-        assert!(error.to_string().contains("missing facts array"));
-    }
-
-    #[test]
-    fn parse_facts_rejects_unknown_section() {
-        let value = ok_facts_response("not_a_real_section");
-        let error = parse_facts(&value).unwrap_err();
-        assert!(matches!(error, ProfileError::BadToolCall(_)));
-    }
-
-    #[test]
-    fn truncate_chars_is_multibyte_safe() {
-        let text = "café".repeat(1000); // multi-byte 'é' repeated well past the limit
-        let truncated = truncate_chars(&text, 10);
-        assert_eq!(truncated.chars().count(), 10);
-        // Must still be valid UTF-8 (guaranteed by String) and start correctly.
-        assert!(truncated.starts_with("café"));
-    }
-
-    #[test]
-    fn build_evidence_entry_truncates_long_bodies() {
-        let dir = tmp_dir("truncate");
-        let long_body = "x".repeat(5000);
-        fs::write(dir.join("s1.md"), &long_body).unwrap();
-        let e = entry("s1", "s1.md");
-        let block = build_evidence_entry(&dir, &e);
-        // Body section should contain at most BODY_TRUNCATE_CHARS x's, not 5000.
-        let body_start = block.find("Body:\n").unwrap() + "Body:\n".len();
-        assert_eq!(block[body_start..].chars().count(), BODY_TRUNCATE_CHARS);
-    }
-
-    #[test]
-    fn build_evidence_entry_includes_metadata() {
-        let dir = tmp_dir("metadata");
-        fs::write(dir.join("s1.md"), "hello").unwrap();
-        let e = entry("s1", "s1.md");
-        let block = build_evidence_entry(&dir, &e);
-        assert!(block.contains("Session id: s1"));
-        assert!(block.contains("Project: proj"));
-        assert!(block.contains("ECONNRESET"));
-        assert!(block.contains("rust"));
-    }
-
-    #[test]
-    fn work_map_prompt_is_byte_identical_to_original() {
-        assert_eq!(map_system_prompt(ProfileScope::Work), MAP_SYSTEM_PROMPT);
-    }
-
-    #[test]
-    fn personal_map_prompt_adds_personal_context_instruction() {
-        let prompt = map_system_prompt(ProfileScope::Personal);
-        assert!(prompt.starts_with(MAP_SYSTEM_PROMPT));
-        assert!(prompt.contains("personal_context"));
-    }
-
-    #[test]
-    fn work_tool_schema_excludes_personal_context_section() {
-        let tool = save_profile_facts_tool(ProfileScope::Work);
-        let enum_values = tool["function"]["parameters"]["properties"]["facts"]["items"]
-            ["properties"]["section"]["enum"]
-            .as_array()
-            .unwrap();
-        assert_eq!(enum_values.len(), 6);
-        assert!(!enum_values.iter().any(|v| v == "personal_context"));
-    }
-
-    #[test]
-    fn personal_tool_schema_includes_personal_context_section() {
-        let tool = save_profile_facts_tool(ProfileScope::Personal);
-        let enum_values = tool["function"]["parameters"]["properties"]["facts"]["items"]
-            ["properties"]["section"]["enum"]
-            .as_array()
-            .unwrap();
-        assert_eq!(enum_values.len(), 7);
-        assert!(enum_values.iter().any(|v| v == "personal_context"));
-    }
-}
+#[path = "distill_tests.rs"]
+mod tests;

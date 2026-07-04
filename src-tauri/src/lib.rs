@@ -33,7 +33,9 @@ use commands::{
     save_settings, search_sessions, search_sessions_fulltext, search_sessions_semantic,
     send_chat_message, trigger_sweep, validate_ollama_api_key,
 };
-use commands_profile::{get_latest_digest, get_profile, run_profile_refresh};
+use commands_profile::{
+    get_latest_digest, get_profile, get_profile_refresh_status, run_profile_refresh,
+};
 use std::sync::{atomic::AtomicBool, Arc};
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem};
@@ -235,6 +237,7 @@ pub fn run() {
             run_profile_refresh,
             get_profile,
             get_latest_digest,
+            get_profile_refresh_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

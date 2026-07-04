@@ -21,6 +21,9 @@
   let running = $derived(busyScope !== null);
   // Progress only renders for the scope currently being viewed.
   let progress = $state<ProfileProgressPayload | null>(null);
+  // Label shown in the progress area before the first profile-progress event
+  // arrives (fresh start vs. remounting into an already-running refresh).
+  let progressPlaceholder = $state("Starting…");
   let resultNote = $state<string | null>(null);
   let resultIsError = $state(false);
   let confirmingFullRebuild = $state(false);
@@ -57,6 +60,7 @@
     confirmingFullRebuild = false;
     busyScope = scope;
     progress = null;
+    progressPlaceholder = "Starting…";
     resultNote = null;
     resultIsError = false;
     try {
@@ -107,6 +111,19 @@
         void loadProfile();
       }),
     );
+
+    // The refresh runs in a detached thread and this component is destroyed
+    // on tab switch: ask the backend whether a run is still in flight so the
+    // remounted panel shows the busy state instead of looking idle.
+    try {
+      const refreshing = await invoke<ProfileScope | null>("get_profile_refresh_status");
+      if (refreshing !== null) {
+        busyScope = refreshing;
+        progressPlaceholder = "Refresh in progress…";
+      }
+    } catch {
+      // Status probe is best-effort; the profile-progress events still arrive.
+    }
   });
 
   onDestroy(() => {
@@ -147,7 +164,7 @@
           style="width: {progress && progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%"
         ></div>
       </div>
-      <span class="progress-label">{progress ? stageLabel(progress) : "Starting…"}</span>
+      <span class="progress-label">{progress ? stageLabel(progress) : progressPlaceholder}</span>
     </div>
   {/if}
 
