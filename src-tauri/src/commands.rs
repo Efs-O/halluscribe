@@ -430,8 +430,14 @@ pub(crate) fn send_chat_message(
     web_search_enabled: bool,
     thinking_enabled: bool,
     search_mode: Option<ChatSearchMode>,
+    profile_scope: Option<String>,
 ) -> Result<(), String> {
     let dir = archive_dir(&app)?;
+    let profile_scope = match profile_scope.as_deref() {
+        None => profile::ProfileScope::Work,
+        Some(key) => profile::ProfileScope::from_key(key)
+            .ok_or_else(|| format!("unknown profile scope: {key}"))?,
+    };
     let settings = settings::load_settings(&dir);
     let has_images = messages.iter().any(|message| {
         message
@@ -501,9 +507,9 @@ pub(crate) fn send_chat_message(
     let tavily_api_key = settings.tavily_api_key.trim().to_string();
     let web_search_available =
         web_search_enabled && (!ollama_api_key.is_empty() || !tavily_api_key.is_empty());
-    // Chat shares the Work profile by default (Phase 2c sharing rule):
-    // Personal is for the user's own companion-agent use, not the coding chat.
-    let user_profile = profile::read_profile_md(&dir, profile::ProfileScope::Work);
+    // Chat uses the Work profile unless the UI toggle selects Personal
+    // (Phase 2c sharing rule: Work is the default sharing scope).
+    let user_profile = profile::read_profile_md(&dir, profile_scope);
     let mut final_messages = vec![serde_json::json!({
         "role": "system",
         "content": build_chat_system_prompt(&ChatPromptContext {
@@ -518,6 +524,7 @@ pub(crate) fn send_chat_message(
                 briefing::tools::ChatScope::ArchiveWide => None,
             },
             profile: user_profile,
+            profile_scope,
         })
     })];
     final_messages.extend(json_messages);

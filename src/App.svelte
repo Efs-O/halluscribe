@@ -26,6 +26,7 @@
     BriefingScope,
     ChatScope,
     ChatSearchMode,
+    ProfileScope,
     SweepProgress,
     HalluScribeSettings,
     WebSearchStatus,
@@ -44,6 +45,7 @@
   let briefingScope = $state<BriefingScope>({ kind: "archive-wide" });
   let chatScope = $state<ChatScope>({ kind: "archive-wide" });
   let chatSearchMode = $state<ChatSearchMode>("archive");
+  let chatProfileScope = $state<ProfileScope>("work");
   let turns = $state<Turn[]>([]);
   let ctxUsedPct = $state(0);
   let chatStreaming = $state(false);
@@ -360,6 +362,7 @@
         webSearchEnabled: webSearchEnabled && webSearchStatus() === "ready",
         thinkingEnabled,
         searchMode: chatSearchMode,
+        profileScope: chatProfileScope,
       });
     } catch (e) {
       const last = turns[turns.length - 1];
@@ -507,6 +510,7 @@
         selectedScopeActive={briefingScope.kind === "selected-session-ids"}
         chatScopeKind={chatScope.kind}
         {chatSearchMode}
+        {chatProfileScope}
         {turns}
         {chatStreaming}
         {webSearchEnabled}
@@ -554,6 +558,9 @@
           const cleared = await clearChat("search-mode-change");
           if (!cleared) return;
           chatSearchMode = mode;
+        }}
+        onSelectProfileScope={(scope) => {
+          chatProfileScope = scope;
         }}
         onClearScope={clearSelectedScope}
       />

@@ -8,6 +8,7 @@ fn base_context() -> ChatPromptContext {
         search_mode: SearchModePrompt::Archive,
         scope_size: None,
         profile: None,
+        profile_scope: ProfileScope::Work,
     }
 }
 
@@ -33,6 +34,7 @@ fn semantic_prompt_preserves_precision_rule() {
         search_mode: SearchModePrompt::Semantic,
         scope_size: Some(5),
         profile: None,
+        profile_scope: ProfileScope::Work,
     });
     assert!(prompt.contains("do not rewrite that as a full fix"));
     assert!(prompt.contains("semantically relevant sessions"));
@@ -55,7 +57,40 @@ fn profile_present_includes_markers_and_content() {
 #[test]
 fn profile_absent_states_unavailable_without_markers() {
     let prompt = build_chat_system_prompt(&base_context());
-    assert!(prompt.contains("No distilled user profile is available."));
+    assert!(
+        prompt.contains("No distilled user profile is available for the selected scope (work).")
+    );
+    assert!(!prompt.contains("--- BEGIN USER PROFILE ---"));
+}
+
+#[test]
+fn work_profile_is_labelled_as_work() {
+    let prompt = build_chat_system_prompt(&ChatPromptContext {
+        profile: Some("Works mostly in Rust.".to_string()),
+        profile_scope: ProfileScope::Work,
+        ..base_context()
+    });
+    assert!(prompt.contains("the user's work profile"));
+}
+
+#[test]
+fn personal_profile_is_labelled_as_personal() {
+    let prompt = build_chat_system_prompt(&ChatPromptContext {
+        profile: Some("Enjoys hiking.".to_string()),
+        profile_scope: ProfileScope::Personal,
+        ..base_context()
+    });
+    assert!(prompt.contains("the user's personal profile"));
+}
+
+#[test]
+fn absent_personal_profile_names_the_scope() {
+    let prompt = build_chat_system_prompt(&ChatPromptContext {
+        profile_scope: ProfileScope::Personal,
+        ..base_context()
+    });
+    assert!(prompt
+        .contains("No distilled user profile is available for the selected scope (personal)."));
     assert!(!prompt.contains("--- BEGIN USER PROFILE ---"));
 }
 

@@ -8,6 +8,7 @@
     BriefingFilters,
     ChatScope,
     ChatSearchMode,
+    ProfileScope,
     WebSearchStatus,
   } from "../../lib/types";
   import BriefingFiltersBar from "./BriefingFiltersBar.svelte";
@@ -25,6 +26,7 @@
     selectedScopeActive: boolean;
     chatScopeKind: ChatScope["kind"];
     chatSearchMode: ChatSearchMode;
+    chatProfileScope: ProfileScope;
     turns: Turn[];
     ctxUsedPct: number;
     chatStreaming: boolean;
@@ -45,6 +47,7 @@
     onToggleThinking: () => void;
     onSetChatScope: (kind: ChatScope["kind"]) => void | Promise<unknown>;
     onSetChatSearchMode: (mode: ChatSearchMode) => void | Promise<unknown>;
+    onSelectProfileScope: (scope: ProfileScope) => void | Promise<unknown>;
     onClearScope: () => void | Promise<unknown>;
     imageAttachEnabled: boolean;
   }
@@ -59,6 +62,7 @@
     selectedScopeActive,
     chatScopeKind,
     chatSearchMode,
+    chatProfileScope,
     turns,
     ctxUsedPct,
     chatStreaming,
@@ -79,6 +83,7 @@
     onToggleThinking,
     onSetChatScope,
     onSetChatSearchMode,
+    onSelectProfileScope,
     onClearScope,
     imageAttachEnabled,
   }: Props = $props();
@@ -209,6 +214,26 @@
             disabled={chatStreaming}
           >
             semantic chat search
+          </button>
+        </div>
+        <div class="search-mode-group">
+          <button
+            class="scope-btn"
+            class:active={chatProfileScope === "work"}
+            onclick={() => onSelectProfileScope("work")}
+            title="Chat uses the distilled WORK profile as background context."
+            disabled={chatStreaming}
+          >
+            work profile
+          </button>
+          <button
+            class="scope-btn"
+            class:active={chatProfileScope === "personal"}
+            onclick={() => onSelectProfileScope("personal")}
+            title="Chat uses the distilled PERSONAL profile as background context."
+            disabled={chatStreaming}
+          >
+            personal profile
           </button>
         </div>
         <div class="chat-actions">
