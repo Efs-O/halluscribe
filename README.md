@@ -96,17 +96,52 @@ It is **strictly read-only** — four tools, no write/redact/delete surface:
 
 The Personal profile scope is never exposed over MCP — only Work, by design.
 
-Register it with a client:
+### Registering with Claude Code
+
+`claude mcp add` defaults to **local scope** — the server is only available in the project directory where you ran the command. To make it permanently available in every Claude Code session on your machine, use user scope:
 
 ```bash
-claude mcp add halluscribe -- /path/to/halluscribe-mcp
+claude mcp add --scope user halluscribe -- /path/to/halluscribe-mcp
 ```
+
+| Scope | Who gets it |
+|---|---|
+| `--scope local` (default) | Only you, only the project directory where you ran the command |
+| `--scope user` | Only you, **all projects and sessions, permanently** — the usual choice |
+| `--scope project` | Writes `.mcp.json` into the repo, shared with everyone who clones it |
+
+Verify with `claude mcp list`; remove with `claude mcp remove halluscribe`.
+
+### Registering with other MCP clients
+
+Any MCP client works — each has its own config file, but they all declare the same thing: run this executable, talk stdio.
+
+**Codex** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.halluscribe]
+command = "/path/to/halluscribe-mcp"
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{ "mcpServers": { "halluscribe": { "command": "/path/to/halluscribe-mcp" } } }
+```
+
+**Cursor / Continue / others** — same pattern in their respective `mcp.json`/config files.
+
+**Your own scripts and local agents** — no MCP library required: spawn the binary as a subprocess and write JSON-RPC lines to its stdin (`initialize` → `notifications/initialized` → `tools/call`). It's just a program that reads requests and prints answers — no ports, no daemon.
+
+### Archive location
 
 By default it reads `~/.halluscribe`. Point it at a different archive with the `HALLUSCRIBE_DIR` environment variable:
 
 ```bash
-HALLUSCRIBE_DIR=/path/to/archive claude mcp add halluscribe -- /path/to/halluscribe-mcp
+HALLUSCRIBE_DIR=/path/to/archive /path/to/halluscribe-mcp
 ```
+
+> **Tip:** if you build from source, the binary lands in `src-tauri/target/release/`, where a later `cargo clean` will delete it — silently breaking every client registered against that path. Copy it to a stable location first and register that copy.
 
 ---
 
