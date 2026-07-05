@@ -35,12 +35,22 @@ pub(crate) struct ChatMessage {
     pub images: Option<Vec<ChatImage>>,
 }
 
-/// Resolve the archive root: ~/.halluscribe
-pub(crate) fn archive_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+/// Absolute path to the DEFAULT archive root (`<home>/.halluscribe`). The
+/// workspace registry and host-global markers always live here, regardless of
+/// which workspace is active.
+pub(crate) fn default_archive_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .home_dir()
         .map(|home| home.join(".halluscribe"))
         .map_err(|error| error.to_string())
+}
+
+/// Resolve the archive root: the active workspace root, or the default root when
+/// no workspace is active (full back-compat). All archive reads/writes key off
+/// this one chokepoint.
+pub(crate) fn archive_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let default_root = default_archive_dir(app)?;
+    Ok(crate::workspace::resolve_active_dir(&default_root))
 }
 
 /// Build a SweepConfig from saved settings. Returns None if the backend config

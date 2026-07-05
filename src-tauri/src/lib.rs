@@ -25,6 +25,7 @@ pub mod scanner;
 pub mod scheduler;
 pub mod search;
 pub mod settings;
+pub mod workspace;
 
 use app_state::{BriefingCancel, ChatCancel, SweepCancel};
 use app_support::{archive_dir, clear_first_run, record_sweep_date, sweep_config};
