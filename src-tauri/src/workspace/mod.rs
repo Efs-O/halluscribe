@@ -27,6 +27,11 @@ pub struct WorkspaceRegistry {
     pub active: Option<PathBuf>,
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
+    /// Display label for the default (host) root. Purely cosmetic — the default
+    /// always resolves by path (`<home>/.halluscribe`), so renaming it never
+    /// touches the archive and never triggers a rebuild. `None` => "Default".
+    #[serde(default)]
+    pub default_name: Option<String>,
 }
 
 /// `<default_root>/workspaces.json` — always in the default root.
@@ -85,6 +90,32 @@ pub fn set_active(reg: &mut WorkspaceRegistry, active: Option<PathBuf>) -> Resul
     }
     reg.active = active;
     Ok(())
+}
+
+/// Remove a registered workspace, found by `path`. If it was the active one, the
+/// active pointer resets to `None` (the default root) so the caller never ends up
+/// pointing at a workspace that no longer exists in the registry. Only the
+/// registry entry is dropped here — the archive folder on disk is left untouched.
+pub fn remove_workspace(reg: &mut WorkspaceRegistry, path: &Path) -> Result<(), String> {
+    let before = reg.workspaces.len();
+    reg.workspaces.retain(|ws| ws.path != path);
+    if reg.workspaces.len() == before {
+        return Err("no workspace registered at that path".to_string());
+    }
+    if reg.active.as_deref() == Some(path) {
+        reg.active = None;
+    }
+    Ok(())
+}
+
+/// Set (or clear, with an empty string) the default root's display label.
+pub fn set_default_name(reg: &mut WorkspaceRegistry, name: &str) {
+    let trimmed = name.trim();
+    reg.default_name = if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    };
 }
 
 /// Rename a registered workspace, found by `path`.
@@ -154,6 +185,7 @@ mod tests {
         let registry = WorkspaceRegistry {
             active: Some(active.clone()),
             workspaces: vec![],
+            ..Default::default()
         };
         save_registry(&root, &registry).unwrap();
         assert_eq!(resolve_active_dir(&root), active);
@@ -166,6 +198,7 @@ mod tests {
         let registry = WorkspaceRegistry {
             active: Some(missing),
             workspaces: vec![],
+            ..Default::default()
         };
         save_registry(&root, &registry).unwrap();
         assert_eq!(resolve_active_dir(&root), root);
@@ -182,6 +215,7 @@ mod tests {
                 path: active.clone(),
                 import_only: true,
             }],
+            ..Default::default()
         };
         save_registry(&root, &registry).unwrap();
         let loaded = load_registry(&root);
@@ -273,6 +307,42 @@ mod tests {
         set_import_only(&mut reg, Path::new("/ws/a"), true).unwrap();
         // The default root (unregistered) is never import-only.
         assert!(!is_import_only(&reg, Path::new("/default/root")));
+    }
+
+    #[test]
+    fn remove_workspace_drops_entry_and_errors_when_absent() {
+        let mut reg = WorkspaceRegistry::default();
+        add_workspace(&mut reg, sample_ws("A", "/ws/a")).unwrap();
+        add_workspace(&mut reg, sample_ws("B", "/ws/b")).unwrap();
+
+        remove_workspace(&mut reg, Path::new("/ws/a")).unwrap();
+        assert_eq!(reg.workspaces.len(), 1);
+        assert_eq!(reg.workspaces[0].path, PathBuf::from("/ws/b"));
+
+        let err = remove_workspace(&mut reg, Path::new("/ws/missing")).unwrap_err();
+        assert_eq!(err, "no workspace registered at that path");
+    }
+
+    #[test]
+    fn remove_workspace_resets_active_when_removing_active() {
+        let mut reg = WorkspaceRegistry::default();
+        add_workspace(&mut reg, sample_ws("A", "/ws/a")).unwrap();
+        set_active(&mut reg, Some(PathBuf::from("/ws/a"))).unwrap();
+
+        remove_workspace(&mut reg, Path::new("/ws/a")).unwrap();
+        assert!(reg.active.is_none());
+    }
+
+    #[test]
+    fn set_default_name_sets_and_clears() {
+        let mut reg = WorkspaceRegistry::default();
+        assert!(reg.default_name.is_none());
+
+        set_default_name(&mut reg, "  EFSO  ");
+        assert_eq!(reg.default_name.as_deref(), Some("EFSO"));
+
+        set_default_name(&mut reg, "   ");
+        assert!(reg.default_name.is_none());
     }
 
     #[test]

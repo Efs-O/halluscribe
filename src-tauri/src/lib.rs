@@ -43,8 +43,8 @@ use commands_profile::{
     get_profile_refresh_status, run_profile_refresh,
 };
 use commands_workspace::{
-    create_workspace, list_workspaces, rename_workspace, set_workspace_import_only,
-    switch_workspace,
+    create_workspace, delete_workspace, list_workspaces, rename_default_workspace,
+    rename_workspace, set_workspace_import_only, switch_workspace,
 };
 use std::sync::{atomic::AtomicBool, Arc};
 use tauri::image::Image;
@@ -255,6 +255,8 @@ pub fn run() {
             create_workspace,
             switch_workspace,
             rename_workspace,
+            rename_default_workspace,
+            delete_workspace,
             set_workspace_import_only,
         ])
         .build(tauri::generate_context!())

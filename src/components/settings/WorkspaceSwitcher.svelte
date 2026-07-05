@@ -11,6 +11,10 @@
 
   // Rename inputs, keyed by workspace path.
   let renameInputs = $state<Record<string, string>>({});
+  // Editable display label for the default (host) root.
+  let defaultNameInput = $state("");
+  // Path of the guest row currently awaiting delete confirmation, or null.
+  let confirmingDelete = $state<string | null>(null);
 
   // Create-form fields.
   let newName = $state("");
@@ -27,6 +31,7 @@
       const seeded: Record<string, string> = {};
       for (const w of list.workspaces) seeded[w.path] = w.name;
       renameInputs = seeded;
+      defaultNameInput = list.default_name ?? "";
     } catch (e) {
       setError(String(e));
     }
@@ -82,6 +87,48 @@
     }
   }
 
+  async function saveDefaultName() {
+    if (busy) return;
+    const name = defaultNameInput.trim();
+    if (!name) {
+      setError("Default workspace name cannot be empty.");
+      return;
+    }
+    busy = true;
+    try {
+      await invoke("rename_default_workspace", { name });
+      setInfo("Default workspace renamed.");
+      await loadList();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Un-registers a guest workspace; its archive folder on disk is left intact.
+  // If the deleted workspace was active, the backend falls back to the default
+  // root, so we reload the page to re-point every panel cleanly.
+  async function deleteWorkspace(w: WorkspaceInfo) {
+    if (busy) return;
+    busy = true;
+    const wasActive = isActive(w.path);
+    try {
+      await invoke("delete_workspace", { path: w.path });
+      confirmingDelete = null;
+      if (wasActive) {
+        window.location.reload();
+        return;
+      }
+      setInfo("Workspace removed from the list. Its folder on disk was kept.");
+      await loadList();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      busy = false;
+    }
+  }
+
   async function toggleImportOnly(w: WorkspaceInfo, importOnly: boolean) {
     if (busy) return;
     busy = true;
@@ -123,9 +170,6 @@
     }
   }
 
-  function defaultLabel(root: string): string {
-    return `Default (${root})`;
-  }
 </script>
 
 <section>
@@ -138,7 +182,7 @@
       <!-- Default root row -->
       <div class="ws-row">
         <div class="ws-head">
-          <span class="ws-name">{defaultLabel(list.default_root)}</span>
+          <span class="ws-name">{list.default_name?.trim() || "Default"} <span class="ws-tag">host</span></span>
           {#if isActive(null)}
             <span class="ws-active">● active</span>
           {:else}
@@ -148,6 +192,22 @@
           {/if}
         </div>
         <p class="field-note ws-path">{list.default_root}</p>
+
+        <div class="ws-inline">
+          <input
+            type="text"
+            bind:value={defaultNameInput}
+            placeholder="Name this workspace (e.g. EFSO)"
+            aria-label="Rename default workspace"
+          />
+          <button class="action-btn" type="button" onclick={saveDefaultName} disabled={busy}>
+            Save
+          </button>
+        </div>
+        <p class="field-note">
+          Display label only — renaming never touches the archive or forces a rebuild. This is the
+          host workspace and cannot be deleted.
+        </p>
       </div>
 
       {#each list.workspaces as w (w.path)}
@@ -194,6 +254,39 @@
             Guest workspace — the sweep ingests only this workspace's chat imports, never the host
             machine's local coding-tool logs.
           </p>
+
+          <div class="ws-delete">
+            {#if confirmingDelete === w.path}
+              <span class="ws-confirm-text">
+                Remove "{w.name}" from the list? Its folder on disk is kept.
+              </span>
+              <button
+                class="action-btn action-btn-danger"
+                type="button"
+                onclick={() => deleteWorkspace(w)}
+                disabled={busy}
+              >
+                Remove
+              </button>
+              <button
+                class="action-btn"
+                type="button"
+                onclick={() => (confirmingDelete = null)}
+                disabled={busy}
+              >
+                Cancel
+              </button>
+            {:else}
+              <button
+                class="action-btn action-btn-danger"
+                type="button"
+                onclick={() => (confirmingDelete = w.path)}
+                disabled={busy}
+              >
+                Delete workspace
+              </button>
+            {/if}
+          </div>
         </div>
       {/each}
     </div>
@@ -271,8 +364,32 @@
   }
 
   .ws-name { font-size: 14px; color: var(--text); }
+  .ws-tag {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 4px;
+    vertical-align: middle;
+  }
   .ws-active { font-size: 12px; color: var(--green); letter-spacing: 0.06em; }
   .ws-path { word-break: break-all; }
+
+  .ws-delete {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .ws-confirm-text { font-size: 12px; color: var(--amber); }
+  .action-btn-danger:hover:not(:disabled) {
+    border-color: var(--red);
+    color: var(--red);
+  }
 
   .ws-inline { display: flex; gap: 8px; align-items: center; }
   .ws-inline input[type="text"] {

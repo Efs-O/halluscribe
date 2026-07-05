@@ -41,6 +41,9 @@
   let exporting = $state(false);
   let exportNote = $state<string | null>(null);
   let exportIsError = $state(false);
+  // The export options live in a popover anchored to the Export Pack button, so
+  // the "incl. raw" choice only appears when the user is actually exporting.
+  let exportOpen = $state(false);
 
   let unlistenFns: UnlistenFn[] = [];
 
@@ -68,6 +71,7 @@
     resultIsError = false;
     confirmingFullRebuild = false;
     digestOpen = false;
+    exportOpen = false;
     exportNote = null;
     exportIsError = false;
     void loadProfile();
@@ -93,6 +97,7 @@
       exportIsError = true;
     } finally {
       exporting = false;
+      exportOpen = false;
     }
   }
 
@@ -196,19 +201,33 @@
       {/if}
       {#if profile}
         <span class="action-divider" aria-hidden="true"></span>
-        <label
-          class="raw-toggle"
-          class:disabled={rawAvailable === 0}
-          title={rawAvailable === 0
-            ? "No raw transcripts preserved yet — raw copies are captured only on new sweeps."
-            : "Raw transcripts are the un-redacted source — only include when you trust the recipient."}
-        >
-          <input type="checkbox" bind:checked={includeRaw} disabled={exporting || rawAvailable === 0} />
-          <span>incl. raw ({rawAvailable} available)</span>
-        </label>
-        <button class="btn" onclick={exportPack} disabled={exporting || running} title="Export this profile + archive as a shareable Persona Pack zip">
-          {exporting ? "Exporting…" : "Export Pack"}
-        </button>
+        <div class="export-wrap">
+          <button
+            class="btn"
+            onclick={() => (exportOpen = !exportOpen)}
+            disabled={exporting || running}
+            title="Export this profile + archive as a shareable Persona Pack zip"
+          >
+            {exporting ? "Exporting…" : "Export Pack ▾"}
+          </button>
+          {#if exportOpen}
+            <div class="export-popover">
+              <label
+                class="raw-toggle"
+                class:disabled={rawAvailable === 0}
+                title={rawAvailable === 0
+                  ? "No raw transcripts preserved yet — raw copies are captured only on new sweeps."
+                  : "Raw transcripts are the un-redacted source — only include when you trust the recipient."}
+              >
+                <input type="checkbox" bind:checked={includeRaw} disabled={exporting || rawAvailable === 0} />
+                <span>incl. raw ({rawAvailable} available)</span>
+              </label>
+              <button class="btn-primary" onclick={exportPack} disabled={exporting}>
+                {exporting ? "Exporting…" : "Export"}
+              </button>
+            </div>
+          {/if}
+        </div>
       {/if}
     </div>
   </div>
@@ -316,6 +335,32 @@
     background: var(--border);
     margin: 0 4px;
     flex-shrink: 0;
+  }
+
+  .export-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .export-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+    min-width: 200px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  }
+
+  .export-popover .btn-primary {
+    align-self: flex-end;
   }
 
   .raw-toggle {

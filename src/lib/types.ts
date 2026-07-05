@@ -226,6 +226,7 @@ export interface WorkspaceInfo {
 /** Snapshot returned by list_workspaces. `active` is null when the default root is active. */
 export interface WorkspaceListDto {
   default_root: string;
+  default_name: string | null;
   active: string | null;
   workspaces: WorkspaceInfo[];
 }

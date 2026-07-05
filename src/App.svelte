@@ -7,6 +7,7 @@
   import { open } from "@tauri-apps/plugin-shell";
   import { onMount } from "svelte";
   import NavBar from "./components/NavBar.svelte";
+  import WorkspaceBadge from "./components/WorkspaceBadge.svelte";
   import RunNowButton from "./components/RunNowButton.svelte";
   import BriefingPanel from "./components/briefing/BriefingPanel.svelte";
   import SessionList from "./components/sessions/SessionList.svelte";
@@ -479,6 +480,7 @@
     <button class="brand" onclick={() => open("https://x.com/amandoulou")} title="@amandoulou on X">HALLUSCRIBE</button>
     <NavBar active={activeTab} onchange={(tab) => { activeTab = tab; }} />
     <div class="top-bar-actions">
+      <WorkspaceBadge />
       {#if activeTab === "sessions"}
         <RunNowButton
           running={sweepRunning}

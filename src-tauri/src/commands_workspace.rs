@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 pub struct WorkspaceListDto {
     /// Absolute path of the default archive root (`<home>/.halluscribe`).
     pub default_root: String,
+    /// Display label for the default root, or `None` when unset (UI shows "Default").
+    pub default_name: Option<String>,
     /// Active workspace path, or `None` when the default root is active.
     pub active: Option<String>,
     pub workspaces: Vec<Workspace>,
@@ -25,6 +27,7 @@ pub(crate) fn list_workspaces(app: tauri::AppHandle) -> Result<WorkspaceListDto,
     let reg = workspace::load_registry(&default_root);
     Ok(WorkspaceListDto {
         default_root: default_root.to_string_lossy().into_owned(),
+        default_name: reg.default_name,
         active: reg.active.map(|p| p.to_string_lossy().into_owned()),
         workspaces: reg.workspaces,
     })
@@ -106,6 +109,33 @@ pub(crate) fn rename_workspace(
     let default_root = default_archive_dir(&app)?;
     let mut reg = workspace::load_registry(&default_root);
     workspace::rename(&mut reg, Path::new(path.trim()), name)?;
+    workspace::save_registry(&default_root, &reg)?;
+    Ok(())
+}
+
+/// Rename the default (host) root. This is a cosmetic label only — the default
+/// always resolves by path, so this never touches the archive or forces a rebuild.
+#[tauri::command]
+pub(crate) fn rename_default_workspace(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("workspace name is required".to_string());
+    }
+    let default_root = default_archive_dir(&app)?;
+    let mut reg = workspace::load_registry(&default_root);
+    workspace::set_default_name(&mut reg, name);
+    workspace::save_registry(&default_root, &reg)?;
+    Ok(())
+}
+
+/// Un-register a workspace (guest only). Drops the registry entry and, if it was
+/// active, falls back to the default root. The archive folder on disk is NOT
+/// deleted — the person's data is preserved and the folder can be re-added later.
+#[tauri::command]
+pub(crate) fn delete_workspace(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let default_root = default_archive_dir(&app)?;
+    let mut reg = workspace::load_registry(&default_root);
+    workspace::remove_workspace(&mut reg, Path::new(path.trim()))?;
     workspace::save_registry(&default_root, &reg)?;
     Ok(())
 }
