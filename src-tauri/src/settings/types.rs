@@ -89,6 +89,12 @@ pub struct HalluScribeSettings {
     /// are never redacted (they are the untouched source) and are excluded from
     /// Persona Pack exports unless explicitly opted in per-export.
     pub preserve_raw_transcripts: bool,
+    /// Absolute path to the piper TTS binary. Empty = auto-search
+    /// `~/.halluscribe/tts/piper`.
+    pub tts_piper_bin: String,
+    /// Bare name (file stem, not full path) of the selected voice in
+    /// `~/.halluscribe/tts/voices`. Empty = no voice selected.
+    pub tts_voice: String,
 }
 
 fn default_profile_sources() -> Vec<String> {
@@ -143,6 +149,8 @@ impl Default for HalluScribeSettings {
             briefing_window_hours: 2,
             profile_sources: default_profile_sources(),
             preserve_raw_transcripts: true,
+            tts_piper_bin: String::new(),
+            tts_voice: String::new(),
         }
     }
 }

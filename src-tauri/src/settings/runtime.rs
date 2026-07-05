@@ -26,6 +26,11 @@ impl HalluScribeSettings {
             ctx_size: self.ctx_size,
             max_tokens: self.max_tokens,
             idle_threshold_mins: self.idle_threshold_mins,
+            // TTS install + voice are host-global (piper/voices live under the
+            // default archive root, shared across workspaces), so inherit them
+            // like the model config - a new guest gets a working Speak button.
+            tts_piper_bin: self.tts_piper_bin.clone(),
+            tts_voice: self.tts_voice.clone(),
             ..HalluScribeSettings::default()
         }
     }
@@ -109,6 +114,8 @@ mod tests {
             first_run: false,
             chatgpt_import_path: "X".to_string(),
             preserve_raw_transcripts: false,
+            tts_piper_bin: "/tools/piper/piper".to_string(),
+            tts_voice: "el_GR-joy-medium".to_string(),
             ..Default::default()
         };
         let seeded = host.seed_workspace_settings();
@@ -120,6 +127,9 @@ mod tests {
         assert_eq!(seeded.gpu_layers, 20);
         assert_eq!(seeded.ctx_size, 1000);
         assert_eq!(seeded.max_tokens, 500);
+        // TTS install + voice are host-global, inherited like the model config.
+        assert_eq!(seeded.tts_piper_bin, "/tools/piper/piper");
+        assert_eq!(seeded.tts_voice, "el_GR-joy-medium");
 
         // Archive-level fields are reset to defaults.
         assert!(seeded.first_run);
@@ -129,5 +139,22 @@ mod tests {
             seeded.profile_sources,
             HalluScribeSettings::default().profile_sources
         );
+    }
+
+    #[test]
+    fn tts_fields_default_to_empty_and_round_trip_through_serde() {
+        let defaults = HalluScribeSettings::default();
+        assert_eq!(defaults.tts_piper_bin, "");
+        assert_eq!(defaults.tts_voice, "");
+
+        let settings = HalluScribeSettings {
+            tts_piper_bin: "C:/tools/piper/piper.exe".to_string(),
+            tts_voice: "el_GR-joy-medium".to_string(),
+            ..HalluScribeSettings::default()
+        };
+        let json = serde_json::to_string(&settings).expect("serialize");
+        let round_tripped: HalluScribeSettings = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(round_tripped.tts_piper_bin, "C:/tools/piper/piper.exe");
+        assert_eq!(round_tripped.tts_voice, "el_GR-joy-medium");
     }
 }

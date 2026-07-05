@@ -6,11 +6,13 @@ mod app_support;
 mod chat_prompt;
 mod commands;
 mod commands_profile;
+mod commands_tts;
 mod commands_workspace;
 mod infer_lock;
 mod llama_pids;
 mod llama_runtime;
 mod recorded_sessions;
+mod tts;
 
 pub mod archive;
 pub mod briefing;
@@ -42,6 +44,7 @@ use commands_profile::{
     backfill_raw, count_available_raw, export_persona_pack, get_latest_digest, get_profile,
     get_profile_refresh_status, run_profile_refresh,
 };
+use commands_tts::{tts_list_voices, tts_speak, tts_status};
 use commands_workspace::{
     create_workspace, delete_workspace, list_workspaces, rename_default_workspace,
     rename_workspace, set_workspace_import_only, switch_workspace,
@@ -258,6 +261,9 @@ pub fn run() {
             rename_default_workspace,
             delete_workspace,
             set_workspace_import_only,
+            tts_list_voices,
+            tts_status,
+            tts_speak,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
