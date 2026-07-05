@@ -2,6 +2,8 @@
 <!-- All state is owned by App.svelte and passed as props so tab switches preserve it. -->
 <script lang="ts">
   import "./BriefingPanel.css";
+  import { onDestroy } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import type {
     ChatAttachment,
     Turn,
@@ -11,6 +13,7 @@
     ProfileScope,
     WebSearchStatus,
   } from "../../lib/types";
+  import { SpeakController } from "../../lib/tts.svelte.ts";
   import BriefingFiltersBar from "./BriefingFiltersBar.svelte";
   import ChatScopeToggle from "./ChatScopeToggle.svelte";
   import ChatMessageComp from "./ChatMessage.svelte";
@@ -132,6 +135,33 @@
     const _last = turns.at(-1)?.answerText;
     if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
   });
+
+  // One shared SpeakController for every ChatMessage rendered by this panel
+  // (briefing / profile / archive / semantic chat all reuse the same
+  // instance), so starting playback on one reply always cancels another.
+  const speakController = new SpeakController();
+  let ttsAvailable = $state(false);
+
+  $effect(() => {
+    void invoke<{ piper_installed: boolean; voice_count: number; selected_voice: string }>(
+      "tts_status",
+    )
+      .then((status) => {
+        ttsAvailable = status.piper_installed && status.voice_count > 0 && status.selected_voice !== "";
+      })
+      .catch(() => {
+        ttsAvailable = false;
+      });
+  });
+
+  // Stop any in-flight/playing audio when the chat is cleared.
+  $effect(() => {
+    if (turns.length === 0) speakController.cancel();
+  });
+
+  onDestroy(() => {
+    speakController.cancel();
+  });
 </script>
 
 <div class="panel" class:resizing bind:this={panelEl}>
@@ -249,12 +279,15 @@
       {#each turns as turn (turn)}
         <div class="turn-wrap">
           <ChatMessageComp
+            id={turn.id}
             role={turn.role}
             thinkingText={turn.thinkingText}
             answerText={turn.answerText}
             toolActivity={turn.toolActivity}
             streaming={turn.streaming}
             attachmentName={turn.attachmentName}
+            {ttsAvailable}
+            controller={speakController}
           />
         </div>
       {/each}

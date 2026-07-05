@@ -1,22 +1,46 @@
 <!-- HalluScribe — one chat turn (user or assistant). -->
-<!-- Assistant turns show a ThinkingBubble + answer text. -->
+<!-- Assistant turns show a ThinkingBubble + answer text, and (once finished) a Speak button. -->
 <script lang="ts">
   import ThinkingBubble from "./ThinkingBubble.svelte";
+  import type { SpeakController } from "../../lib/tts.svelte.ts";
 
   interface Props {
+    id: string;
     role: "user" | "assistant";
     thinkingText: string;
     answerText: string;
     toolActivity: string | null;
     streaming: boolean;
     attachmentName?: string;
+    ttsAvailable: boolean;
+    controller: SpeakController;
   }
-  let { role, thinkingText, answerText, toolActivity, streaming, attachmentName }: Props = $props();
+  let {
+    id,
+    role,
+    thinkingText,
+    answerText,
+    toolActivity,
+    streaming,
+    attachmentName,
+    ttsAvailable,
+    controller,
+  }: Props = $props();
 
   function stripMarkdown(text: string): string {
     return text
       .replace(/^#{1,6}\s+/gm, '')
       .replace(/\*\*([^*]+)\*\*/g, '$1');
+  }
+
+  let showSpeak = $derived(
+    role === "assistant" && !streaming && answerText.trim() !== "" && ttsAvailable,
+  );
+  let isActive = $derived(controller.activeId() === id);
+  let speakPhase = $derived(isActive ? controller.phase() : "idle");
+
+  function onSpeakClick() {
+    void controller.speak(id, answerText);
   }
 </script>
 
@@ -43,6 +67,25 @@
         <span class="cursor">▋</span>
       {/if}
     </div>
+    {#if showSpeak}
+      <div class="answer-controls">
+        <button
+          class="speak-btn"
+          class:speak-active={isActive}
+          onclick={onSpeakClick}
+          title={speakPhase === "synthesizing" ? "Loading..." : speakPhase === "playing" ? "Stop" : "Read aloud"}
+          aria-label={speakPhase === "synthesizing" ? "Loading..." : speakPhase === "playing" ? "Stop" : "Read aloud"}
+        >
+          {#if speakPhase === "synthesizing"}
+            ⏳
+          {:else if speakPhase === "playing"}
+            ⏹
+          {:else}
+            🔊
+          {/if}
+        </button>
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -114,5 +157,33 @@
     font-style: italic;
     margin-bottom: 6px;
     padding: 4px 0;
+  }
+
+  .answer-controls {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 4px;
+  }
+
+  .speak-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 4px 8px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .speak-btn:hover {
+    border-color: var(--green);
+    color: var(--green);
+  }
+
+  .speak-btn.speak-active {
+    border-color: var(--green);
+    color: var(--green);
   }
 </style>

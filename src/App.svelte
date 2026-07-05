@@ -64,6 +64,11 @@
   let sweepToastTimer: ReturnType<typeof setTimeout> | undefined;
   let isMaximized = $state(false);
   const appWindow = getCurrentWindow();
+  let turnIdCounter = 0;
+  function nextTurnId(): string {
+    turnIdCounter += 1;
+    return `t${turnIdCounter}`;
+  }
 
   function formatToolActivity(tool: string, args: Record<string, unknown>): string {
     if (tool === "web_search") {
@@ -321,6 +326,7 @@
       modelName: currentModelName(),
     };
     turns.push({
+      id: nextTurnId(),
       role: "user",
       thinkingText: "",
       answerText: visibleText,
@@ -330,6 +336,7 @@
       ...turnState,
     });
     turns.push({
+      id: nextTurnId(),
       role: "assistant",
       thinkingText: "",
       answerText: "",

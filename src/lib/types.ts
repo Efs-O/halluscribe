@@ -93,6 +93,8 @@ export interface ChatImage {
 
 /** One rendered turn in the chat UI (not the same as ChatMessage sent to Rust). */
 export interface Turn {
+  /** Stable per-turn id (monotonic counter), used to key the shared SpeakController. */
+  id: string;
   role: "user" | "assistant";
   thinkingText: string;
   answerText: string;

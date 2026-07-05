@@ -6,6 +6,7 @@ import type { Turn } from "./types";
 
 function assistantTurn(): Turn {
   return {
+    id: "t1",
     role: "assistant",
     thinkingText: "",
     answerText: "",
@@ -32,6 +33,7 @@ describe("appendAssistantToken", () => {
   it("ignores non-assistant turns", () => {
     const next = appendAssistantToken(
       {
+        id: "t2",
         role: "user",
         thinkingText: "",
         answerText: "hello",
