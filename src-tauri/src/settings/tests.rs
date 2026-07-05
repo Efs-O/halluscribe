@@ -20,6 +20,9 @@ mod tests {
         assert!(settings.ollama_api_key.is_empty());
         assert!(settings.tavily_api_key.is_empty());
         assert_eq!(settings.summary_min_fill_pct, 50.0);
+        // Auto-sweep is opt-in: off by default so no unattended sweep runs
+        // against a workspace (esp. a new guest) without the user enabling it.
+        assert!(!settings.scheduled_processing_enabled);
         assert_eq!(settings.schedule_time, "02:00");
         assert_eq!(settings.lookback_hours, 24);
         assert_eq!(settings.gpu_layers, -1);
@@ -217,6 +220,7 @@ mod tests {
             lookback_hours: 24,
             ctx_size: 65_536,
             max_tokens: 32_768,
+            scheduled_processing_enabled: true,
             ..Default::default()
         };
         let cfg = settings
@@ -233,6 +237,7 @@ mod tests {
             lookback_hours: 48,
             ctx_size: 65_536,
             max_tokens: 32_768,
+            scheduled_processing_enabled: true,
             ..Default::default()
         };
         let cfg = settings

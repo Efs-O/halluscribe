@@ -338,6 +338,11 @@
           <span>Scheduled nightly sweep</span>
           <input type="checkbox" bind:checked={s.scheduled_processing_enabled} onchange={onToggle} />
         </label>
+        <p class="field-note">
+          Off by default — sweeps run only when you click "Run Now". When on, an unattended sweep
+          runs daily against the <strong>active</strong> workspace, so enable it per workspace only
+          when you want that person's archive kept up to date automatically.
+        </p>
 
         <label class="row-label">
           <span>Preserve raw transcripts</span>

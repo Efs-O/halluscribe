@@ -128,7 +128,12 @@ impl Default for HalluScribeSettings {
             ollama_chat_db_path: String::new(),
             continue_data_path: String::new(),
             forge_sessions_path: String::new(),
-            scheduled_processing_enabled: true,
+            // Off by default: sweeps are manual ("Run Now") unless the user opts
+            // in. An unattended auto-sweep runs against whatever workspace is
+            // active — including a freshly created guest, which the catch-up
+            // scheduler treats as immediately overdue — so defaulting it on risks
+            // ingesting the host's local coding logs into someone else's profile.
+            scheduled_processing_enabled: false,
             schedule_time: "02:00".to_string(),
             last_sweep_date: String::new(),
             idle_threshold_mins: 30,
