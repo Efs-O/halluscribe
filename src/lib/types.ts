@@ -58,6 +58,8 @@ export interface HalluScribeSettings {
   max_tokens: number;
   briefing_window_hours: number;
   preserve_raw_transcripts: boolean;
+  tts_piper_bin: string;
+  tts_voice: string;
 }
 
 /** Filters passed to run_briefing. Empty strings mean "no restriction". */

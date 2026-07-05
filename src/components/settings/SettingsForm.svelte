@@ -5,6 +5,7 @@
   import { onMount } from "svelte";
   import type { BackfillResult, EmbeddingRebuildProgress, HalluScribeSettings } from "../../lib/types";
   import WorkspaceSwitcher from "./WorkspaceSwitcher.svelte";
+  import TtsVoiceSettings from "./TtsVoiceSettings.svelte";
 
   interface ApiKeyValidationResult {
     status: "valid" | "invalid" | "unreachable" | "empty";
@@ -496,6 +497,8 @@
 
         <p class="field-note">Required for sweep session summaries, briefing generation, archive chat, and semantic chat. Generation will not run until both values are set.</p>
       </section>
+
+      <TtsVoiceSettings bind:piperBin={s.tts_piper_bin} bind:voice={s.tts_voice} onSave={onBlur} />
     </form>
 
     {#if savedFlash}
