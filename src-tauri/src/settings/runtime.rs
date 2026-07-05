@@ -88,6 +88,7 @@ impl HalluScribeSettings {
             force,
             schedule_time: self.schedule_time.clone(),
             last_sweep_date: self.last_sweep_date.clone(),
+            import_only: false,
         })
     }
 }

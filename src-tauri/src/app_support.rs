@@ -57,8 +57,12 @@ pub(crate) fn archive_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// is incomplete (e.g. empty llama-server bin path).
 pub(crate) fn sweep_config(app: &tauri::AppHandle, force: bool) -> Option<scheduler::SweepConfig> {
     let dir = archive_dir(app).ok()?;
+    let default_root = default_archive_dir(app).ok()?;
+    let import_only = crate::workspace::is_active_import_only(&default_root, &dir);
     let settings = settings::load_settings(&dir);
-    settings.to_sweep_config(dir, force)
+    let mut config = settings.to_sweep_config(dir, force)?;
+    config.import_only = import_only;
+    Some(config)
 }
 
 /// Return aggregate stats across all archived sessions.
@@ -94,14 +98,18 @@ pub(crate) fn collect_session_stats(app: &tauri::AppHandle) -> Result<SessionSta
 
 pub(crate) fn collect_raw_session_total(app: &tauri::AppHandle) -> Result<u32, String> {
     let dir = archive_dir(app)?;
+    let default_root = default_archive_dir(app)?;
+    let import_only = crate::workspace::is_active_import_only(&default_root, &dir);
     let settings = settings::load_settings(&dir);
-    Ok(scanner::scan_sessions(&dir, &settings, u64::MAX, 0.0)
-        .into_iter()
-        .map(|target| match crate::readers::read_target(&target) {
-            Ok(parsed_sessions) => parsed_sessions.len() as u32,
-            Err(_) => 0,
-        })
-        .sum())
+    Ok(
+        scanner::scan_sessions(&dir, &settings, u64::MAX, 0.0, import_only)
+            .into_iter()
+            .map(|target| match crate::readers::read_target(&target) {
+                Ok(parsed_sessions) => parsed_sessions.len() as u32,
+                Err(_) => 0,
+            })
+            .sum(),
+    )
 }
 
 /// After a successful sweep, flip `first_run` to false so subsequent sweeps

@@ -58,6 +58,7 @@ pub fn run_sweep(
         &config.settings,
         config.lookback_secs,
         config.min_fill_pct,
+        config.import_only,
     );
     let mut worklist = Vec::new();
 

@@ -98,6 +98,22 @@ pub fn rename(reg: &mut WorkspaceRegistry, path: &Path, name: &str) -> Result<()
     Ok(())
 }
 
+/// True when the registered workspace at `active_dir` is import-only. The default
+/// root (or an unregistered path) is never import-only.
+pub fn is_import_only(reg: &WorkspaceRegistry, active_dir: &Path) -> bool {
+    reg.workspaces
+        .iter()
+        .find(|ws| ws.path == active_dir)
+        .map(|ws| ws.import_only)
+        .unwrap_or(false)
+}
+
+/// Load the registry from `default_root` and report whether `active_dir` is an
+/// import-only workspace.
+pub fn is_active_import_only(default_root: &Path, active_dir: &Path) -> bool {
+    is_import_only(&load_registry(default_root), active_dir)
+}
+
 /// Toggle a registered workspace's `import_only` flag, found by `path`.
 pub fn set_import_only(
     reg: &mut WorkspaceRegistry,
@@ -233,6 +249,30 @@ mod tests {
 
         let err = rename(&mut reg, Path::new("/ws/missing"), "X").unwrap_err();
         assert_eq!(err, "no workspace registered at that path");
+    }
+
+    #[test]
+    fn is_import_only_true_for_matching_guest_workspace() {
+        let mut reg = WorkspaceRegistry::default();
+        add_workspace(&mut reg, sample_ws("A", "/ws/a")).unwrap();
+        set_import_only(&mut reg, Path::new("/ws/a"), true).unwrap();
+        assert!(is_import_only(&reg, Path::new("/ws/a")));
+    }
+
+    #[test]
+    fn is_import_only_false_for_non_guest_workspace() {
+        let mut reg = WorkspaceRegistry::default();
+        add_workspace(&mut reg, sample_ws("A", "/ws/a")).unwrap();
+        assert!(!is_import_only(&reg, Path::new("/ws/a")));
+    }
+
+    #[test]
+    fn is_import_only_false_for_unregistered_path() {
+        let mut reg = WorkspaceRegistry::default();
+        add_workspace(&mut reg, sample_ws("A", "/ws/a")).unwrap();
+        set_import_only(&mut reg, Path::new("/ws/a"), true).unwrap();
+        // The default root (unregistered) is never import-only.
+        assert!(!is_import_only(&reg, Path::new("/default/root")));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 use crate::app_state::{BriefingCancel, ChatCancel, SweepCancel};
 use crate::app_support::{
     archive_dir, clear_first_run, collect_raw_session_total, collect_session_stats,
-    record_sweep_date, ChatMessage, SessionStats,
+    default_archive_dir, record_sweep_date, ChatMessage, SessionStats,
 };
 use crate::chat_prompt::{build_chat_system_prompt, ChatPromptContext, SearchModePrompt};
 use crate::recorded_sessions::{SaveRecordedChatRequest, SaveRecordedChatResult};
@@ -78,11 +78,14 @@ pub(crate) async fn get_raw_session_total(app: tauri::AppHandle) -> Result<u32, 
 #[tauri::command]
 pub(crate) fn trigger_sweep(app: tauri::AppHandle) -> Result<(), String> {
     let dir = archive_dir(&app)?;
+    let default_root = default_archive_dir(&app)?;
+    let import_only = crate::workspace::is_active_import_only(&default_root, &dir);
     let settings = settings::load_settings(&dir);
     settings.generation_limits()?;
-    let config = settings
+    let mut config = settings
         .to_sweep_config(dir, true)
         .ok_or_else(|| "backend is not configured (check Settings)".to_string())?;
+    config.import_only = import_only;
     let cancel = app.state::<SweepCancel>().0.clone();
     cancel.store(false, Ordering::Relaxed);
     std::thread::spawn(move || {

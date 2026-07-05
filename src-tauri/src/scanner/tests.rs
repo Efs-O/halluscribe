@@ -202,7 +202,13 @@ mod tests {
         fs::create_dir_all(&recorded_dir).unwrap();
         fs::write(recorded_dir.join("10-00-00-000-abc-gemma4-chat.json"), "{}").unwrap();
 
-        let targets = scan_sessions(&archive_dir, &HalluScribeSettings::default(), u64::MAX, 0.0);
+        let targets = scan_sessions(
+            &archive_dir,
+            &HalluScribeSettings::default(),
+            u64::MAX,
+            0.0,
+            false,
+        );
         assert!(targets.iter().any(|target| {
             target.path.ends_with("10-00-00-000-abc-gemma4-chat.json")
                 && matches!(
@@ -210,5 +216,59 @@ mod tests {
                     super::super::ScanTargetKind::Import(ChatProvider::HalluScribeGemmaChat)
                 )
         }));
+    }
+
+    #[test]
+    fn import_only_skips_local_tools_keeps_recorded_chats() {
+        // Local-tool source: a Forge override root with one minimal .jsonl fixture.
+        let local = tempdir().unwrap();
+        let forge_root = local.path().join("forge_sessions");
+        fs::create_dir_all(&forge_root).unwrap();
+        fs::write(forge_root.join("guest-1.jsonl"), "{\"role\":\"user\"}\n").unwrap();
+
+        // Archive dir with one recorded in-app gemma chat.
+        let archive = tempdir().unwrap();
+        let archive_dir = archive.path().join(".halluscribe");
+        let recorded_dir = archive_dir
+            .join("recorded_sessions")
+            .join("HalluScribe")
+            .join("gemma4")
+            .join("2026-04-23");
+        fs::create_dir_all(&recorded_dir).unwrap();
+        fs::write(recorded_dir.join("10-00-00-000-abc-gemma4-chat.json"), "{}").unwrap();
+
+        let settings = HalluScribeSettings {
+            forge_sessions_path: forge_root.display().to_string(),
+            ..HalluScribeSettings::default()
+        };
+
+        let has_forge = |targets: &[super::super::ScanTarget]| {
+            targets.iter().any(|target| {
+                matches!(
+                    target.kind,
+                    super::super::ScanTargetKind::Coding(super::super::ToolSource::Forge)
+                )
+            })
+        };
+        let has_recorded = |targets: &[super::super::ScanTarget]| {
+            targets.iter().any(|target| {
+                target.path.ends_with("10-00-00-000-abc-gemma4-chat.json")
+                    && matches!(
+                        target.kind,
+                        super::super::ScanTargetKind::Import(ChatProvider::HalluScribeGemmaChat)
+                    )
+            })
+        };
+
+        // Host workspace (import_only = false): the local Forge fixture is present.
+        let host = scan_sessions(&archive_dir, &settings, u64::MAX, 0.0, false);
+        assert!(has_forge(&host));
+        assert!(has_recorded(&host));
+
+        // Guest workspace (import_only = true): the local Forge fixture is gated
+        // out, while the workspace's own recorded chat is still ingested.
+        let guest = scan_sessions(&archive_dir, &settings, u64::MAX, 0.0, true);
+        assert!(!has_forge(&guest));
+        assert!(has_recorded(&guest));
     }
 }
