@@ -168,18 +168,19 @@
   .speak-btn {
     background: none;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--muted);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 22px;
     line-height: 1;
-    padding: 4px 8px;
-    transition: border-color 0.15s, color 0.15s;
+    padding: 6px 12px;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
   }
 
   .speak-btn:hover {
     border-color: var(--green);
     color: var(--green);
+    background: rgba(255, 255, 255, 0.04);
   }
 
   .speak-btn.speak-active {
