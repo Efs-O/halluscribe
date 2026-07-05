@@ -1,17 +1,23 @@
-// HalluScribe - Persona Pack export (Persona Protocol Phase 4).
+// HalluScribe - Persona Pack export (Persona Protocol Phase 4, per-scope in
+// Parity Phase B).
 //
-// One button → `<user>-persona-<date>.zip`, the portable "protocol" artifact any
-// future agent can ingest: `profile.md` at boot, `archive/` behind retrieval.
+// One button → `<user>-<scope>-persona-<date>.zip`, the portable "protocol"
+// artifact any future agent can ingest: `profile.md` at boot, `archive/`
+// behind retrieval.
 //
-// Privacy model (matches MCP get_profile = Work only): the pack carries the WORK
-// profile and only sessions from Work-consented providers — personal chat
-// exports (ChatGPT/Claude.ai/Gemini) never leave the machine. Raw transcripts
-// (`raw/`) are excluded unless the caller explicitly opts in per-export, because
-// raw copies are the un-redacted source. The `.md` summaries are already
+// Privacy model: the pack is per-scope — a Work pack carries only the Work
+// profile and Work-consented coding providers; a Personal pack additionally
+// carries the private-chat-derived life context (ChatGPT/Claude.ai/Gemini),
+// since Personal's consent list is a superset of Work's (`sources_for_scope`).
+// Which scope leaves the machine is the user's explicit choice on each
+// export — the button lives on both profile panels. Raw transcripts (`raw/`)
+// are excluded unless the caller explicitly opts in per-export, because raw
+// copies are the un-redacted source. The `.md` summaries are already
 // redaction-applied on disk (the sweep re-applies the ledger), so `archive/`
 // needs no further scrubbing here.
 
 use crate::archive::{self, IndexEntry};
+use crate::profile::ProfileScope;
 use chrono::{DateTime, Utc};
 use std::fmt;
 use std::io::{self, Write};
@@ -24,7 +30,8 @@ pub enum PackError {
     Io(io::Error),
     Zip(zip::result::ZipError),
     Json(serde_json::Error),
-    /// No distilled Work profile exists yet — a pack is meaningless without it.
+    /// No distilled profile exists yet for the requested scope — a pack is
+    /// meaningless without it.
     NoProfile,
 }
 
@@ -36,7 +43,7 @@ impl fmt::Display for PackError {
             Self::Json(error) => write!(f, "JSON error: {error}"),
             Self::NoProfile => write!(
                 f,
-                "no Work profile has been built yet — build the profile before exporting a pack"
+                "no profile has been built yet for this scope — build the profile before exporting a pack"
             ),
         }
     }
@@ -77,20 +84,22 @@ pub fn select_pack_entries(entries: Vec<IndexEntry>, sources: &[String]) -> Vec<
         .collect()
 }
 
-/// Count Work-consent sessions with a preserved raw transcript on disk — the
-/// exact number `export_persona_pack(.., include_raw = true)` would bundle. Lets
-/// the UI show "incl. raw (N available)" without running an export. Mirrors the
+/// Count sessions in `sources` consent with a preserved raw transcript on
+/// disk — the exact number `export_persona_pack(.., include_raw = true)`
+/// would bundle for that consent list. Lets the UI show "incl. raw (N
+/// available)" for the panel's scope without running an export. Mirrors the
 /// export loop's filter: non-empty `raw_path` whose `.zst` still exists.
-pub fn count_available_raw(archive_dir: &Path, work_sources: &[String]) -> usize {
-    select_pack_entries(archive::read_sessions(archive_dir), work_sources)
+pub fn count_available_raw(archive_dir: &Path, sources: &[String]) -> usize {
+    select_pack_entries(archive::read_sessions(archive_dir), sources)
         .into_iter()
         .filter(|entry| !entry.raw_path.is_empty() && archive_dir.join(&entry.raw_path).is_file())
         .count()
 }
 
-/// Default file name `<user>-persona-<YYYY-MM-DD>.zip`. `user` is sanitised to
-/// lowercase alphanumerics and dashes; empty/odd values fall back to "user".
-pub fn default_pack_name(user: &str, now: DateTime<Utc>) -> String {
+/// Default file name `<user>-<scope>-persona-<YYYY-MM-DD>.zip`. `user` is
+/// sanitised to lowercase alphanumerics and dashes; empty/odd values fall
+/// back to "user".
+pub fn default_pack_name(user: &str, scope: ProfileScope, now: DateTime<Utc>) -> String {
     let slug: String = user
         .to_lowercase()
         .chars()
@@ -98,7 +107,11 @@ pub fn default_pack_name(user: &str, now: DateTime<Utc>) -> String {
         .collect();
     let slug = slug.trim_matches('-');
     let slug = if slug.is_empty() { "user" } else { slug };
-    format!("{slug}-persona-{}.zip", now.format("%Y-%m-%d"))
+    format!(
+        "{slug}-{}-persona-{}.zip",
+        scope.as_str(),
+        now.format("%Y-%m-%d")
+    )
 }
 
 /// 64-bit FNV-1a content fingerprint (hex). A cheap integrity marker for the
@@ -112,24 +125,26 @@ fn fingerprint(bytes: &[u8]) -> String {
     format!("{hash:016x}")
 }
 
-/// Write the Persona Pack zip to `dest_zip`. `work_sources` is the Work-consent
-/// provider list (`sources_for_scope(profile_sources, Work)`); `profile_md` is
-/// the distilled Work profile; `digests` are `(filename, contents)` pairs. When
-/// `include_raw` is on, each exported session's `raw/<id>.jsonl.zst` is added
-/// verbatim (already compressed → stored, not re-deflated).
+/// Write the Persona Pack zip to `dest_zip`. `sources` is the consented
+/// provider list for `scope` (`sources_for_scope(profile_sources, scope)`);
+/// `profile_md` is the distilled profile for that scope; `digests` are
+/// `(filename, contents)` pairs. When `include_raw` is on, each exported
+/// session's `raw/<id>.jsonl.zst` is added verbatim (already compressed →
+/// stored, not re-deflated).
 #[allow(clippy::too_many_arguments)]
 pub fn export_persona_pack(
     archive_dir: &Path,
     dest_zip: &Path,
-    work_sources: &[String],
+    sources: &[String],
     profile_md: &str,
     digests: &[(String, String)],
     include_raw: bool,
     version: &str,
     embedding_model: &str,
+    scope: ProfileScope,
     now: DateTime<Utc>,
 ) -> Result<PackSummary, PackError> {
-    let entries = select_pack_entries(archive::read_sessions(archive_dir), work_sources);
+    let entries = select_pack_entries(archive::read_sessions(archive_dir), sources);
 
     if let Some(parent) = dest_zip.parent() {
         std::fs::create_dir_all(parent)?;
@@ -184,10 +199,10 @@ pub fn export_persona_pack(
     let manifest = serde_json::json!({
         "version": version,
         "generated_at": now.to_rfc3339(),
-        "scope": "work",
+        "scope": scope.as_str(),
         "session_count": entries.len(),
         "digest_count": digests.len(),
-        "consent_sources": work_sources,
+        "consent_sources": sources,
         "includes_raw": include_raw,
         "raw_count": raw_count,
         "embedding_model": embedding_model,

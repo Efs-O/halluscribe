@@ -1,6 +1,7 @@
 // HalluScribe - unit/integration tests for Persona Pack export.
 
 use super::*;
+use crate::profile::ProfileScope;
 use chrono::TimeZone;
 use std::io::Read;
 
@@ -86,12 +87,12 @@ fn select_pack_entries_keeps_only_consented_providers() {
 #[test]
 fn default_pack_name_sanitises_user_and_dates() {
     assert_eq!(
-        default_pack_name("Efso Office", fixed_now()),
-        "efso-office-persona-2026-07-05.zip"
+        default_pack_name("Efso Office", ProfileScope::Work, fixed_now()),
+        "efso-office-work-persona-2026-07-05.zip"
     );
     assert_eq!(
-        default_pack_name("", fixed_now()),
-        "user-persona-2026-07-05.zip"
+        default_pack_name("", ProfileScope::Personal, fixed_now()),
+        "user-personal-persona-2026-07-05.zip"
     );
 }
 
@@ -126,6 +127,7 @@ fn export_excludes_personal_sessions_and_raw_by_default() {
         false,
         "0.2.1",
         "embeddinggemma-300m",
+        ProfileScope::Work,
         fixed_now(),
     )
     .unwrap();
@@ -172,6 +174,7 @@ fn export_includes_raw_when_opted_in() {
         true,
         "0.2.1",
         "",
+        ProfileScope::Work,
         fixed_now(),
     )
     .unwrap();
@@ -218,4 +221,37 @@ fn count_available_raw_matches_what_export_would_bundle() {
     archive::preserve_raw(&dir, "work1", &dir.join("index.json")).unwrap();
 
     assert_eq!(count_available_raw(&dir, &["claude_code".to_string()]), 1);
+}
+
+#[test]
+fn export_personal_scope_includes_chat_providers_and_labels_manifest() {
+    let dir = tmp_dir("personal_export");
+    let entries = vec![
+        entry("work1", "claude_code", "sessions/proj/work1.md", ""),
+        entry("chat1", "chatgpt", "sessions/proj/chat1.md", ""),
+    ];
+    seed_archive(&dir, &entries);
+
+    let dest = dir.join("out.zip");
+    let summary = export_persona_pack(
+        &dir,
+        &dest,
+        &["claude_code".to_string(), "chatgpt".to_string()],
+        "# Personal profile",
+        &[],
+        false,
+        "0.2.1",
+        "",
+        ProfileScope::Personal,
+        fixed_now(),
+    )
+    .unwrap();
+
+    assert_eq!(summary.session_count, 2);
+
+    let names = zip_names(&dest);
+    assert!(names.contains(&"archive/sessions/proj/chat1.md".to_string()));
+
+    let manifest = zip_read(&dest, "manifest.json").unwrap();
+    assert!(manifest.contains("\"scope\": \"personal\""));
 }

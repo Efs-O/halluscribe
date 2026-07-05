@@ -233,20 +233,25 @@ pub(crate) struct PackResult {
     includes_raw: bool,
 }
 
-/// Export the Work Persona Pack to `<archive>/exports/<user>-persona-<date>.zip`
-/// and return the written path. Always Work scope (personal chat exports never
-/// leave the machine). `include_raw` opts the un-redacted raw transcripts in.
+/// Export a Persona Pack for `scope` to
+/// `<archive>/exports/<user>-<scope>-persona-<date>.zip` and return the
+/// written path. Bundles that scope's distilled profile plus its consented
+/// archive (`sources_for_scope`) — Personal's consent list is a superset of
+/// Work's, so a Personal pack additionally carries the chat-export-derived
+/// life context. `include_raw` opts the un-redacted raw transcripts in.
 #[tauri::command]
 pub(crate) fn export_persona_pack(
     app: tauri::AppHandle,
     include_raw: bool,
+    scope: String,
 ) -> Result<PackResult, String> {
+    let profile_scope = parse_scope(&scope)?;
     let dir = archive_dir(&app)?;
     let settings = settings::load_settings(&dir);
-    let work_sources = profile::sources_for_scope(&settings.profile_sources, ProfileScope::Work);
-    let profile_md = profile::read_profile_md(&dir, ProfileScope::Work)
+    let sources = profile::sources_for_scope(&settings.profile_sources, profile_scope);
+    let profile_md = profile::read_profile_md(&dir, profile_scope)
         .ok_or_else(|| pack::PackError::NoProfile.to_string())?;
-    let digests = profile::all_digests(&dir, ProfileScope::Work);
+    let digests = profile::all_digests(&dir, profile_scope);
 
     let user = std::env::var("USERNAME")
         .or_else(|_| std::env::var("USER"))
@@ -254,7 +259,7 @@ pub(crate) fn export_persona_pack(
     let now = chrono::Utc::now();
     let dest = dir
         .join("exports")
-        .join(pack::default_pack_name(&user, now));
+        .join(pack::default_pack_name(&user, profile_scope, now));
 
     let embedding_model = std::path::Path::new(&settings.embedding_model_path)
         .file_stem()
@@ -265,12 +270,13 @@ pub(crate) fn export_persona_pack(
     let summary = pack::export_persona_pack(
         &dir,
         &dest,
-        &work_sources,
+        &sources,
         &profile_md,
         &digests,
         include_raw,
         env!("CARGO_PKG_VERSION"),
         &embedding_model,
+        profile_scope,
         now,
     )
     .map_err(|error| error.to_string())?;
@@ -284,15 +290,16 @@ pub(crate) fn export_persona_pack(
     })
 }
 
-/// Number of Work sessions with a preserved raw transcript on disk — drives the
-/// "incl. raw (N available)" hint on the Work profile panel. Cheap: reads the
-/// archive index only, no inference.
+/// Number of sessions in `scope`'s consented sources with a preserved raw
+/// transcript on disk — drives the "incl. raw (N available)" hint on that
+/// scope's profile panel. Cheap: reads the archive index only, no inference.
 #[tauri::command]
-pub(crate) fn count_available_raw(app: tauri::AppHandle) -> Result<usize, String> {
+pub(crate) fn count_available_raw(app: tauri::AppHandle, scope: String) -> Result<usize, String> {
+    let profile_scope = parse_scope(&scope)?;
     let dir = archive_dir(&app)?;
     let settings = settings::load_settings(&dir);
-    let work_sources = profile::sources_for_scope(&settings.profile_sources, ProfileScope::Work);
-    Ok(pack::count_available_raw(&dir, &work_sources))
+    let sources = profile::sources_for_scope(&settings.profile_sources, profile_scope);
+    Ok(pack::count_available_raw(&dir, &sources))
 }
 
 /// One-time, non-destructive backfill (Persona Parity Phase A): recover raw

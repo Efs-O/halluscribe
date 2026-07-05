@@ -29,12 +29,14 @@
   let confirmingFullRebuild = $state(false);
   let digestOpen = $state(false);
 
-  // Persona Pack export (Work scope only — personal chat exports never leave
-  // the machine, matching the MCP get_profile privacy rule).
+  // Persona Pack export — per scope (Persona Parity Phase B): both Work and
+  // Personal panels export their own pack; the user chooses which scope's
+  // profile + consented archive leaves the machine on each export.
   let includeRaw = $state(false);
-  // How many Work sessions have a preserved raw transcript on disk — raw copies
-  // are only captured on new sweeps, so this is 0 until the first post-Phase-1
-  // sweep runs. Drives the "incl. raw (N available)" hint and disables the box.
+  // How many of this scope's sessions have a preserved raw transcript on disk —
+  // raw copies are only captured on new sweeps, so this is 0 until the first
+  // post-Phase-1 sweep runs. Drives the "incl. raw (N available)" hint and
+  // disables the box.
   let rawAvailable = $state(0);
   let exporting = $state(false);
   let exportNote = $state<string | null>(null);
@@ -48,11 +50,9 @@
     try {
       profile = await invoke<string | null>("get_profile", { scope });
       digest = await invoke<string | null>("get_latest_digest", { scope });
-      if (scope === "work") {
-        rawAvailable = await invoke<number>("count_available_raw");
-        // Never ship raw the export can't actually find (count went to 0).
-        if (rawAvailable === 0) includeRaw = false;
-      }
+      rawAvailable = await invoke<number>("count_available_raw", { scope });
+      // Never ship raw the export can't actually find (count went to 0).
+      if (rawAvailable === 0) includeRaw = false;
     } catch (e) {
       loadError = String(e);
     } finally {
@@ -85,7 +85,7 @@
         digest_count: number;
         raw_count: number;
         includes_raw: boolean;
-      }>("export_persona_pack", { includeRaw });
+      }>("export_persona_pack", { includeRaw, scope });
       exportNote = `Exported ${r.session_count} sessions${r.includes_raw ? ` + ${r.raw_count} raw` : ""} → ${r.path}`;
       exportIsError = false;
     } catch (e) {
@@ -194,7 +194,7 @@
           <button class="btn" onclick={() => (confirmingFullRebuild = false)}>Cancel</button>
         </span>
       {/if}
-      {#if scope === "work" && profile}
+      {#if profile}
         <span class="action-divider" aria-hidden="true"></span>
         <label
           class="raw-toggle"
@@ -206,7 +206,7 @@
           <input type="checkbox" bind:checked={includeRaw} disabled={exporting || rawAvailable === 0} />
           <span>incl. raw ({rawAvailable} available)</span>
         </label>
-        <button class="btn" onclick={exportPack} disabled={exporting || running} title="Export the Work profile + archive as a shareable Persona Pack zip">
+        <button class="btn" onclick={exportPack} disabled={exporting || running} title="Export this profile + archive as a shareable Persona Pack zip">
           {exporting ? "Exporting…" : "Export Pack"}
         </button>
       {/if}
