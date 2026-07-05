@@ -22,12 +22,9 @@ const WORK_SECTIONS: [ProfileSection; 6] = [
     ProfileSection::Timeline,
 ];
 
-const PERSONAL_SECTIONS: [ProfileSection; 7] = [
+const PERSONAL_SECTIONS: [ProfileSection; 4] = [
     ProfileSection::Identity,
     ProfileSection::PersonalContext,
-    ProfileSection::Projects,
-    ProfileSection::Conventions,
-    ProfileSection::RecurringProblems,
     ProfileSection::CommunicationStyle,
     ProfileSection::Timeline,
 ];
@@ -65,7 +62,9 @@ impl ProfileScope {
 
     /// The fixed section skeleton this scope's profile.md is built from.
     /// Work is the original six-section skeleton (unchanged order); Personal
-    /// inserts `PersonalContext` right after `Identity`.
+    /// is a life/character skeleton — Identity, Interests & Life Context
+    /// (`PersonalContext`), Communication Style, and Timeline — dropping the
+    /// coding-only sections (Projects, Conventions, RecurringProblems).
     pub fn sections(&self) -> &'static [ProfileSection] {
         match self {
             Self::Work => &WORK_SECTIONS,
@@ -114,11 +113,14 @@ mod tests {
     }
 
     #[test]
-    fn personal_sections_include_personal_context_after_identity() {
+    fn personal_sections_are_life_focused() {
         let sections = ProfileScope::Personal.sections();
-        assert_eq!(sections.len(), 7);
+        assert_eq!(sections.len(), 4);
         assert_eq!(sections[0], ProfileSection::Identity);
         assert_eq!(sections[1], ProfileSection::PersonalContext);
+        assert!(!sections.contains(&ProfileSection::Projects));
+        assert!(!sections.contains(&ProfileSection::Conventions));
+        assert!(!sections.contains(&ProfileSection::RecurringProblems));
     }
 
     #[test]

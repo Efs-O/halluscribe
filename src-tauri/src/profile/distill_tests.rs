@@ -234,6 +234,17 @@ fn personal_tool_schema_includes_personal_context_section() {
         ["section"]["enum"]
         .as_array()
         .unwrap();
-    assert_eq!(enum_values.len(), 7);
+    assert_eq!(enum_values.len(), 4);
     assert!(enum_values.iter().any(|v| v == "personal_context"));
+}
+
+#[test]
+fn parse_facts_skips_conventions_fact_under_personal_scope() {
+    // Conventions is a coding-only section, dropped from the Personal
+    // life/character skeleton (Phase 0 refocus) even though it is still
+    // valid under Work scope.
+    let value = ok_facts_response("conventions");
+    let (facts, warnings) = parse_facts(ProfileScope::Personal, &value).unwrap();
+    assert!(facts.is_empty());
+    assert_eq!(warnings.len(), 1);
 }

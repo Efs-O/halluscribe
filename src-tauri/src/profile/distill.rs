@@ -29,11 +29,13 @@ highlights). Call save_profile_facts with up to 10 facts drawn ONLY from the evi
 provided. Every fact must include the session id(s) it is grounded in in `evidence`. Do \
 not invent facts not supported by the text.";
 
-/// Appended to `MAP_SYSTEM_PROMPT` only for the Personal scope (Phase 2c):
-/// this scope's sources include personal chat exports, so the map step
-/// should also capture non-work facts into `personal_context`.
-const PERSONAL_MAP_EXTRA: &str = " Also extract personal facts — interests, life context, \
-and non-work preferences — into the personal_context section.";
+/// Appended to `MAP_SYSTEM_PROMPT` only for the Personal scope (Phase 0
+/// refocus): Personal is now a life/character skeleton, so the map step
+/// should bias toward personal facts into `personal_context` and ignore
+/// coding detail that has no home in that skeleton.
+const PERSONAL_MAP_EXTRA: &str = " Also extract personal, life, and character facts — interests, \
+relationships, communication style, and life timeline — into the personal_context section; ignore \
+purely technical or coding detail such as project internals, conventions, or bug/error specifics.";
 
 /// The map step's system prompt for `scope`. Work is byte-identical to the
 /// original single-profile prompt; Personal appends one instruction sentence.
