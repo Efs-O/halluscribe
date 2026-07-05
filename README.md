@@ -143,6 +143,16 @@ HALLUSCRIBE_DIR=/path/to/archive /path/to/halluscribe-mcp
 
 > **Tip:** if you build from source, the binary lands in `src-tauri/target/release/`, where a later `cargo clean` will delete it — silently breaking every client registered against that path. Copy it to a stable location first and register that copy.
 
+### Per-person workspaces
+
+HalluScribe can hold more than one person's archive (see **Workspaces** in Settings — each person is an isolated root with its own index, profiles, raw copies, and settings). A workspace root is just an archive directory, so exposing a specific person's profile over MCP needs no extra code: point `HALLUSCRIBE_DIR` at that workspace's folder.
+
+```bash
+HALLUSCRIBE_DIR=/path/to/personas/alex /path/to/halluscribe-mcp
+```
+
+Register one MCP server per person by giving each a distinct name and `HALLUSCRIBE_DIR`. The registry that tracks which workspace is *active in the desktop app* lives in the default root (`~/.halluscribe/workspaces.json`) and does not affect the MCP binary — the binary reads whatever root you point it at.
+
 ---
 
 ## Inference backends
