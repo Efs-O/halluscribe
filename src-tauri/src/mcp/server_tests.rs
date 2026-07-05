@@ -97,7 +97,10 @@ fn read_session_errors_cleanly_for_unknown_id() {
 fn get_profile_returns_placeholder_when_absent() {
     let dir = tmp();
     let server = HalluscribeServer::new(dir.path().to_path_buf());
-    assert_eq!(server.do_get_profile(), "No profile has been built yet.");
+    assert_eq!(
+        server.do_get_profile(ProfileScope::Work),
+        "No profile has been built yet."
+    );
 }
 
 #[test]
@@ -107,11 +110,11 @@ fn get_profile_returns_work_scope_markdown_when_present() {
     fs::create_dir_all(&work_dir).unwrap();
     fs::write(work_dir.join("profile.md"), "# User Profile\n\nHello.").unwrap();
     let server = HalluscribeServer::new(dir.path().to_path_buf());
-    assert!(server.do_get_profile().contains("Hello."));
+    assert!(server.do_get_profile(ProfileScope::Work).contains("Hello."));
 }
 
 #[test]
-fn get_profile_never_returns_personal_scope_content() {
+fn get_profile_returns_personal_scope_when_requested() {
     let dir = tmp();
     let work_dir = dir.path().join("profile").join("work");
     let personal_dir = dir.path().join("profile").join("personal");
@@ -124,16 +127,23 @@ fn get_profile_never_returns_personal_scope_content() {
     )
     .unwrap();
     let server = HalluscribeServer::new(dir.path().to_path_buf());
-    let content = server.do_get_profile();
-    assert!(content.contains("Work profile"));
-    assert!(!content.contains("secret"));
+
+    let work_content = server.do_get_profile(ProfileScope::Work);
+    assert!(work_content.contains("Work profile"));
+    assert!(!work_content.contains("secret"));
+
+    let personal_content = server.do_get_profile(ProfileScope::Personal);
+    assert!(personal_content.contains("secret"));
 }
 
 #[test]
 fn get_digest_returns_placeholder_when_absent() {
     let dir = tmp();
     let server = HalluscribeServer::new(dir.path().to_path_buf());
-    assert_eq!(server.do_get_digest(), "No digest has been generated yet.");
+    assert_eq!(
+        server.do_get_digest(ProfileScope::Work),
+        "No digest has been generated yet."
+    );
 }
 
 #[test]
@@ -144,5 +154,35 @@ fn get_digest_returns_latest_work_digest_when_present() {
     fs::write(work_dir.join("digest-2026-W10.md"), "old week").unwrap();
     fs::write(work_dir.join("digest-2026-W12.md"), "newest week").unwrap();
     let server = HalluscribeServer::new(dir.path().to_path_buf());
-    assert_eq!(server.do_get_digest(), "newest week");
+    assert_eq!(server.do_get_digest(ProfileScope::Work), "newest week");
+}
+
+#[test]
+fn get_digest_returns_personal_scope_when_requested() {
+    let dir = tmp();
+    let personal_dir = dir.path().join("profile").join("personal");
+    fs::create_dir_all(&personal_dir).unwrap();
+    fs::write(
+        personal_dir.join("digest-2026-W12.md"),
+        "personal newest week",
+    )
+    .unwrap();
+    let server = HalluscribeServer::new(dir.path().to_path_buf());
+    assert_eq!(
+        server.do_get_digest(ProfileScope::Personal),
+        "personal newest week"
+    );
+}
+
+#[test]
+fn scope_or_work_defaults_and_falls_back_to_work() {
+    assert_eq!(scope_or_work(None), ProfileScope::Work);
+    assert_eq!(
+        scope_or_work(Some("nonsense".to_string())),
+        ProfileScope::Work
+    );
+    assert_eq!(
+        scope_or_work(Some("personal".to_string())),
+        ProfileScope::Personal
+    );
 }

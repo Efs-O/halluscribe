@@ -46,6 +46,26 @@ pub struct ReadSessionRequest {
     pub session_id: String,
 }
 
+/// Optional scope selector for the profile/digest tools.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ScopeRequest {
+    /// Which profile to return: "work" (default) or "personal". Personal is
+    /// a SUPERSET that also carries private-chat-derived (ChatGPT/Claude.ai/
+    /// Gemini) life context, so request it only when that exposure is intended.
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
+/// Maps the optional wire-format scope string to a `ProfileScope`, defaulting
+/// to Work for back-compat (no `scope` arg) and falling back to Work on any
+/// unrecognized value rather than erroring.
+fn scope_or_work(scope: Option<String>) -> ProfileScope {
+    scope
+        .as_deref()
+        .and_then(ProfileScope::from_key)
+        .unwrap_or(ProfileScope::Work)
+}
+
 /// Stateless (beyond the archive path) MCP server: one HalluScribe archive,
 /// four read-only tools. Constructed once in `main` with the resolved
 /// archive directory and served over stdio for the lifetime of the process.
@@ -90,13 +110,13 @@ impl HalluscribeServer {
             .map_err(|error| McpError::resource_not_found(error, None))
     }
 
-    fn do_get_profile(&self) -> String {
-        profile::read_profile_md(&self.archive_dir, ProfileScope::Work)
+    fn do_get_profile(&self, scope: ProfileScope) -> String {
+        profile::read_profile_md(&self.archive_dir, scope)
             .unwrap_or_else(|| "No profile has been built yet.".to_string())
     }
 
-    fn do_get_digest(&self) -> String {
-        profile::latest_digest(&self.archive_dir, ProfileScope::Work)
+    fn do_get_digest(&self, scope: ProfileScope) -> String {
+        profile::latest_digest(&self.archive_dir, scope)
             .unwrap_or_else(|| "No digest has been generated yet.".to_string())
     }
 }
@@ -124,17 +144,23 @@ impl HalluscribeServer {
     }
 
     #[tool(
-        description = "Get the distilled Work profile (profile.md): identity, projects, conventions, recurring problems, communication style, and timeline distilled from the user's archived sessions. Work scope only - the Personal profile is never exposed over MCP by design (v1 sharing rule). Returns a placeholder message if no profile has been built yet."
+        description = "Get the distilled profile.md for the requested scope: identity, projects, conventions, recurring problems, communication style, and timeline distilled from the user's archived sessions. Optional `scope` argument: \"work\" (default) or \"personal\". Personal is a SUPERSET that also carries private-chat-derived (ChatGPT/Claude.ai/Gemini) life context - request it only when that exposure is intended. Returns a placeholder message if no profile has been built yet for the requested scope."
     )]
-    fn get_profile(&self) -> Result<String, McpError> {
-        Ok(self.do_get_profile())
+    fn get_profile(
+        &self,
+        Parameters(request): Parameters<ScopeRequest>,
+    ) -> Result<String, McpError> {
+        Ok(self.do_get_profile(scope_or_work(request.scope)))
     }
 
     #[tool(
-        description = "Get the most recent weekly digest for the Work profile scope: sessions distilled, breakdowns by project/type, top new error tags, and new facts folded into the profile that week. Returns a placeholder message if no digest has been generated yet."
+        description = "Get the most recent weekly digest for the requested profile scope: sessions distilled, breakdowns by project/type, top new error tags, and new facts folded into the profile that week. Optional `scope` argument: \"work\" (default) or \"personal\" (a superset also carrying private-chat-derived life context). Returns a placeholder message if no digest has been generated yet for the requested scope."
     )]
-    fn get_digest(&self) -> Result<String, McpError> {
-        Ok(self.do_get_digest())
+    fn get_digest(
+        &self,
+        Parameters(request): Parameters<ScopeRequest>,
+    ) -> Result<String, McpError> {
+        Ok(self.do_get_digest(scope_or_work(request.scope)))
     }
 }
 
@@ -151,8 +177,9 @@ impl ServerHandler for HalluscribeServer {
             .with_instructions(
                 "HalluScribe read-only archive server. Gives every future agent session memory \
                  of all previous ones: search_sessions and read_session query the user's archived \
-                 AI coding sessions; get_profile and get_digest return the distilled Work profile. \
-                 No write, redact, or delete tools are exposed."
+                 AI coding sessions; get_profile and get_digest return the distilled profile for \
+                 the requested scope (work by default, or personal - a superset that also carries \
+                 private-chat-derived life context). No write, redact, or delete tools are exposed."
                     .to_string(),
             )
     }

@@ -91,10 +91,10 @@ It is **strictly read-only** — four tools, no write/redact/delete surface:
 |---|---|
 | `search_sessions` | A paginated page of matching session index entries (title, tags, tool, date) |
 | `read_session` | The full redaction-applied Markdown body of one session, by id |
-| `get_profile` | The distilled Work profile (identity, projects, conventions, recurring problems, style, timeline) |
-| `get_digest` | The latest weekly digest for the Work profile |
+| `get_profile` | The distilled profile for the requested `scope` (`work` default, or `personal`) — identity, projects, conventions, recurring problems, style, timeline (Personal is life-focused) |
+| `get_digest` | The latest weekly digest for the requested profile `scope` (`work` default \| `personal`) |
 
-The Personal profile scope is never exposed over MCP — only Work, by design.
+Both profile scopes are available via the optional `scope` argument on `get_profile`/`get_digest` (it defaults to `work` for back-compat). `personal` is a superset that also carries private-chat-derived (ChatGPT/Claude.ai/Gemini) life context, so pointing an external agent at it shares that context — request it only when that's intended.
 
 ### Registering with Claude Code
 
