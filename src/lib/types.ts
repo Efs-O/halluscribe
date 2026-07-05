@@ -155,6 +155,14 @@ export interface EmbeddingRebuildProgress {
   failed: number;
 }
 
+/** Result of a raw-transcript backfill pass (Persona Parity Phase A). */
+export interface BackfillResult {
+  recovered: number;
+  already_had: number;
+  source_missing: number;
+  total: number;
+}
+
 /** Payload from briefing-token / chat-token Tauri events. */
 export interface TokenPayload {
   text: string;

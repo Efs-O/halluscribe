@@ -1,5 +1,6 @@
 // HalluScribe - archive writer and index access for processed sessions.
 
+mod backfill;
 mod index;
 mod raw;
 mod redact;
@@ -39,9 +40,10 @@ impl From<serde_json::Error> for ArchiveError {
     }
 }
 
+pub use backfill::{backfill_raw, BackfillResult};
 pub use index::{
     archived_source_size, delete_sessions, find_session, is_archived, read_sessions, session_id,
-    set_secret_flags,
+    set_raw_path, set_secret_flags,
 };
 pub use raw::{preserve_raw, raw_rel_path, read_raw, RAW_DIR};
 pub use redact::{

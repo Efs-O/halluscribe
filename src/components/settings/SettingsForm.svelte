@@ -3,7 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
-  import type { EmbeddingRebuildProgress, HalluScribeSettings } from "../../lib/types";
+  import type { BackfillResult, EmbeddingRebuildProgress, HalluScribeSettings } from "../../lib/types";
 
   interface ApiKeyValidationResult {
     status: "valid" | "invalid" | "unreachable" | "empty";
@@ -24,6 +24,8 @@
   let rebuildRunning = $state(false);
   let rebuildProgress = $state<EmbeddingRebuildProgress | null>(null);
   let rebuildMessage = $state("");
+  let backfillRunning = $state(false);
+  let backfillMessage = $state("");
   const SCHEDULE_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
   onMount(() => {
@@ -154,6 +156,23 @@
       showFlash("embedding rebuild failed", "warn", 3200);
     } finally {
       rebuildRunning = false;
+    }
+  }
+
+  async function recoverRawTranscripts() {
+    if (backfillRunning || !s?.preserve_raw_transcripts) return;
+    backfillRunning = true;
+    backfillMessage = "";
+    try {
+      const r = await invoke<BackfillResult>("backfill_raw");
+      backfillMessage =
+        `Recovered ${r.recovered} raw transcripts (already had ${r.already_had}, source gone ${r.source_missing}, of ${r.total}).`;
+      showFlash("raw transcript recovery complete");
+    } catch (e) {
+      backfillMessage = `Raw transcript recovery failed: ${String(e)}`;
+      showFlash("raw transcript recovery failed", "warn", 3200);
+    } finally {
+      backfillRunning = false;
     }
   }
 </script>
@@ -327,6 +346,25 @@
           so raw detail survives after the source tool prunes its logs. Raw copies are the untouched
           source — they are never redacted, and Persona Pack exports exclude them unless you opt in per-export.
         </p>
+
+        <div class="semantic-actions">
+          <button
+            class="action-btn"
+            type="button"
+            onclick={recoverRawTranscripts}
+            disabled={backfillRunning || !s.preserve_raw_transcripts}
+          >
+            {#if backfillRunning}recovering raw transcripts...{:else}recover raw transcripts{/if}
+          </button>
+          {#if !s.preserve_raw_transcripts}
+            <p class="field-note">Enable Preserve raw transcripts above to recover history for existing sessions.</p>
+          {/if}
+          {#if backfillMessage}
+            <p class="field-note" class:field-note-warn={backfillMessage.includes("failed")}>
+              {backfillMessage}
+            </p>
+          {/if}
+        </div>
 
         <label class="row-label">
           <span>Sweep time (24-hour)</span>

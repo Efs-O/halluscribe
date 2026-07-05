@@ -4,7 +4,7 @@
 
 use crate::app_support::archive_dir;
 use crate::profile::ProfileScope;
-use crate::{gemma, pack, profile, settings};
+use crate::{archive, gemma, pack, profile, settings};
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Mutex;
@@ -293,4 +293,20 @@ pub(crate) fn count_available_raw(app: tauri::AppHandle) -> Result<usize, String
     let settings = settings::load_settings(&dir);
     let work_sources = profile::sources_for_scope(&settings.profile_sources, ProfileScope::Work);
     Ok(pack::count_available_raw(&dir, &work_sources))
+}
+
+/// One-time, non-destructive backfill (Persona Parity Phase A): recover raw
+/// transcripts for already-archived sessions whose original `source_jsonl`
+/// still exists on disk. Gated server-side on `preserve_raw_transcripts` -
+/// that setting is the single consent point for keeping un-redacted raw
+/// transcripts around, so the backfill must never run without it even if the
+/// UI's disabled button is somehow bypassed.
+#[tauri::command]
+pub(crate) fn backfill_raw(app: tauri::AppHandle) -> Result<archive::BackfillResult, String> {
+    let dir = archive_dir(&app)?;
+    let settings = settings::load_settings(&dir);
+    if !settings.preserve_raw_transcripts {
+        return Err("Enable 'Preserve raw transcripts' before recovering raw history.".to_string());
+    }
+    archive::backfill_raw(&dir).map_err(|e| e.to_string())
 }
