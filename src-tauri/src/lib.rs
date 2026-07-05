@@ -37,8 +37,8 @@ use commands::{
     send_chat_message, trigger_sweep, validate_ollama_api_key,
 };
 use commands_profile::{
-    export_persona_pack, get_latest_digest, get_profile, get_profile_refresh_status,
-    run_profile_refresh,
+    count_available_raw, export_persona_pack, get_latest_digest, get_profile,
+    get_profile_refresh_status, run_profile_refresh,
 };
 use std::sync::{atomic::AtomicBool, Arc};
 use tauri::image::Image;
@@ -243,6 +243,7 @@ pub fn run() {
             get_latest_digest,
             get_profile_refresh_status,
             export_persona_pack,
+            count_available_raw,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -283,3 +283,14 @@ pub(crate) fn export_persona_pack(
         includes_raw: summary.includes_raw,
     })
 }
+
+/// Number of Work sessions with a preserved raw transcript on disk — drives the
+/// "incl. raw (N available)" hint on the Work profile panel. Cheap: reads the
+/// archive index only, no inference.
+#[tauri::command]
+pub(crate) fn count_available_raw(app: tauri::AppHandle) -> Result<usize, String> {
+    let dir = archive_dir(&app)?;
+    let settings = settings::load_settings(&dir);
+    let work_sources = profile::sources_for_scope(&settings.profile_sources, ProfileScope::Work);
+    Ok(pack::count_available_raw(&dir, &work_sources))
+}

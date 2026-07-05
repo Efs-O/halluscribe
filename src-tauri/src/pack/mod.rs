@@ -77,6 +77,17 @@ pub fn select_pack_entries(entries: Vec<IndexEntry>, sources: &[String]) -> Vec<
         .collect()
 }
 
+/// Count Work-consent sessions with a preserved raw transcript on disk — the
+/// exact number `export_persona_pack(.., include_raw = true)` would bundle. Lets
+/// the UI show "incl. raw (N available)" without running an export. Mirrors the
+/// export loop's filter: non-empty `raw_path` whose `.zst` still exists.
+pub fn count_available_raw(archive_dir: &Path, work_sources: &[String]) -> usize {
+    select_pack_entries(archive::read_sessions(archive_dir), work_sources)
+        .into_iter()
+        .filter(|entry| !entry.raw_path.is_empty() && archive_dir.join(&entry.raw_path).is_file())
+        .count()
+}
+
 /// Default file name `<user>-persona-<YYYY-MM-DD>.zip`. `user` is sanitised to
 /// lowercase alphanumerics and dashes; empty/odd values fall back to "user".
 pub fn default_pack_name(user: &str, now: DateTime<Utc>) -> String {

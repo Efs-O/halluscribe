@@ -184,3 +184,38 @@ fn export_includes_raw_when_opted_in() {
     assert!(manifest.contains("\"includes_raw\": true"));
     assert!(manifest.contains("\"scope\": \"work\""));
 }
+
+#[test]
+fn count_available_raw_matches_what_export_would_bundle() {
+    let dir = tmp_dir("count_raw");
+    let entries = vec![
+        // Work session with a raw file actually on disk → counts.
+        entry(
+            "work1",
+            "claude_code",
+            "sessions/proj/work1.md",
+            "raw/work1.jsonl.zst",
+        ),
+        // Work session whose raw_path points at a missing file → excluded.
+        entry(
+            "work2",
+            "claude_code",
+            "sessions/proj/work2.md",
+            "raw/work2.jsonl.zst",
+        ),
+        // Work session with no raw preserved → excluded.
+        entry("work3", "claude_code", "sessions/proj/work3.md", ""),
+        // Personal-provider session with raw → excluded by consent filter.
+        entry(
+            "chat1",
+            "chatgpt",
+            "sessions/proj/chat1.md",
+            "raw/chat1.jsonl.zst",
+        ),
+    ];
+    seed_archive(&dir, &entries);
+    // Only work1 gets its .zst written to disk.
+    archive::preserve_raw(&dir, "work1", &dir.join("index.json")).unwrap();
+
+    assert_eq!(count_available_raw(&dir, &["claude_code".to_string()]), 1);
+}

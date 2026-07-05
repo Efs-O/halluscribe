@@ -32,6 +32,10 @@
   // Persona Pack export (Work scope only — personal chat exports never leave
   // the machine, matching the MCP get_profile privacy rule).
   let includeRaw = $state(false);
+  // How many Work sessions have a preserved raw transcript on disk — raw copies
+  // are only captured on new sweeps, so this is 0 until the first post-Phase-1
+  // sweep runs. Drives the "incl. raw (N available)" hint and disables the box.
+  let rawAvailable = $state(0);
   let exporting = $state(false);
   let exportNote = $state<string | null>(null);
   let exportIsError = $state(false);
@@ -44,6 +48,11 @@
     try {
       profile = await invoke<string | null>("get_profile", { scope });
       digest = await invoke<string | null>("get_latest_digest", { scope });
+      if (scope === "work") {
+        rawAvailable = await invoke<number>("count_available_raw");
+        // Never ship raw the export can't actually find (count went to 0).
+        if (rawAvailable === 0) includeRaw = false;
+      }
     } catch (e) {
       loadError = String(e);
     } finally {
@@ -186,9 +195,16 @@
         </span>
       {/if}
       {#if scope === "work" && profile}
-        <label class="raw-toggle" title="Raw transcripts are the un-redacted source — only include when you trust the recipient.">
-          <input type="checkbox" bind:checked={includeRaw} disabled={exporting} />
-          <span>incl. raw</span>
+        <span class="action-divider" aria-hidden="true"></span>
+        <label
+          class="raw-toggle"
+          class:disabled={rawAvailable === 0}
+          title={rawAvailable === 0
+            ? "No raw transcripts preserved yet — raw copies are captured only on new sweeps."
+            : "Raw transcripts are the un-redacted source — only include when you trust the recipient."}
+        >
+          <input type="checkbox" bind:checked={includeRaw} disabled={exporting || rawAvailable === 0} />
+          <span>incl. raw ({rawAvailable} available)</span>
         </label>
         <button class="btn" onclick={exportPack} disabled={exporting || running} title="Export the Work profile + archive as a shareable Persona Pack zip">
           {exporting ? "Exporting…" : "Export Pack"}
@@ -294,6 +310,14 @@
     gap: 8px;
   }
 
+  .action-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    margin: 0 4px;
+    flex-shrink: 0;
+  }
+
   .raw-toggle {
     display: flex;
     align-items: center;
@@ -301,6 +325,11 @@
     font-size: 12px;
     color: var(--dim);
     cursor: pointer;
+  }
+
+  .raw-toggle.disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .confirm-text {
