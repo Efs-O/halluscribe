@@ -16,10 +16,14 @@
   // Path of the guest row currently awaiting delete confirmation, or null.
   let confirmingDelete = $state<string | null>(null);
 
-  // Create-form fields.
+  // Create-form fields. Import-only defaults ON: a new workspace is almost always
+  // a guest (another person's imports), and leaving it off would sweep THIS
+  // machine's coding logs into their profile.
   let newName = $state("");
   let newPath = $state("");
-  let newImportOnly = $state(false);
+  let newImportOnly = $state(true);
+  // Path of the guest row awaiting confirmation to turn import-only OFF, or null.
+  let confirmingHostAccess = $state<string | null>(null);
 
   onMount(() => {
     void loadList();
@@ -129,11 +133,25 @@
     }
   }
 
-  async function toggleImportOnly(w: WorkspaceInfo, importOnly: boolean) {
+  // Checkbox handler. Turning import-only ON is safe and applies immediately;
+  // turning it OFF exposes this machine's coding logs to the workspace, so we
+  // ask for confirmation first instead of applying the change.
+  function onToggleImportOnly(w: WorkspaceInfo, importOnly: boolean) {
+    if (busy) return;
+    if (importOnly) {
+      confirmingHostAccess = null;
+      void applyImportOnly(w, true);
+    } else {
+      confirmingHostAccess = w.path;
+    }
+  }
+
+  async function applyImportOnly(w: WorkspaceInfo, importOnly: boolean) {
     if (busy) return;
     busy = true;
     try {
       await invoke("set_workspace_import_only", { path: w.path, importOnly });
+      confirmingHostAccess = null;
       setInfo("Import-only updated.");
       await loadList();
     } catch (e) {
@@ -141,6 +159,13 @@
     } finally {
       busy = false;
     }
+  }
+
+  // Abandon a pending "turn off" — reload so the checkbox snaps back to its
+  // real (still import-only) state.
+  async function cancelHostAccess() {
+    confirmingHostAccess = null;
+    await loadList();
   }
 
   async function createWorkspace() {
@@ -160,7 +185,7 @@
       await invoke("create_workspace", { name, path, importOnly: newImportOnly });
       newName = "";
       newPath = "";
-      newImportOnly = false;
+      newImportOnly = true;
       setInfo("Workspace created. Switch to it above when ready.");
       await loadList();
     } catch (e) {
@@ -246,14 +271,42 @@
             <input
               type="checkbox"
               checked={w.import_only}
-              onchange={(e) => toggleImportOnly(w, (e.currentTarget as HTMLInputElement).checked)}
-              disabled={busy}
+              onchange={(e) => onToggleImportOnly(w, (e.currentTarget as HTMLInputElement).checked)}
+              disabled={busy || confirmingHostAccess === w.path}
             />
           </label>
           <p class="field-note">
             Guest workspace — the sweep ingests only this workspace's chat imports, never the host
             machine's local coding-tool logs.
           </p>
+
+          {#if confirmingHostAccess === w.path}
+            <div class="ws-warn">
+              <p class="ws-warn-text">
+                Turning this off lets the next sweep read <strong>this machine's</strong> Claude
+                Code / Codex / Continue / Forge logs and file them into "{w.name}"'s profile. Only do
+                this if this workspace is meant to track your own coding activity.
+              </p>
+              <div class="ws-warn-actions">
+                <button
+                  class="action-btn action-btn-danger"
+                  type="button"
+                  onclick={() => applyImportOnly(w, false)}
+                  disabled={busy}
+                >
+                  Turn off anyway
+                </button>
+                <button
+                  class="action-btn"
+                  type="button"
+                  onclick={cancelHostAccess}
+                  disabled={busy}
+                >
+                  Keep import-only
+                </button>
+              </div>
+            </div>
+          {/if}
 
           <div class="ws-delete">
             {#if confirmingDelete === w.path}
@@ -318,6 +371,18 @@
         <span>Import-only (guest workspace)</span>
         <input type="checkbox" bind:checked={newImportOnly} />
       </label>
+      {#if newImportOnly}
+        <p class="field-note">
+          Recommended for another person: sweeps only this workspace's imports, never this machine's
+          coding logs.
+        </p>
+      {:else}
+        <p class="field-note field-note-warn">
+          Import-only off: sweeps will read <strong>this machine's</strong> Claude Code / Codex /
+          Continue / Forge logs into this workspace. Only leave this off if the workspace is meant to
+          track your own coding activity.
+        </p>
+      {/if}
 
       <div class="ws-actions">
         <button class="action-btn" type="button" onclick={createWorkspace} disabled={busy}>
@@ -386,6 +451,18 @@
     flex-wrap: wrap;
   }
   .ws-confirm-text { font-size: 12px; color: var(--amber); }
+
+  .ws-warn {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--amber);
+    border-radius: 5px;
+    background: rgba(240, 192, 122, 0.08);
+  }
+  .ws-warn-text { font-size: 12px; color: var(--amber); margin: 0; line-height: 1.5; }
+  .ws-warn-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .action-btn-danger:hover:not(:disabled) {
     border-color: var(--red);
     color: var(--red);
