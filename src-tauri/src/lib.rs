@@ -6,6 +6,7 @@ mod app_support;
 mod chat_prompt;
 mod commands;
 mod commands_profile;
+mod commands_workspace;
 mod infer_lock;
 mod llama_pids;
 mod llama_runtime;
@@ -40,6 +41,10 @@ use commands::{
 use commands_profile::{
     backfill_raw, count_available_raw, export_persona_pack, get_latest_digest, get_profile,
     get_profile_refresh_status, run_profile_refresh,
+};
+use commands_workspace::{
+    create_workspace, list_workspaces, rename_workspace, set_workspace_import_only,
+    switch_workspace,
 };
 use std::sync::{atomic::AtomicBool, Arc};
 use tauri::image::Image;
@@ -246,6 +251,11 @@ pub fn run() {
             export_persona_pack,
             count_available_raw,
             backfill_raw,
+            list_workspaces,
+            create_workspace,
+            switch_workspace,
+            rename_workspace,
+            set_workspace_import_only,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

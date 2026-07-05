@@ -61,6 +61,58 @@ pub fn resolve_active_dir(default_root: &Path) -> PathBuf {
     }
 }
 
+/// Register a new workspace. Rejects a duplicate `path` so two entries can never
+/// point at the same archive root.
+pub fn add_workspace(reg: &mut WorkspaceRegistry, ws: Workspace) -> Result<(), String> {
+    if reg
+        .workspaces
+        .iter()
+        .any(|existing| existing.path == ws.path)
+    {
+        return Err("a workspace is already registered at that path".to_string());
+    }
+    reg.workspaces.push(ws);
+    Ok(())
+}
+
+/// Set the active workspace. `None` means "use the default root" and is always
+/// valid; `Some(path)` must match a registered workspace.
+pub fn set_active(reg: &mut WorkspaceRegistry, active: Option<PathBuf>) -> Result<(), String> {
+    if let Some(ref path) = active {
+        if !reg.workspaces.iter().any(|ws| &ws.path == path) {
+            return Err("no workspace registered at that path".to_string());
+        }
+    }
+    reg.active = active;
+    Ok(())
+}
+
+/// Rename a registered workspace, found by `path`.
+pub fn rename(reg: &mut WorkspaceRegistry, path: &Path, name: &str) -> Result<(), String> {
+    let ws = reg
+        .workspaces
+        .iter_mut()
+        .find(|ws| ws.path == path)
+        .ok_or_else(|| "no workspace registered at that path".to_string())?;
+    ws.name = name.to_string();
+    Ok(())
+}
+
+/// Toggle a registered workspace's `import_only` flag, found by `path`.
+pub fn set_import_only(
+    reg: &mut WorkspaceRegistry,
+    path: &Path,
+    value: bool,
+) -> Result<(), String> {
+    let ws = reg
+        .workspaces
+        .iter_mut()
+        .find(|ws| ws.path == path)
+        .ok_or_else(|| "no workspace registered at that path".to_string())?;
+    ws.import_only = value;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +181,70 @@ mod tests {
         assert!(loaded.active.is_none());
         assert!(loaded.workspaces.is_empty());
         assert_eq!(resolve_active_dir(&root), root);
+    }
+
+    fn sample_ws(name: &str, path: &str) -> Workspace {
+        Workspace {
+            name: name.to_string(),
+            path: PathBuf::from(path),
+            import_only: false,
+        }
+    }
+
+    #[test]
+    fn add_workspace_pushes_and_rejects_duplicate_path() {
+        let mut reg = WorkspaceRegistry::default();
+        add_workspace(&mut reg, sample_ws("A", "/ws/a")).unwrap();
+        assert_eq!(reg.workspaces.len(), 1);
+
+        let err = add_workspace(&mut reg, sample_ws("A2", "/ws/a")).unwrap_err();
+        assert_eq!(err, "a workspace is already registered at that path");
+        assert_eq!(reg.workspaces.len(), 1);
+    }
+
+    #[test]
+    fn set_active_none_is_always_ok() {
+        let mut reg = WorkspaceRegistry::default();
+        set_active(&mut reg, None).unwrap();
+        assert!(reg.active.is_none());
+    }
+
+    #[test]
+    fn set_active_known_path_ok_unknown_rejected() {
+        let mut reg = WorkspaceRegistry::default();
+        add_workspace(&mut reg, sample_ws("A", "/ws/a")).unwrap();
+
+        set_active(&mut reg, Some(PathBuf::from("/ws/a"))).unwrap();
+        assert_eq!(reg.active, Some(PathBuf::from("/ws/a")));
+
+        let err = set_active(&mut reg, Some(PathBuf::from("/ws/missing"))).unwrap_err();
+        assert_eq!(err, "no workspace registered at that path");
+        // active pointer unchanged on failure
+        assert_eq!(reg.active, Some(PathBuf::from("/ws/a")));
+    }
+
+    #[test]
+    fn rename_updates_and_errors_when_absent() {
+        let mut reg = WorkspaceRegistry::default();
+        add_workspace(&mut reg, sample_ws("A", "/ws/a")).unwrap();
+
+        rename(&mut reg, Path::new("/ws/a"), "Renamed").unwrap();
+        assert_eq!(reg.workspaces[0].name, "Renamed");
+
+        let err = rename(&mut reg, Path::new("/ws/missing"), "X").unwrap_err();
+        assert_eq!(err, "no workspace registered at that path");
+    }
+
+    #[test]
+    fn set_import_only_toggles_and_errors_when_absent() {
+        let mut reg = WorkspaceRegistry::default();
+        add_workspace(&mut reg, sample_ws("A", "/ws/a")).unwrap();
+        assert!(!reg.workspaces[0].import_only);
+
+        set_import_only(&mut reg, Path::new("/ws/a"), true).unwrap();
+        assert!(reg.workspaces[0].import_only);
+
+        let err = set_import_only(&mut reg, Path::new("/ws/missing"), true).unwrap_err();
+        assert_eq!(err, "no workspace registered at that path");
     }
 }
