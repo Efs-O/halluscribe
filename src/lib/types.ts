@@ -215,3 +215,17 @@ export interface ProfileDonePayload {
   errors: string[];
   scope: ProfileScope;
 }
+
+/** One registered person/workspace (Persona Parity Phase E). */
+export interface WorkspaceInfo {
+  name: string;
+  path: string;
+  import_only: boolean;
+}
+
+/** Snapshot returned by list_workspaces. `active` is null when the default root is active. */
+export interface WorkspaceListDto {
+  default_root: string;
+  active: string | null;
+  workspaces: WorkspaceInfo[];
+}

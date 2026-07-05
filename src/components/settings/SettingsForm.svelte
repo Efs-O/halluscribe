@@ -4,6 +4,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
   import type { BackfillResult, EmbeddingRebuildProgress, HalluScribeSettings } from "../../lib/types";
+  import WorkspaceSwitcher from "./WorkspaceSwitcher.svelte";
 
   interface ApiKeyValidationResult {
     status: "valid" | "invalid" | "unreachable" | "empty";
@@ -182,6 +183,8 @@
     <p class="loading">loading settings...</p>
   {:else}
     <form class="form" onsubmit={(e) => e.preventDefault()}>
+      <WorkspaceSwitcher />
+
       <section>
         <h2 class="section-title">GENERAL</h2>
 
