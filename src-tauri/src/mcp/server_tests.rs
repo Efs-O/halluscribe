@@ -74,6 +74,47 @@ fn search_sessions_returns_json_page_with_honest_counts() {
 }
 
 #[test]
+fn search_sessions_multiword_query_finds_forge_bridge_session() {
+    // Mirrors SEARCH_TOKENIZATION_PLAN.md's synthetic c47cc0fa-shaped entry:
+    // the title splits "MCP" and "Bridge" as separate words, and only the
+    // body contains the contiguous "mcpBridge" identifier / word "client".
+    // A pre-tokenization matcher (plain substring) finds zero hits for this
+    // query; the AND-of-tokens matcher must find it.
+    let dir = tmp();
+    make_index(
+        dir.path(),
+        &[(
+            "c47cc0fa",
+            "Forge MCP Bridge Implementation and HalluScribe Sync",
+            "2026-07-06",
+            "Forge",
+        )],
+    );
+    write_session_md(
+        dir.path(),
+        "2026-07-06",
+        "Implemented Forge's MCP client integration; the bridge (mcpBridge.ts) now connects to \
+         HalluScribe's read-only tools. Part B implemented and released as Forge v0.12.27.",
+    );
+    let server = HalluscribeServer::new(dir.path().to_path_buf());
+    let json = server
+        .do_search_sessions(SearchSessionsRequest {
+            query: Some("Forge MCP client bridge".into()),
+            date_from: None,
+            date_to: None,
+            tags: None,
+            project: None,
+            tool: None,
+            limit: None,
+            offset: None,
+        })
+        .unwrap();
+    let page: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(page["total_matches"], 1);
+    assert_eq!(page["results"][0]["id"], "c47cc0fa");
+}
+
+#[test]
 fn read_session_returns_body_for_known_id() {
     let dir = tmp();
     make_index(dir.path(), &[("abc", "Title", "2026-04-15", "Claude Code")]);

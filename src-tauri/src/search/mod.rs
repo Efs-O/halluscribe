@@ -6,8 +6,9 @@
 mod content;
 mod filtering;
 mod params;
+mod tokenize;
 
-pub(crate) use content::body_contains;
+pub(crate) use content::{body_contains, body_find};
 pub use params::SearchParams;
 
 use crate::archive::{read_sessions, IndexEntry};
@@ -81,12 +82,27 @@ pub fn search_sessions_page(
         })
         .collect();
     let searched = in_scope.len();
-    let matched: Vec<IndexEntry> = in_scope
+    // Score each entry (structured filters applied as boolean inside
+    // `match_score`; only the query is field-weighted) so matches can be
+    // ranked instead of left in recency order - see plan §3.2.
+    let mut matched: Vec<(u32, IndexEntry)> = in_scope
         .into_iter()
-        .filter(|entry| filtering::matches_params(archive_dir, entry, params))
+        .filter_map(|entry| {
+            filtering::match_score(archive_dir, &entry, params).map(|score| (score, entry))
+        })
         .collect();
+    matched.sort_by(|(score_a, entry_a), (score_b, entry_b)| {
+        score_b
+            .cmp(score_a)
+            .then_with(|| entry_b.date.cmp(&entry_a.date))
+    });
     let total_matches = matched.len();
-    let results: Vec<IndexEntry> = matched.into_iter().skip(offset).take(limit).collect();
+    let results: Vec<IndexEntry> = matched
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|(_, entry)| entry)
+        .collect();
     let returned = results.len();
     SearchPage {
         searched,
@@ -138,3 +154,5 @@ pub fn read_session_in_scope(
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_tokenized;
