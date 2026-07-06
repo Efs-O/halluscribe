@@ -56,6 +56,41 @@ pub struct ScopeRequest {
     pub scope: Option<String>,
 }
 
+/// Parameters for `get_digest`. Digests grow with the archive (a busy week can
+/// exceed 100KB) and easily overflow an MCP client's per-result token cap, so
+/// unlike the fixed-size profile the digest is paged.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DigestRequest {
+    /// Which scope's digest to return: "work" (default) or "personal". Personal
+    /// is a SUPERSET that also carries private-chat-derived (ChatGPT/Claude.ai/
+    /// Gemini) life context, so request it only when that exposure is intended.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Byte offset to continue from (default 0). Use the `offset=N` value named
+    /// in the previous slice's header line. Snapped down to a UTF-8 boundary.
+    #[serde(default)]
+    pub offset: Option<usize>,
+    /// Max bytes returned per call (default 20000, capped at 50000).
+    #[serde(default)]
+    pub max_chars: Option<usize>,
+}
+
+/// Default / hard-cap slice sizes for `get_digest`. 20KB ≈ 5-7K tokens — safely
+/// under common MCP client result caps (25K tokens) with headroom to spare.
+const DIGEST_DEFAULT_MAX_CHARS: usize = 20_000;
+const DIGEST_MAX_CHARS_CAP: usize = 50_000;
+
+/// Largest byte index `<= i` that lands on a UTF-8 character boundary of `s`.
+fn floor_char_boundary(s: &str, mut i: usize) -> usize {
+    if i >= s.len() {
+        return s.len();
+    }
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
 /// Maps the optional wire-format scope string to a `ProfileScope`, defaulting
 /// to Work for back-compat (no `scope` arg) and falling back to Work on any
 /// unrecognized value rather than erroring.
@@ -115,9 +150,35 @@ impl HalluscribeServer {
             .unwrap_or_else(|| "No profile has been built yet.".to_string())
     }
 
-    fn do_get_digest(&self, scope: ProfileScope) -> String {
-        profile::latest_digest(&self.archive_dir, scope)
-            .unwrap_or_else(|| "No digest has been generated yet.".to_string())
+    fn do_get_digest(
+        &self,
+        scope: ProfileScope,
+        offset: usize,
+        max_chars: Option<usize>,
+    ) -> String {
+        let Some(full) = profile::latest_digest(&self.archive_dir, scope) else {
+            return "No digest has been generated yet.".to_string();
+        };
+        let max = max_chars
+            .unwrap_or(DIGEST_DEFAULT_MAX_CHARS)
+            .clamp(1, DIGEST_MAX_CHARS_CAP);
+        let total = full.len();
+        // Whole digest fits in one default-shaped call: return it verbatim so
+        // small archives keep the original (headerless) behaviour.
+        if offset == 0 && total <= max {
+            return full;
+        }
+        let start = floor_char_boundary(&full, offset);
+        let end = floor_char_boundary(&full, (start.saturating_add(max)).min(total));
+        let continuation = if end < total {
+            format!("continue with offset={end}")
+        } else {
+            "end of digest".to_string()
+        };
+        format!(
+            "[digest slice bytes {start}..{end} of {total}; {continuation}]\n{}",
+            &full[start..end]
+        )
     }
 }
 
@@ -154,13 +215,17 @@ impl HalluscribeServer {
     }
 
     #[tool(
-        description = "Get the most recent weekly digest for the requested profile scope: sessions distilled, breakdowns by project/type, top new error tags, and new facts folded into the profile that week. Optional `scope` argument: \"work\" (default) or \"personal\" (a superset also carrying private-chat-derived life context). Returns a placeholder message if no digest has been generated yet for the requested scope."
+        description = "Get the most recent weekly digest for the requested profile scope: sessions distilled, breakdowns by project/type, top new error tags, and new facts folded into the profile that week. Optional `scope` argument: \"work\" (default) or \"personal\" (a superset also carrying private-chat-derived life context). Large digests are PAGED: at most `max_chars` bytes (default 20000, cap 50000) are returned per call, prefixed by a header line naming the byte range and the `offset` to continue from; the statistics live at the top, so the first page alone usually suffices. Returns a placeholder message if no digest has been generated yet for the requested scope."
     )]
     fn get_digest(
         &self,
-        Parameters(request): Parameters<ScopeRequest>,
+        Parameters(request): Parameters<DigestRequest>,
     ) -> Result<String, McpError> {
-        Ok(self.do_get_digest(scope_or_work(request.scope)))
+        Ok(self.do_get_digest(
+            scope_or_work(request.scope),
+            request.offset.unwrap_or(0),
+            request.max_chars,
+        ))
     }
 }
 

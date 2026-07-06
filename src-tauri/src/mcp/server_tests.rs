@@ -141,7 +141,7 @@ fn get_digest_returns_placeholder_when_absent() {
     let dir = tmp();
     let server = HalluscribeServer::new(dir.path().to_path_buf());
     assert_eq!(
-        server.do_get_digest(ProfileScope::Work),
+        server.do_get_digest(ProfileScope::Work, 0, None),
         "No digest has been generated yet."
     );
 }
@@ -154,7 +154,11 @@ fn get_digest_returns_latest_work_digest_when_present() {
     fs::write(work_dir.join("digest-2026-W10.md"), "old week").unwrap();
     fs::write(work_dir.join("digest-2026-W12.md"), "newest week").unwrap();
     let server = HalluscribeServer::new(dir.path().to_path_buf());
-    assert_eq!(server.do_get_digest(ProfileScope::Work), "newest week");
+    // Small digest, default call: verbatim, no slice header (back-compat).
+    assert_eq!(
+        server.do_get_digest(ProfileScope::Work, 0, None),
+        "newest week"
+    );
 }
 
 #[test]
@@ -169,9 +173,56 @@ fn get_digest_returns_personal_scope_when_requested() {
     .unwrap();
     let server = HalluscribeServer::new(dir.path().to_path_buf());
     assert_eq!(
-        server.do_get_digest(ProfileScope::Personal),
+        server.do_get_digest(ProfileScope::Personal, 0, None),
         "personal newest week"
     );
+}
+
+/// Writes a Work digest of exactly `content` and returns a server over it.
+fn server_with_work_digest(dir: &Path, content: &str) -> HalluscribeServer {
+    let work_dir = dir.join("profile").join("work");
+    fs::create_dir_all(&work_dir).unwrap();
+    fs::write(work_dir.join("digest-2026-W12.md"), content).unwrap();
+    HalluscribeServer::new(dir.to_path_buf())
+}
+
+#[test]
+fn get_digest_pages_oversized_digest_and_names_continuation_offset() {
+    let dir = tmp();
+    let big = "x".repeat(25);
+    let server = server_with_work_digest(dir.path(), &big);
+
+    let first = server.do_get_digest(ProfileScope::Work, 0, Some(10));
+    assert!(first.starts_with("[digest slice bytes 0..10 of 25; continue with offset=10]\n"));
+    assert!(first.ends_with(&"x".repeat(10)));
+
+    let last = server.do_get_digest(ProfileScope::Work, 20, Some(10));
+    assert!(last.starts_with("[digest slice bytes 20..25 of 25; end of digest]\n"));
+    assert!(last.ends_with(&"x".repeat(5)));
+}
+
+#[test]
+fn get_digest_slices_on_utf8_boundaries() {
+    let dir = tmp();
+    // "αβγδε" — every char is 2 bytes, so byte index 5 is mid-character.
+    let server = server_with_work_digest(dir.path(), "αβγδε");
+
+    let sliced = server.do_get_digest(ProfileScope::Work, 0, Some(5));
+    // max_chars=5 snaps down to the 4-byte boundary: two whole chars, no panic.
+    assert!(sliced.contains("αβ"));
+    assert!(!sliced.contains('γ'));
+
+    let offset_snapped = server.do_get_digest(ProfileScope::Work, 3, Some(50));
+    // offset=3 snaps down to 2, so the slice starts at a whole char.
+    assert!(offset_snapped.contains("βγδε"));
+}
+
+#[test]
+fn get_digest_offset_past_end_returns_empty_slice_not_panic() {
+    let dir = tmp();
+    let server = server_with_work_digest(dir.path(), "short");
+    let out = server.do_get_digest(ProfileScope::Work, 999, Some(10));
+    assert!(out.starts_with("[digest slice bytes 5..5 of 5; end of digest]"));
 }
 
 #[test]
