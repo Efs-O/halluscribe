@@ -79,6 +79,28 @@ Browse, filter, and sort all archived sessions in a paginated table. Full-text s
 ### Semantic search
 Embeddings are computed locally using a second GGUF model and stored in `embeddings.json`. Cosine similarity retrieval returns the most contextually relevant sessions for any query — no keyword match required.
 
+### Profiles
+The model distills your archived sessions into a living **profile** — identity, projects, conventions, recurring problems, working style, and a timeline — regenerated as new sessions land. Two scopes:
+- **Work** — derived from your coding sessions only.
+- **Personal** — a superset that also folds in private-chat exports (ChatGPT, Claude.ai, Gemini) for life context, organised into life sections.
+
+The Profile panel shows each scope in its own tab and lets you rebuild on demand. The same profiles back the `get_profile` MCP tool, so external agents can read them too.
+
+### Persona Pack export
+Export a portable **persona pack** (`~/.halluscribe/exports/<user>-<scope>-persona-<date>.zip`) — the distilled profile, weekly digests, redacted session Markdown, a filtered index, and a manifest. A consent filter governs what leaves the machine; raw transcripts are excluded unless you explicitly opt in, and embeddings are never included.
+
+### Workspaces
+Hold more than one person's archive on a single machine. Each **workspace** is an isolated root with its own index, profiles, raw copies, and settings. Switch the active workspace from Settings; guest workspaces can be set **import-only** so a sweep ingests only that person's chat exports, never the host machine's coding sessions.
+
+### Privacy &amp; redaction
+A secret scanner flags likely credentials (API keys, tokens) in each session, and a per-session redaction panel lets you review and strip sensitive spans before anything is exported or exposed over MCP. Redaction is applied to archive Markdown and MCP reads; raw copies are never redacted and never leave unless you opt in.
+
+### Raw transcript preservation
+With `preserve_raw_transcripts` enabled, the sweep keeps a compressed verbatim copy of each new transcript (`raw/<id>.jsonl.zst`) alongside the summary. Raw copies are never redacted and are excluded from exports by default. A backfill action can capture raw for already-archived sessions.
+
+### Voice (text-to-speech)
+Finished assistant replies in every chat scope get a **Speak** button, backed by a local [piper](https://github.com/rhasspy/piper) voice — no cloud TTS. Configure the voice and piper path in Settings; playback runs off the UI thread.
+
 ---
 
 ## MCP server
