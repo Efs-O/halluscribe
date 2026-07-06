@@ -130,10 +130,31 @@
 
   let scrollEl: HTMLDivElement | undefined;
 
+  // Auto-scroll to the newest text only while the user is already parked at
+  // the bottom. Scrolling up (e.g. to re-read the start of a streaming reply)
+  // flips this off so generation stops yanking the view back down; returning
+  // to the bottom re-arms it. 48px slack absorbs the sub-pixel gap left by a
+  // programmatic scroll and fractional line growth between frames.
+  let stickToBottom = true;
+
+  function onChatScroll() {
+    if (!scrollEl) return;
+    const distanceFromBottom =
+      scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+    stickToBottom = distanceFromBottom <= 48;
+  }
+
+  // A new turn (the user just sent something) re-arms auto-scroll even if they
+  // had scrolled up during the previous reply, so the fresh answer is visible.
+  $effect(() => {
+    const _count = turns.length;
+    stickToBottom = true;
+  });
+
   $effect(() => {
     const _briefing = briefingAnswer;
     const _last = turns.at(-1)?.answerText;
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    if (scrollEl && stickToBottom) scrollEl.scrollTop = scrollEl.scrollHeight;
   });
 
   // One shared SpeakController for every ChatMessage rendered by this panel
@@ -246,6 +267,7 @@
             semantic chat search
           </button>
         </div>
+        <div class="group-divider" aria-hidden="true"></div>
         <div class="search-mode-group">
           <button
             class="scope-btn"
@@ -275,7 +297,7 @@
       </div>
     </div>
 
-    <div class="chat-scroll" bind:this={scrollEl}>
+    <div class="chat-scroll" bind:this={scrollEl} onscroll={onChatScroll}>
       {#each turns as turn (turn)}
         <div class="turn-wrap">
           <ChatMessageComp

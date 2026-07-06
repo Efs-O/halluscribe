@@ -47,6 +47,16 @@
   flex-wrap: wrap;
 }
 
+/* Vertical rule marking the boundary between the two independent toggle
+   groups (search mode | profile scope) so the row doesn't read as one group. */
+.group-divider {
+  align-self: stretch;
+  width: 1px;
+  min-height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
 .briefing-zone {
   display: flex;
   flex-direction: column;
