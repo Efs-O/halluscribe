@@ -7,6 +7,7 @@ mod claude;
 mod codex;
 mod continue_scan;
 mod forge;
+pub mod secrets;
 mod shared;
 mod tests;
 mod types;
@@ -30,27 +31,33 @@ pub fn scan_sessions(
     settings: &HalluScribeSettings,
     lookback_secs: u64,
     min_fill_pct: f64,
+    import_only: bool,
 ) -> Vec<ScanTarget> {
     let mut sessions = Vec::new();
-    sessions.extend(claude::scan_claude(lookback_secs, min_fill_pct));
-    sessions.extend(codex::scan_codex(lookback_secs, min_fill_pct));
-    let continue_override = {
-        let p = settings.continue_data_path.trim();
-        (!p.is_empty()).then(|| std::path::Path::new(p))
-    };
-    sessions.extend(continue_scan::scan_continue(
-        lookback_secs,
-        min_fill_pct,
-        continue_override,
-    ));
-    let forge_override = {
-        let p = settings.forge_sessions_path.trim();
-        (!p.is_empty()).then(|| std::path::Path::new(p))
-    };
-    sessions.extend(forge::scan_forge(lookback_secs, forge_override));
+    // A guest/import-only workspace skips every host-local coding-tool scan
+    // (those live under the HOST's home dir, not the guest's) and ingests only
+    // this workspace's configured chat imports + its own recorded in-app chats.
+    if !import_only {
+        sessions.extend(claude::scan_claude(lookback_secs, min_fill_pct));
+        sessions.extend(codex::scan_codex(lookback_secs, min_fill_pct));
+        let continue_override = {
+            let p = settings.continue_data_path.trim();
+            (!p.is_empty()).then(|| std::path::Path::new(p))
+        };
+        sessions.extend(continue_scan::scan_continue(
+            lookback_secs,
+            min_fill_pct,
+            continue_override,
+        ));
+        let forge_override = {
+            let p = settings.forge_sessions_path.trim();
+            (!p.is_empty()).then(|| std::path::Path::new(p))
+        };
+        sessions.extend(forge::scan_forge(lookback_secs, forge_override));
+        sessions.extend(scan_ollama_chat(settings));
+    }
     sessions.extend(scan_chat_imports(settings, lookback_secs));
     sessions.extend(scan_recorded_chat_sessions(archive_dir, lookback_secs));
-    sessions.extend(scan_ollama_chat(settings));
     sessions
 }
 

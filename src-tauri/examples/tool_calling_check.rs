@@ -60,6 +60,7 @@ fn resolve_jsonl_path(archive_dir: &std::path::Path) -> (PathBuf, ToolSource) {
                 &HalluScribeSettings::default(),
                 30 * 24 * 3600,
                 0.0,
+                false,
             );
             if sessions.is_empty() {
                 eprintln!("ERROR: No session files found. Set JSONL_PATH to a specific file.");

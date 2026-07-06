@@ -2,11 +2,11 @@
 use crate::app_state::{BriefingCancel, ChatCancel, SweepCancel};
 use crate::app_support::{
     archive_dir, clear_first_run, collect_raw_session_total, collect_session_stats,
-    record_sweep_date, ChatMessage, SessionStats,
+    default_archive_dir, record_sweep_date, ChatMessage, SessionStats,
 };
 use crate::chat_prompt::{build_chat_system_prompt, ChatPromptContext, SearchModePrompt};
 use crate::recorded_sessions::{SaveRecordedChatRequest, SaveRecordedChatResult};
-use crate::{archive, briefing, retrieval, scheduler, search, settings};
+use crate::{archive, briefing, profile, retrieval, scheduler, search, settings};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -78,11 +78,14 @@ pub(crate) async fn get_raw_session_total(app: tauri::AppHandle) -> Result<u32, 
 #[tauri::command]
 pub(crate) fn trigger_sweep(app: tauri::AppHandle) -> Result<(), String> {
     let dir = archive_dir(&app)?;
+    let default_root = default_archive_dir(&app)?;
+    let import_only = crate::workspace::is_active_import_only(&default_root, &dir);
     let settings = settings::load_settings(&dir);
     settings.generation_limits()?;
-    let config = settings
+    let mut config = settings
         .to_sweep_config(dir, true)
         .ok_or_else(|| "backend is not configured (check Settings)".to_string())?;
+    config.import_only = import_only;
     let cancel = app.state::<SweepCancel>().0.clone();
     cancel.store(false, Ordering::Relaxed);
     std::thread::spawn(move || {
@@ -103,6 +106,9 @@ pub(crate) fn trigger_sweep(app: tauri::AppHandle) -> Result<(), String> {
         );
         if !result.errors.is_empty() {
             message.push_str(&format!(", errors: {}", result.errors.len()));
+        }
+        if result.flagged > 0 {
+            message.push_str(&format!(", possible secrets flagged: {}", result.flagged));
         }
         let _ = app.emit("sweep-done", message);
     });
@@ -333,6 +339,30 @@ pub(crate) fn delete_sessions(
     Ok(deleted)
 }
 
+/// Preview a redaction: count occurrences and show excerpts, without writing anything.
+#[tauri::command]
+pub(crate) fn preview_redaction(
+    app: tauri::AppHandle,
+    session_id: String,
+    find: String,
+) -> Result<archive::RedactionPreview, String> {
+    let dir = archive_dir(&app)?;
+    archive::preview_redaction(&dir, &session_id, &find).map_err(|error| error.to_string())
+}
+
+/// Apply a redaction to a session's archived body, backing up the original and
+/// persisting the rule so it survives future re-sweeps of this session.
+#[tauri::command]
+pub(crate) fn apply_redaction(
+    app: tauri::AppHandle,
+    session_id: String,
+    find: String,
+    replace: String,
+) -> Result<archive::RedactionOutcome, String> {
+    let dir = archive_dir(&app)?;
+    archive::apply_redaction(&dir, &session_id, &find, &replace).map_err(|error| error.to_string())
+}
+
 /// Rebuild semantic embeddings for all archived sessions.
 #[tauri::command]
 pub(crate) async fn rebuild_session_embeddings(
@@ -403,8 +433,14 @@ pub(crate) fn send_chat_message(
     web_search_enabled: bool,
     thinking_enabled: bool,
     search_mode: Option<ChatSearchMode>,
+    profile_scope: Option<String>,
 ) -> Result<(), String> {
     let dir = archive_dir(&app)?;
+    let profile_scope = match profile_scope.as_deref() {
+        None => profile::ProfileScope::Work,
+        Some(key) => profile::ProfileScope::from_key(key)
+            .ok_or_else(|| format!("unknown profile scope: {key}"))?,
+    };
     let settings = settings::load_settings(&dir);
     let has_images = messages.iter().any(|message| {
         message
@@ -474,6 +510,9 @@ pub(crate) fn send_chat_message(
     let tavily_api_key = settings.tavily_api_key.trim().to_string();
     let web_search_available =
         web_search_enabled && (!ollama_api_key.is_empty() || !tavily_api_key.is_empty());
+    // Chat uses the Work profile unless the UI toggle selects Personal
+    // (Phase 2c sharing rule: Work is the default sharing scope).
+    let user_profile = profile::read_profile_md(&dir, profile_scope);
     let mut final_messages = vec![serde_json::json!({
         "role": "system",
         "content": build_chat_system_prompt(&ChatPromptContext {
@@ -487,6 +526,8 @@ pub(crate) fn send_chat_message(
                 briefing::tools::ChatScope::AllowedSessionIds(ids) => Some(ids.len()),
                 briefing::tools::ChatScope::ArchiveWide => None,
             },
+            profile: user_profile,
+            profile_scope,
         })
     })];
     final_messages.extend(json_messages);

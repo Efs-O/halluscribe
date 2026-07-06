@@ -18,6 +18,10 @@ pub struct SweepConfig {
     /// Date (`YYYY-MM-DD`, local) of the last successful sweep, copied from
     /// settings. Used by the catch-up scheduler to run at most once per day.
     pub last_sweep_date: String,
+    /// When true, this is a guest/import-only workspace: the sweep skips the
+    /// host's local coding-tool scan and ingests only configured chat imports
+    /// + recorded in-app chats.
+    pub import_only: bool,
 }
 
 /// Emitted after each session is processed during a sweep.
@@ -40,5 +44,8 @@ pub struct SweepResult {
     pub processed: u32,
     pub skipped: u32,
     pub deferred: u32,
+    /// Number of sessions written this sweep whose archived markdown matched
+    /// at least one high-confidence secret shape (Phase 0b scan).
+    pub flagged: u32,
     pub errors: Vec<String>,
 }

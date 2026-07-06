@@ -1,17 +1,21 @@
 // HalluScribe - archive writer and index access for processed sessions.
 
+mod backfill;
 mod index;
+mod raw;
+mod redact;
 mod types;
 mod writer;
 
 use std::fmt;
 
-pub use types::{IndexEntry, SessionMeta};
+pub use types::{IndexEntry, SessionMeta, WrittenSession};
 
 #[derive(Debug)]
 pub enum ArchiveError {
     Io(std::io::Error),
     Json(serde_json::Error),
+    Invalid(String),
 }
 
 impl fmt::Display for ArchiveError {
@@ -19,6 +23,7 @@ impl fmt::Display for ArchiveError {
         match self {
             Self::Io(e) => write!(f, "IO error: {e}"),
             Self::Json(e) => write!(f, "JSON error: {e}"),
+            Self::Invalid(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -35,7 +40,14 @@ impl From<serde_json::Error> for ArchiveError {
     }
 }
 
+pub use backfill::{backfill_raw, BackfillResult};
 pub use index::{
     archived_source_size, delete_sessions, find_session, is_archived, read_sessions, session_id,
+    set_raw_path, set_secret_flags,
+};
+pub use raw::{preserve_raw, raw_rel_path, read_raw, RAW_DIR};
+pub use redact::{
+    apply_redaction, load_rules, preview_redaction, rules_for_session, RedactionOutcome,
+    RedactionPreview, RedactionRule,
 };
 pub use writer::write_session;

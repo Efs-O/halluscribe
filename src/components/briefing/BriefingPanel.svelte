@@ -2,14 +2,18 @@
 <!-- All state is owned by App.svelte and passed as props so tab switches preserve it. -->
 <script lang="ts">
   import "./BriefingPanel.css";
+  import { onDestroy } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import type {
     ChatAttachment,
     Turn,
     BriefingFilters,
     ChatScope,
     ChatSearchMode,
+    ProfileScope,
     WebSearchStatus,
   } from "../../lib/types";
+  import { SpeakController } from "../../lib/tts.svelte.ts";
   import BriefingFiltersBar from "./BriefingFiltersBar.svelte";
   import ChatScopeToggle from "./ChatScopeToggle.svelte";
   import ChatMessageComp from "./ChatMessage.svelte";
@@ -25,6 +29,7 @@
     selectedScopeActive: boolean;
     chatScopeKind: ChatScope["kind"];
     chatSearchMode: ChatSearchMode;
+    chatProfileScope: ProfileScope;
     turns: Turn[];
     ctxUsedPct: number;
     chatStreaming: boolean;
@@ -45,6 +50,7 @@
     onToggleThinking: () => void;
     onSetChatScope: (kind: ChatScope["kind"]) => void | Promise<unknown>;
     onSetChatSearchMode: (mode: ChatSearchMode) => void | Promise<unknown>;
+    onSelectProfileScope: (scope: ProfileScope) => void | Promise<unknown>;
     onClearScope: () => void | Promise<unknown>;
     imageAttachEnabled: boolean;
   }
@@ -59,6 +65,7 @@
     selectedScopeActive,
     chatScopeKind,
     chatSearchMode,
+    chatProfileScope,
     turns,
     ctxUsedPct,
     chatStreaming,
@@ -79,6 +86,7 @@
     onToggleThinking,
     onSetChatScope,
     onSetChatSearchMode,
+    onSelectProfileScope,
     onClearScope,
     imageAttachEnabled,
   }: Props = $props();
@@ -122,10 +130,58 @@
 
   let scrollEl: HTMLDivElement | undefined;
 
+  // Auto-scroll to the newest text only while the user is already parked at
+  // the bottom. Scrolling up (e.g. to re-read the start of a streaming reply)
+  // flips this off so generation stops yanking the view back down; returning
+  // to the bottom re-arms it. 48px slack absorbs the sub-pixel gap left by a
+  // programmatic scroll and fractional line growth between frames.
+  let stickToBottom = true;
+
+  function onChatScroll() {
+    if (!scrollEl) return;
+    const distanceFromBottom =
+      scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+    stickToBottom = distanceFromBottom <= 48;
+  }
+
+  // A new turn (the user just sent something) re-arms auto-scroll even if they
+  // had scrolled up during the previous reply, so the fresh answer is visible.
+  $effect(() => {
+    const _count = turns.length;
+    stickToBottom = true;
+  });
+
   $effect(() => {
     const _briefing = briefingAnswer;
     const _last = turns.at(-1)?.answerText;
-    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+    if (scrollEl && stickToBottom) scrollEl.scrollTop = scrollEl.scrollHeight;
+  });
+
+  // One shared SpeakController for every ChatMessage rendered by this panel
+  // (briefing / profile / archive / semantic chat all reuse the same
+  // instance), so starting playback on one reply always cancels another.
+  const speakController = new SpeakController();
+  let ttsAvailable = $state(false);
+
+  $effect(() => {
+    void invoke<{ piper_installed: boolean; voice_count: number; selected_voice: string }>(
+      "tts_status",
+    )
+      .then((status) => {
+        ttsAvailable = status.piper_installed && status.voice_count > 0 && status.selected_voice !== "";
+      })
+      .catch(() => {
+        ttsAvailable = false;
+      });
+  });
+
+  // Stop any in-flight/playing audio when the chat is cleared.
+  $effect(() => {
+    if (turns.length === 0) speakController.cancel();
+  });
+
+  onDestroy(() => {
+    speakController.cancel();
   });
 </script>
 
@@ -211,6 +267,27 @@
             semantic chat search
           </button>
         </div>
+        <div class="group-divider" aria-hidden="true"></div>
+        <div class="search-mode-group">
+          <button
+            class="scope-btn"
+            class:active={chatProfileScope === "work"}
+            onclick={() => onSelectProfileScope("work")}
+            title="Chat uses the distilled WORK profile as background context."
+            disabled={chatStreaming}
+          >
+            work profile
+          </button>
+          <button
+            class="scope-btn"
+            class:active={chatProfileScope === "personal"}
+            onclick={() => onSelectProfileScope("personal")}
+            title="Chat uses the distilled PERSONAL profile as background context."
+            disabled={chatStreaming}
+          >
+            personal profile
+          </button>
+        </div>
         <div class="chat-actions">
           <ChatScopeToggle {selectedScopeActive} {chatScopeKind} {chatStreaming} {onSetChatScope} />
           {#if turns.length > 0}
@@ -220,16 +297,19 @@
       </div>
     </div>
 
-    <div class="chat-scroll" bind:this={scrollEl}>
+    <div class="chat-scroll" bind:this={scrollEl} onscroll={onChatScroll}>
       {#each turns as turn (turn)}
         <div class="turn-wrap">
           <ChatMessageComp
+            id={turn.id}
             role={turn.role}
             thinkingText={turn.thinkingText}
             answerText={turn.answerText}
             toolActivity={turn.toolActivity}
             streaming={turn.streaming}
             attachmentName={turn.attachmentName}
+            {ttsAvailable}
+            controller={speakController}
           />
         </div>
       {/each}

@@ -58,6 +58,7 @@ pub fn run_sweep(
         &config.settings,
         config.lookback_secs,
         config.min_fill_pct,
+        config.import_only,
     );
     let mut worklist = Vec::new();
 
@@ -137,6 +138,24 @@ pub fn run_sweep(
             }
         };
 
+        // Preserve the untouched source transcript (compressed) so raw detail
+        // survives the source tool pruning its own logs (Phase 1). A copy
+        // failure is non-fatal: the summary still archives, just without a raw
+        // pointer. Skipped entirely when the setting is off.
+        let raw_path = if config.settings.preserve_raw_transcripts {
+            match archive::preserve_raw(&config.archive_dir, &session.id, &session.source_path) {
+                Ok(rel) => Some(rel),
+                Err(error) => {
+                    result
+                        .errors
+                        .push(format!("{}: raw preserve: {error}", session.id));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let meta = SessionMeta {
             id: session.id.clone(),
             source: session.source_path.clone(),
@@ -149,11 +168,15 @@ pub fn run_sweep(
             session_timestamp: session.created_at,
             updated_at: session.updated_at,
             transcript_hash: session.transcript_hash.clone(),
+            raw_path,
         };
 
         match archive::write_session(&config.archive_dir, &meta, &output, Utc::now()) {
-            Ok(_) => {
+            Ok(written) => {
                 result.processed += 1;
+                if !written.secret_flags.is_empty() {
+                    result.flagged += 1;
+                }
                 written_ids.push(session.id.clone());
                 emit_progress(app, current, total, &session.id, "done");
             }

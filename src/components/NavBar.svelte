@@ -1,14 +1,15 @@
-<!-- HalluScribe — tab navigation: BRIEFING / SESSION SUMMARY / SETTINGS. -->
+<!-- HalluScribe — tab navigation: BRIEFING / SESSION SUMMARY / PROFILE / SETTINGS. -->
 <script lang="ts">
   interface Props {
-    active: "briefing" | "sessions" | "settings";
-    onchange: (tab: "briefing" | "sessions" | "settings") => void;
+    active: "briefing" | "sessions" | "profile" | "settings";
+    onchange: (tab: "briefing" | "sessions" | "profile" | "settings") => void;
   }
   let { active, onchange }: Props = $props();
 
-  const tabs: { id: "briefing" | "sessions" | "settings"; label: string }[] = [
+  const tabs: { id: "briefing" | "sessions" | "profile" | "settings"; label: string }[] = [
     { id: "briefing",  label: "BRIEFING" },
     { id: "sessions",  label: "SESSION SUMMARY" },
+    { id: "profile",   label: "PROFILE" },
     { id: "settings",  label: "SETTINGS" },
   ];
 </script>

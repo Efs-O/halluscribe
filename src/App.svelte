@@ -7,9 +7,11 @@
   import { open } from "@tauri-apps/plugin-shell";
   import { onMount } from "svelte";
   import NavBar from "./components/NavBar.svelte";
+  import WorkspaceBadge from "./components/WorkspaceBadge.svelte";
   import RunNowButton from "./components/RunNowButton.svelte";
   import BriefingPanel from "./components/briefing/BriefingPanel.svelte";
   import SessionList from "./components/sessions/SessionList.svelte";
+  import ProfilePanel from "./components/profile/ProfilePanel.svelte";
   import SettingsForm from "./components/settings/SettingsForm.svelte";
   import { appendAssistantToken } from "./lib/chatTurns";
   import type {
@@ -25,12 +27,13 @@
     BriefingScope,
     ChatScope,
     ChatSearchMode,
+    ProfileScope,
     SweepProgress,
     HalluScribeSettings,
     WebSearchStatus,
   } from "./lib/types";
 
-  type Tab = "briefing" | "sessions" | "settings";
+  type Tab = "briefing" | "sessions" | "profile" | "settings";
   let activeTab = $state<Tab>("briefing");
   let ctxVisible = $state(false);
   let ctxX = $state(0);
@@ -43,6 +46,7 @@
   let briefingScope = $state<BriefingScope>({ kind: "archive-wide" });
   let chatScope = $state<ChatScope>({ kind: "archive-wide" });
   let chatSearchMode = $state<ChatSearchMode>("archive");
+  let chatProfileScope = $state<ProfileScope>("work");
   let turns = $state<Turn[]>([]);
   let ctxUsedPct = $state(0);
   let chatStreaming = $state(false);
@@ -60,6 +64,11 @@
   let sweepToastTimer: ReturnType<typeof setTimeout> | undefined;
   let isMaximized = $state(false);
   const appWindow = getCurrentWindow();
+  let turnIdCounter = 0;
+  function nextTurnId(): string {
+    turnIdCounter += 1;
+    return `t${turnIdCounter}`;
+  }
 
   function formatToolActivity(tool: string, args: Record<string, unknown>): string {
     if (tool === "web_search") {
@@ -317,6 +326,7 @@
       modelName: currentModelName(),
     };
     turns.push({
+      id: nextTurnId(),
       role: "user",
       thinkingText: "",
       answerText: visibleText,
@@ -326,6 +336,7 @@
       ...turnState,
     });
     turns.push({
+      id: nextTurnId(),
       role: "assistant",
       thinkingText: "",
       answerText: "",
@@ -359,6 +370,7 @@
         webSearchEnabled: webSearchEnabled && webSearchStatus() === "ready",
         thinkingEnabled,
         searchMode: chatSearchMode,
+        profileScope: chatProfileScope,
       });
     } catch (e) {
       const last = turns[turns.length - 1];
@@ -475,6 +487,7 @@
     <button class="brand" onclick={() => open("https://x.com/amandoulou")} title="@amandoulou on X">HALLUSCRIBE</button>
     <NavBar active={activeTab} onchange={(tab) => { activeTab = tab; }} />
     <div class="top-bar-actions">
+      <WorkspaceBadge />
       {#if activeTab === "sessions"}
         <RunNowButton
           running={sweepRunning}
@@ -506,6 +519,7 @@
         selectedScopeActive={briefingScope.kind === "selected-session-ids"}
         chatScopeKind={chatScope.kind}
         {chatSearchMode}
+        {chatProfileScope}
         {turns}
         {chatStreaming}
         {webSearchEnabled}
@@ -554,10 +568,15 @@
           if (!cleared) return;
           chatSearchMode = mode;
         }}
+        onSelectProfileScope={(scope) => {
+          chatProfileScope = scope;
+        }}
         onClearScope={clearSelectedScope}
       />
     {:else if activeTab === "sessions"}
       <SessionList onSendToBriefing={sendSelectedSessionsToBriefing} />
+    {:else if activeTab === "profile"}
+      <ProfilePanel />
     {:else}
       <SettingsForm
         initialSettings={settingsSnapshot}

@@ -67,7 +67,9 @@ fn active_child() -> &'static Mutex<Option<Child>> {
 pub fn kill_embedding_server() {
     if let Ok(mut guard) = active_child().lock() {
         if let Some(mut child) = guard.take() {
+            let pid = child.id();
             let _ = child.kill();
+            crate::llama_pids::unregister(pid);
         }
     }
 }
@@ -77,14 +79,20 @@ pub fn start_runner(settings: &HalluScribeSettings) -> Result<EmbeddingRunner, S
     let model_name = embedding_model_name(settings)?;
     let port = llama_runtime::find_free_port(runtime.port);
     let runtime = EmbeddingRuntime { port, ..runtime };
+    // Reap a llama-server this app orphaned on a prior hard-kill so it frees
+    // VRAM before we load the embedding model (OPS-1).
+    crate::llama_pids::reap_orphans();
     let mut child = spawn_server(&runtime)?;
     if let Err(error) = wait_for_server(port, &mut child) {
         let _ = child.kill();
         return Err(error);
     }
+    crate::llama_pids::register(child.id());
     let mut guard = active_child().lock().unwrap();
     if let Some(mut old) = guard.take() {
+        let pid = old.id();
         let _ = old.kill();
+        crate::llama_pids::unregister(pid);
     }
     *guard = Some(child);
     Ok(EmbeddingRunner { port, model_name })

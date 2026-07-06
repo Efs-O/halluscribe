@@ -1,6 +1,9 @@
 [package]
 name = "halluscribe"
 version = "0.2.1"
+# Two [[bin]] targets exist (the app + halluscribe-mcp); the Tauri bundler
+# needs default-run to know which one is the application binary.
+default-run = "halluscribe"
 edition = "2021"
 license = "Apache-2.0"
 description = "Local-first AI session scribe — reads Claude Code, Codex and Continue JSONL files, summarises them with Gemma 4, and archives human-readable session logs to ~/.halluscribe/"
@@ -11,6 +14,10 @@ repository = "https://github.com/Efs-O/halluscribe"
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "halluscribe-mcp"
+path = "src/bin/halluscribe_mcp.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -26,6 +33,10 @@ reqwest    = { version = "0.12", features = ["blocking", "json"] }
 rusqlite   = { version = "0.31", features = ["bundled"] }
 which      = "6"
 chrono     = { version = "0.4", features = ["clock", "std"], default-features = false }
+rmcp       = { version = "2.1", features = ["transport-io"] }
+tokio      = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
+zstd       = "0.13"
+zip        = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile = "3"

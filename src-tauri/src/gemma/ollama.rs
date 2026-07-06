@@ -1,6 +1,6 @@
 // HalluScribe - Ollama request handling for Gemma session summaries.
 
-use super::schema::{parse_ollama_tool_args, save_session_summary_tool};
+use super::schema::{extract_ollama_tool_args, parse_ollama_tool_args, save_session_summary_tool};
 use super::{GemmaError, GemmaOutput, INFER_TIMEOUT, TEMPERATURE};
 use serde_json::Value;
 use std::time::Duration;
@@ -70,6 +70,43 @@ impl OllamaSession {
             .json()
             .map_err(|e| GemmaError::Http(e.to_string()))?;
         parse_ollama_tool_args(&value)
+    }
+
+    /// Run one completion against an arbitrary caller-supplied tool schema,
+    /// returning the raw parsed tool-call arguments. Used by the profile
+    /// distiller's map/reduce steps, which do not share `save_session_summary`.
+    pub(crate) fn infer_tool(
+        &self,
+        max_tokens: u32,
+        system_prompt: &str,
+        user_content: &str,
+        tool: &Value,
+    ) -> Result<Value, GemmaError> {
+        let payload = serde_json::json!({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_content}
+            ],
+            "tools": [tool],
+            "stream": false,
+            "think": false,
+            "keep_alive": SWEEP_KEEP_ALIVE_SECS,
+            "options": {
+                "temperature": TEMPERATURE,
+                "num_predict": max_tokens,
+                "num_ctx": self.ctx_size
+            }
+        });
+        let value: Value = self
+            .client
+            .post(format!("{}/api/chat", self.base))
+            .json(&payload)
+            .timeout(INFER_TIMEOUT)
+            .send()?
+            .json()
+            .map_err(|e| GemmaError::Http(e.to_string()))?;
+        extract_ollama_tool_args(&value)
     }
 }
 

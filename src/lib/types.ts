@@ -17,6 +17,7 @@ export interface IndexEntry {
   provider?: string;
   fill_estimated?: boolean;
   transcript_hash?: string;
+  secret_flags?: string[];
 }
 
 export interface SessionStats {
@@ -56,6 +57,9 @@ export interface HalluScribeSettings {
   ctx_size: number;
   max_tokens: number;
   briefing_window_hours: number;
+  preserve_raw_transcripts: boolean;
+  tts_piper_bin: string;
+  tts_voice: string;
 }
 
 /** Filters passed to run_briefing. Empty strings mean "no restriction". */
@@ -91,6 +95,8 @@ export interface ChatImage {
 
 /** One rendered turn in the chat UI (not the same as ChatMessage sent to Rust). */
 export interface Turn {
+  /** Stable per-turn id (monotonic counter), used to key the shared SpeakController. */
+  id: string;
   role: "user" | "assistant";
   thinkingText: string;
   answerText: string;
@@ -153,6 +159,14 @@ export interface EmbeddingRebuildProgress {
   failed: number;
 }
 
+/** Result of a raw-transcript backfill pass (Persona Parity Phase A). */
+export interface BackfillResult {
+  recovered: number;
+  already_had: number;
+  source_missing: number;
+  total: number;
+}
+
 /** Payload from briefing-token / chat-token Tauri events. */
 export interface TokenPayload {
   text: string;
@@ -173,3 +187,50 @@ export interface ChatUsagePayload {
 }
 
 export type WebSearchStatus = "ready" | "missing-api-key" | "unsupported-backend" | "loading";
+
+/** Result of previewing a redaction before applying it. */
+export interface RedactionPreview {
+  occurrences: number;
+  excerpts: string[];
+}
+
+/** Result of applying a redaction to an archived session body. */
+export interface RedactionOutcome {
+  replacements: number;
+  backup_path: string;
+}
+
+/** Which of the two profiles (Phase 2c) an operation targets. */
+export type ProfileScope = "work" | "personal";
+
+/** Emitted by `profile-progress` events during a profile refresh. */
+export interface ProfileProgressPayload {
+  current: number;
+  total: number;
+  stage: "mapping" | "merging" | "writing";
+  scope: ProfileScope;
+}
+
+/** Emitted by the `profile-done` event when a profile refresh finishes. */
+export interface ProfileDonePayload {
+  busy: boolean;
+  session_count: number;
+  facts_count: number;
+  errors: string[];
+  scope: ProfileScope;
+}
+
+/** One registered person/workspace (Persona Parity Phase E). */
+export interface WorkspaceInfo {
+  name: string;
+  path: string;
+  import_only: boolean;
+}
+
+/** Snapshot returned by list_workspaces. `active` is null when the default root is active. */
+export interface WorkspaceListDto {
+  default_root: string;
+  default_name: string | null;
+  active: string | null;
+  workspaces: WorkspaceInfo[];
+}

@@ -1,0 +1,241 @@
+// HalluScribe - deterministic assembly: profile.md + profile_meta.json from
+// merged sections, and the weekly digest from the map step's raw facts. No
+// inference happens here - this module only formats and writes.
+
+use super::scope::ProfileScope;
+use super::types::{ProfileFact, ProfileMeta, ProfileSections};
+use super::ProfileError;
+use crate::archive::IndexEntry;
+use chrono::{DateTime, Datelike, Utc};
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+const HALLUSCRIBE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Body rendered for a section with no distilled content yet. Shared with
+/// `parse_md.rs`, which maps it back to an empty section on parse so the
+/// writer/parser pair round-trips.
+pub(super) const EMPTY_SECTION_PLACEHOLDER: &str = "_No facts distilled yet._";
+
+fn profile_dir(archive_dir: &Path) -> PathBuf {
+    archive_dir.join("profile")
+}
+
+/// The scope's directory, e.g. `<archive_dir>/profile/work/`. Runs the
+/// legacy-layout migration first (idempotent, cheap) so every read/write
+/// entry point sees the current layout regardless of call order.
+pub(super) fn scope_dir(archive_dir: &Path, scope: ProfileScope) -> PathBuf {
+    migrate_legacy_profile_layout(archive_dir);
+    profile_dir(archive_dir).join(scope.dir_name())
+}
+
+/// One-time migration from the original (pre-Phase-2c) single-profile layout
+/// — `profile/profile.md`, `profile/profile_meta.json`,
+/// `profile/digest-*.md` — into `profile/work/...`, since those files were
+/// always built from the Work-scope sources. Idempotent: a no-op once
+/// `profile/work/profile.md` exists, and safe when any individual legacy
+/// file is missing.
+pub fn migrate_legacy_profile_layout(archive_dir: &Path) {
+    let dir = profile_dir(archive_dir);
+    let legacy_profile_md = dir.join("profile.md");
+    let work_dir = dir.join(ProfileScope::Work.dir_name());
+    if !legacy_profile_md.exists() || work_dir.join("profile.md").exists() {
+        return;
+    }
+    if fs::create_dir_all(&work_dir).is_err() {
+        return;
+    }
+    for name in ["profile.md", "profile_meta.json"] {
+        let src = dir.join(name);
+        if src.exists() {
+            let _ = fs::rename(&src, work_dir.join(name));
+        }
+    }
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+            if file_name.starts_with("digest-") && file_name.ends_with(".md") {
+                let _ = fs::rename(entry.path(), work_dir.join(&file_name));
+            }
+        }
+    }
+}
+
+pub fn load_meta(archive_dir: &Path, scope: ProfileScope) -> ProfileMeta {
+    let path = scope_dir(archive_dir, scope).join("profile_meta.json");
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+pub fn read_profile_md(archive_dir: &Path, scope: ProfileScope) -> Option<String> {
+    fs::read_to_string(scope_dir(archive_dir, scope).join("profile.md")).ok()
+}
+
+/// Content of the newest `digest-*.md` for `scope`, or `None` when no digest
+/// exists yet. `digest-<year>-W<week>.md` names sort chronologically as
+/// plain strings, so the lexicographic maximum is the latest week.
+pub fn latest_digest(archive_dir: &Path, scope: ProfileScope) -> Option<String> {
+    let dir = scope_dir(archive_dir, scope);
+    let newest = fs::read_dir(&dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("digest-") && name.ends_with(".md"))
+        .max()?;
+    fs::read_to_string(dir.join(newest)).ok()
+}
+
+/// All `digest-*.md` for `scope` as `(filename, contents)` pairs, sorted by
+/// filename (chronological). Used by the Persona Pack export. Empty when none
+/// exist yet or the directory is unreadable.
+pub fn all_digests(archive_dir: &Path, scope: ProfileScope) -> Vec<(String, String)> {
+    let dir = scope_dir(archive_dir, scope);
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("digest-") && name.ends_with(".md"))
+        .collect();
+    names.sort();
+    names
+        .into_iter()
+        .filter_map(|name| {
+            fs::read_to_string(dir.join(&name))
+                .ok()
+                .map(|contents| (name, contents))
+        })
+        .collect()
+}
+
+/// Write profile.md and profile_meta.json for `scope`.
+pub fn write_profile(
+    archive_dir: &Path,
+    scope: ProfileScope,
+    sections: &ProfileSections,
+    meta: &ProfileMeta,
+) -> Result<PathBuf, ProfileError> {
+    let dir = scope_dir(archive_dir, scope);
+    fs::create_dir_all(&dir)?;
+
+    let date = meta.generated_at.get(..10).unwrap_or(&meta.generated_at);
+    let markdown = build_profile_markdown(scope, date, meta.session_count, sections);
+    let profile_path = dir.join("profile.md");
+    fs::write(&profile_path, markdown)?;
+    fs::write(
+        dir.join("profile_meta.json"),
+        serde_json::to_string_pretty(meta)?,
+    )?;
+
+    Ok(profile_path)
+}
+
+fn build_profile_markdown(
+    scope: ProfileScope,
+    date: &str,
+    session_count: usize,
+    sections: &ProfileSections,
+) -> String {
+    let mut out = format!(
+        "# User Profile — generated by HalluScribe {HALLUSCRIBE_VERSION} on {date} from {session_count} sessions\n\n"
+    );
+    for section in scope.sections() {
+        out.push_str(&format!("## {}\n\n", section.heading()));
+        let body = sections.get(*section);
+        let body = if body.is_empty() {
+            EMPTY_SECTION_PLACEHOLDER
+        } else {
+            body
+        };
+        out.push_str(body);
+        out.push_str("\n\n");
+    }
+    out
+}
+
+/// Write `digest-<ISO-week>.md` for `scope`: a deterministic (no-inference)
+/// rollup of the sessions this refresh mapped, plus the new facts' one-liners.
+pub fn write_digest(
+    archive_dir: &Path,
+    scope: ProfileScope,
+    selected: &[&IndexEntry],
+    facts: &[ProfileFact],
+    now: DateTime<Utc>,
+) -> Result<PathBuf, ProfileError> {
+    let dir = scope_dir(archive_dir, scope);
+    fs::create_dir_all(&dir)?;
+
+    let iso_week = now.iso_week();
+    let filename = format!("digest-{}-W{:02}.md", iso_week.year(), iso_week.week());
+    let path = dir.join(filename);
+    fs::write(&path, build_digest_markdown(selected, facts))?;
+    Ok(path)
+}
+
+fn build_digest_markdown(selected: &[&IndexEntry], facts: &[ProfileFact]) -> String {
+    let mut by_project: HashMap<&str, u32> = HashMap::new();
+    let mut by_type: HashMap<&str, u32> = HashMap::new();
+    let mut error_counts: HashMap<&str, u32> = HashMap::new();
+    for entry in selected {
+        *by_project.entry(entry.project.as_str()).or_insert(0) += 1;
+        *by_type.entry(entry.session_type.as_str()).or_insert(0) += 1;
+        for tag in &entry.error_tags {
+            *error_counts.entry(tag.as_str()).or_insert(0) += 1;
+        }
+    }
+
+    let mut out = format!(
+        "# Weekly Digest\n\n{} sessions distilled this refresh.\n\n",
+        selected.len()
+    );
+
+    out.push_str("## By project\n\n");
+    for (project, count) in sorted_desc(&by_project) {
+        out.push_str(&format!("- {project}: {count}\n"));
+    }
+
+    out.push_str("\n## By type\n\n");
+    for (session_type, count) in sorted_desc(&by_type) {
+        out.push_str(&format!("- {session_type}: {count}\n"));
+    }
+
+    out.push_str("\n## Top new error tags\n\n");
+    let top_errors = sorted_desc(&error_counts);
+    if top_errors.is_empty() {
+        out.push_str("_None._\n");
+    } else {
+        for (tag, count) in top_errors.into_iter().take(10) {
+            out.push_str(&format!("- {tag}: {count}\n"));
+        }
+    }
+
+    out.push_str("\n## New facts\n\n");
+    if facts.is_empty() {
+        out.push_str("_None._\n");
+    } else {
+        for f in facts {
+            out.push_str(&format!(
+                "- [{}] {} [{}]\n",
+                f.date,
+                f.fact,
+                f.evidence.join(", ")
+            ));
+        }
+    }
+
+    out
+}
+
+fn sorted_desc<'a>(counts: &HashMap<&'a str, u32>) -> Vec<(&'a str, u32)> {
+    let mut pairs: Vec<(&str, u32)> = counts.iter().map(|(k, v)| (*k, *v)).collect();
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    pairs
+}
+
+#[cfg(test)]
+#[path = "writer_tests.rs"]
+mod tests;

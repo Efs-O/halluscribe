@@ -5,31 +5,49 @@ mod app_state;
 mod app_support;
 mod chat_prompt;
 mod commands;
+mod commands_profile;
+mod commands_tts;
+mod commands_workspace;
 mod infer_lock;
+mod llama_pids;
 mod llama_runtime;
 mod recorded_sessions;
+mod tts;
 
 pub mod archive;
 pub mod briefing;
 pub mod core;
 pub mod gemma;
+pub mod mcp;
+pub mod pack;
 pub mod preprocessor;
+pub mod profile;
 pub mod readers;
 pub mod retrieval;
 pub mod scanner;
 pub mod scheduler;
 pub mod search;
 pub mod settings;
+pub mod workspace;
 
 use app_state::{BriefingCancel, ChatCancel, SweepCancel};
 use app_support::{archive_dir, clear_first_run, record_sweep_date, sweep_config};
 use chrono::{Datelike, Local, Timelike};
 use commands::{
-    cancel_briefing, cancel_chat, cancel_sweep, delete_sessions, get_raw_session_total,
-    get_recent_sessions, get_settings, get_stats, read_session, rebuild_session_embeddings,
-    run_briefing, save_recorded_chat_session, save_settings, search_sessions,
-    search_sessions_fulltext, search_sessions_semantic, send_chat_message, trigger_sweep,
-    validate_ollama_api_key,
+    apply_redaction, cancel_briefing, cancel_chat, cancel_sweep, delete_sessions,
+    get_raw_session_total, get_recent_sessions, get_settings, get_stats, preview_redaction,
+    read_session, rebuild_session_embeddings, run_briefing, save_recorded_chat_session,
+    save_settings, search_sessions, search_sessions_fulltext, search_sessions_semantic,
+    send_chat_message, trigger_sweep, validate_ollama_api_key,
+};
+use commands_profile::{
+    backfill_raw, count_available_raw, export_persona_pack, get_latest_digest, get_profile,
+    get_profile_refresh_status, run_profile_refresh,
+};
+use commands_tts::{tts_list_voices, tts_speak, tts_status};
+use commands_workspace::{
+    create_workspace, delete_workspace, list_workspaces, rename_default_workspace,
+    rename_workspace, set_workspace_import_only, switch_workspace,
 };
 use std::sync::{atomic::AtomicBool, Arc};
 use tauri::image::Image;
@@ -193,6 +211,12 @@ pub fn run() {
                             if !result.errors.is_empty() {
                                 message.push_str(&format!(", errors: {}", result.errors.len()));
                             }
+                            if result.flagged > 0 {
+                                message.push_str(&format!(
+                                    ", possible secrets flagged: {}",
+                                    result.flagged
+                                ));
+                            }
                             let _ = handle.emit("sweep-done", message);
                         }
                     }
@@ -221,6 +245,25 @@ pub fn run() {
             delete_sessions,
             cancel_sweep,
             rebuild_session_embeddings,
+            preview_redaction,
+            apply_redaction,
+            run_profile_refresh,
+            get_profile,
+            get_latest_digest,
+            get_profile_refresh_status,
+            export_persona_pack,
+            count_available_raw,
+            backfill_raw,
+            list_workspaces,
+            create_workspace,
+            switch_workspace,
+            rename_workspace,
+            rename_default_workspace,
+            delete_workspace,
+            set_workspace_import_only,
+            tts_list_voices,
+            tts_status,
+            tts_speak,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -1,6 +1,6 @@
 // HalluScribe - llama.cpp subprocess lifecycle and request handling for Gemma.
 
-use super::schema::{parse_openai_tool_args, save_session_summary_tool};
+use super::schema::{extract_openai_tool_args, parse_openai_tool_args, save_session_summary_tool};
 use super::{GemmaError, GemmaOutput, INFER_TIMEOUT, STARTUP_TIMEOUT_SECS, TEMPERATURE};
 use crate::llama_runtime::{self, ServerWaitError};
 use serde_json::Value;
@@ -35,11 +35,15 @@ impl LlamaServer {
             .and_then(|s| s.to_str())
             .unwrap_or("model")
             .to_string();
+        // Reap any llama-server this app orphaned on a prior hard-kill so it
+        // releases VRAM before we load a fresh model (OPS-1).
+        crate::llama_pids::reap_orphans();
         let mut child = spawn_server(&bin, model, port, gpu_layers, ctx_size)?;
         if let Err(error) = wait_for_server(port, &mut child) {
             let _ = child.kill();
             return Err(error);
         }
+        crate::llama_pids::register(child.id());
         Ok(Self {
             child,
             port,
@@ -61,11 +65,33 @@ impl LlamaServer {
             transcript,
         )
     }
+
+    /// Run one completion against an arbitrary caller-supplied tool schema,
+    /// returning the raw parsed tool-call arguments. Used by the profile
+    /// distiller's map/reduce steps, which do not share `save_session_summary`.
+    pub(crate) fn infer_tool(
+        &self,
+        max_tokens: u32,
+        system_prompt: &str,
+        user_content: &str,
+        tool: &Value,
+    ) -> Result<Value, GemmaError> {
+        call_tool(
+            self.port,
+            &self.model_name,
+            max_tokens,
+            system_prompt,
+            user_content,
+            tool,
+        )
+    }
 }
 
 impl Drop for LlamaServer {
     fn drop(&mut self) {
+        let pid = self.child.id();
         let _ = self.child.kill();
+        crate::llama_pids::unregister(pid);
     }
 }
 
@@ -173,4 +199,34 @@ fn call(
         .json()
         .map_err(|e| GemmaError::Http(e.to_string()))?;
     parse_openai_tool_args(&value)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn call_tool(
+    port: u16,
+    model_name: &str,
+    max_tokens: u32,
+    system_prompt: &str,
+    user_content: &str,
+    tool: &Value,
+) -> Result<Value, GemmaError> {
+    let payload = serde_json::json!({
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_content}
+        ],
+        "tools": [tool],
+        "temperature": TEMPERATURE,
+        "max_tokens": max_tokens,
+        "stream": false
+    });
+    let value: Value = reqwest::blocking::Client::new()
+        .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
+        .json(&payload)
+        .timeout(INFER_TIMEOUT)
+        .send()?
+        .json()
+        .map_err(|e| GemmaError::Http(e.to_string()))?;
+    extract_openai_tool_args(&value)
 }

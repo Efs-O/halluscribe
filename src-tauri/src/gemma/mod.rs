@@ -6,8 +6,10 @@ mod llamacpp;
 mod ollama;
 mod schema;
 mod session;
+mod tool_session;
 
 pub use session::{start_sweep_session, SweepSession};
+pub use tool_session::{start_tool_session, ToolSession};
 
 use crate::readers::ChatProvider;
 use serde::{Deserialize, Serialize};

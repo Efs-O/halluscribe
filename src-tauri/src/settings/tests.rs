@@ -20,6 +20,9 @@ mod tests {
         assert!(settings.ollama_api_key.is_empty());
         assert!(settings.tavily_api_key.is_empty());
         assert_eq!(settings.summary_min_fill_pct, 50.0);
+        // Auto-sweep is opt-in: off by default so no unattended sweep runs
+        // against a workspace (esp. a new guest) without the user enabling it.
+        assert!(!settings.scheduled_processing_enabled);
         assert_eq!(settings.schedule_time, "02:00");
         assert_eq!(settings.lookback_hours, 24);
         assert_eq!(settings.gpu_layers, -1);
@@ -217,6 +220,7 @@ mod tests {
             lookback_hours: 24,
             ctx_size: 65_536,
             max_tokens: 32_768,
+            scheduled_processing_enabled: true,
             ..Default::default()
         };
         let cfg = settings
@@ -233,6 +237,7 @@ mod tests {
             lookback_hours: 48,
             ctx_size: 65_536,
             max_tokens: 32_768,
+            scheduled_processing_enabled: true,
             ..Default::default()
         };
         let cfg = settings
@@ -301,6 +306,58 @@ mod tests {
         assert_eq!(cfg.schedule_time, "03:45");
         assert_eq!(cfg.min_fill_pct, 60.0);
         assert_eq!(cfg.lookback_secs, 48 * 3600);
+    }
+
+    #[test]
+    fn default_profile_sources_include_coding_tools_and_exclude_personal_chats() {
+        let settings = HalluScribeSettings::default();
+        for key in [
+            "claude_code",
+            "codex",
+            "forge",
+            "continue",
+            "halluscribe_gemma_chat",
+            "ollama_chat",
+        ] {
+            assert!(
+                settings.profile_sources.iter().any(|s| s == key),
+                "missing default profile source: {key}"
+            );
+        }
+        for excluded in ["chatgpt", "claude_ai", "gemini"] {
+            assert!(
+                !settings.profile_sources.iter().any(|s| s == excluded),
+                "personal chat provider must be excluded by default: {excluded}"
+            );
+        }
+    }
+
+    #[test]
+    fn old_settings_json_without_profile_sources_gets_default() {
+        let dir = tmp();
+        fs::write(
+            dir.path().join("settings.json"),
+            r#"{"schedule_time": "04:00", "ollama_model": "gemma4:12b"}"#,
+        )
+        .unwrap();
+        let settings = load_settings(dir.path());
+        assert_eq!(settings.ollama_model, "gemma4:12b");
+        assert_eq!(
+            settings.profile_sources,
+            HalluScribeSettings::default().profile_sources
+        );
+    }
+
+    #[test]
+    fn profile_sources_round_trip() {
+        let dir = tmp();
+        let settings = HalluScribeSettings {
+            profile_sources: vec!["claude_code".to_string()],
+            ..Default::default()
+        };
+        save_settings(dir.path(), &settings).unwrap();
+        let reloaded = load_settings(dir.path());
+        assert_eq!(reloaded.profile_sources, vec!["claude_code".to_string()]);
     }
 
     #[test]
