@@ -39,13 +39,21 @@ pub(crate) fn tts_status(app: tauri::AppHandle) -> Result<TtsStatus, String> {
 /// Synthesize `text` with the user-selected voice and return a complete WAV
 /// file as raw bytes, so the webview receives an `ArrayBuffer` instead of a
 /// JSON number array.
+///
+/// `async` + `spawn_blocking` so the piper subprocess (spawn, model load,
+/// synth, wait) runs off the main thread — a synchronous command would block
+/// the UI thread and freeze the window until synthesis finished.
 #[tauri::command]
-pub(crate) fn tts_speak(
+pub(crate) async fn tts_speak(
     app: tauri::AppHandle,
     text: String,
 ) -> Result<tauri::ipc::Response, String> {
-    let dir = archive_dir(&app)?;
-    let loaded_settings = settings::load_settings(&dir);
-    let wav = tts::synth_wav(&app, &loaded_settings, &text)?;
+    let wav = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let dir = archive_dir(&app)?;
+        let loaded_settings = settings::load_settings(&dir);
+        tts::synth_wav(&app, &loaded_settings, &text)
+    })
+    .await
+    .map_err(|error| format!("tts synthesis task failed: {error}"))??;
     Ok(tauri::ipc::Response::new(wav))
 }
