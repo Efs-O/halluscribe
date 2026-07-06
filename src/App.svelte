@@ -14,6 +14,7 @@
   import ProfilePanel from "./components/profile/ProfilePanel.svelte";
   import SettingsForm from "./components/settings/SettingsForm.svelte";
   import { appendAssistantToken } from "./lib/chatTurns";
+  import { SpeakController } from "./lib/tts.svelte.ts";
   import type {
     ChatAttachment,
     ChatUsagePayload,
@@ -35,6 +36,11 @@
 
   type Tab = "briefing" | "sessions" | "profile" | "settings";
   let activeTab = $state<Tab>("briefing");
+
+  // One shared SpeakController owned here (App is never destroyed) so TTS
+  // playback keeps running when the user switches tabs — BriefingPanel used to
+  // own it and cancelled playback in its onDestroy on every tab change.
+  const speakController = new SpeakController();
   let ctxVisible = $state(false);
   let ctxX = $state(0);
   let ctxY = $state(0);
@@ -530,6 +536,7 @@
         {thinkingChangePending}
         webSearchStatus={webSearchStatus()}
         imageAttachEnabled={imageAttachEnabled()}
+        {speakController}
         onRefreshBriefing={(filters) => runBriefing(filters)}
         onStopBriefing={cancelBriefing}
         onSendChat={sendChat}

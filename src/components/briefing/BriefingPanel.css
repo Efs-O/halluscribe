@@ -83,7 +83,7 @@
 }
 
 .briefing-scroll { gap: 8px; }
-.chat-scroll { gap: 4px; padding-bottom: 8px; }
+.chat-scroll { gap: 4px; padding: 0 10px 8px; }
 
 .refresh-btn,
 .scope-btn,

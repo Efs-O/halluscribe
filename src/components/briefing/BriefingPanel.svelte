@@ -2,7 +2,6 @@
 <!-- All state is owned by App.svelte and passed as props so tab switches preserve it. -->
 <script lang="ts">
   import "./BriefingPanel.css";
-  import { onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import type {
     ChatAttachment,
@@ -13,7 +12,7 @@
     ProfileScope,
     WebSearchStatus,
   } from "../../lib/types";
-  import { SpeakController } from "../../lib/tts.svelte.ts";
+  import type { SpeakController } from "../../lib/tts.svelte.ts";
   import BriefingFiltersBar from "./BriefingFiltersBar.svelte";
   import ChatScopeToggle from "./ChatScopeToggle.svelte";
   import ChatMessageComp from "./ChatMessage.svelte";
@@ -53,6 +52,7 @@
     onSelectProfileScope: (scope: ProfileScope) => void | Promise<unknown>;
     onClearScope: () => void | Promise<unknown>;
     imageAttachEnabled: boolean;
+    speakController: SpeakController;
   }
 
   let {
@@ -89,6 +89,7 @@
     onSelectProfileScope,
     onClearScope,
     imageAttachEnabled,
+    speakController,
   }: Props = $props();
 
   let dateFrom = $state("");
@@ -157,10 +158,10 @@
     if (scrollEl && stickToBottom) scrollEl.scrollTop = scrollEl.scrollHeight;
   });
 
-  // One shared SpeakController for every ChatMessage rendered by this panel
-  // (briefing / profile / archive / semantic chat all reuse the same
-  // instance), so starting playback on one reply always cancels another.
-  const speakController = new SpeakController();
+  // The SpeakController is owned by App.svelte (which is never destroyed) and
+  // passed in as a prop, so TTS playback keeps running across tab switches.
+  // A single shared instance means starting playback on one reply always
+  // cancels another (briefing / profile / archive / semantic chat all reuse it).
   let ttsAvailable = $state(false);
 
   $effect(() => {
@@ -178,10 +179,6 @@
   // Stop any in-flight/playing audio when the chat is cleared.
   $effect(() => {
     if (turns.length === 0) speakController.cancel();
-  });
-
-  onDestroy(() => {
-    speakController.cancel();
   });
 </script>
 
