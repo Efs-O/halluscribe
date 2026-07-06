@@ -145,6 +145,8 @@ Any MCP client works — each has its own config file, but they all declare the 
 command = "/path/to/halluscribe-mcp"
 ```
 
+`mcp_servers` is a table, so this coexists with any other servers you've already registered (e.g. your own coordination/relay MCP server) — just add another `[mcp_servers.<name>]` block, don't replace existing ones. Config changes only take effect in a **new** Codex session; existing sessions keep running against whatever was loaded at their start, same caveat as Claude Code.
+
 **Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
