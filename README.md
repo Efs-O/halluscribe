@@ -164,6 +164,8 @@ HALLUSCRIBE_DIR=/path/to/archive /path/to/halluscribe-mcp
 ```
 
 > **Tip:** if you build from source, the binary lands in `src-tauri/target/release/`, where a later `cargo clean` will delete it — silently breaking every client registered against that path. Copy it to a stable location first and register that copy.
+>
+> **The flip side of that copy:** it does not update itself. After every new release (or any rebuild that changes the MCP tools), re-copy the fresh `halluscribe-mcp` over the registered one — otherwise agents keep talking to yesterday's tool schema and silently miss new capabilities. Sessions already running keep their old server process; new sessions pick up the new binary.
 
 ### Per-person workspaces
 
