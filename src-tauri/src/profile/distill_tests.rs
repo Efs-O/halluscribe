@@ -248,3 +248,62 @@ fn parse_facts_skips_conventions_fact_under_personal_scope() {
     assert!(facts.is_empty());
     assert_eq!(warnings.len(), 1);
 }
+
+fn fact(evidence: &[&str]) -> ProfileFact {
+    ProfileFact {
+        section: ProfileSection::Conventions,
+        fact: "Uses Rust and Tauri.".to_string(),
+        evidence: evidence.iter().map(|s| s.to_string()).collect(),
+        date: "2026-06-01".to_string(),
+    }
+}
+
+#[test]
+fn validate_evidence_keeps_exact_match() {
+    let known: HashSet<&str> = ["abc12345", "def67890"].into_iter().collect();
+    let (facts, warnings) = validate_evidence(vec![fact(&["abc12345"])], &known);
+    assert_eq!(facts.len(), 1);
+    assert_eq!(facts[0].evidence, vec!["abc12345".to_string()]);
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn validate_evidence_repairs_unique_prefix() {
+    let known: HashSet<&str> = ["d087b575-1234-4abc-9def-3bddaffa6ae1", "other-id-99999999"]
+        .into_iter()
+        .collect();
+    let (facts, warnings) = validate_evidence(vec![fact(&["d087b575-1234"])], &known);
+    assert_eq!(facts.len(), 1);
+    assert_eq!(
+        facts[0].evidence,
+        vec!["d087b575-1234-4abc-9def-3bddaffa6ae1".to_string()]
+    );
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn validate_evidence_drops_unknown_id_but_keeps_fact() {
+    let known: HashSet<&str> = ["abc12345", "def67890"].into_iter().collect();
+    let (facts, warnings) = validate_evidence(vec![fact(&["abc12345", "totally-fake-id"])], &known);
+    assert_eq!(facts.len(), 1);
+    assert_eq!(facts[0].evidence, vec!["abc12345".to_string()]);
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("totally-fake-id"));
+}
+
+#[test]
+fn validate_evidence_drops_fact_when_all_evidence_invalid() {
+    let known: HashSet<&str> = ["abc12345", "def67890"].into_iter().collect();
+    let (facts, warnings) = validate_evidence(vec![fact(&["nope-not-real"])], &known);
+    assert!(facts.is_empty());
+    assert_eq!(warnings.len(), 2); // one for the dropped id, one for the dropped fact
+    assert!(warnings.iter().any(|w| w.contains("no valid evidence")));
+}
+
+#[test]
+fn validate_evidence_ambiguous_prefix_is_dropped_not_repaired() {
+    let known: HashSet<&str> = ["abcd1234-aaaa", "abcd1234-bbbb"].into_iter().collect();
+    let (facts, warnings) = validate_evidence(vec![fact(&["abcd1234"])], &known);
+    assert!(facts.is_empty());
+    assert!(warnings.iter().any(|w| w.contains("abcd1234")));
+}

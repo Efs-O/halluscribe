@@ -1,12 +1,14 @@
 // HalluScribe - profile distiller map step: batch sessions into an evidence
 // block and extract candidate facts via a `save_profile_facts` tool call.
 
+use super::citations::resolve_id;
 use super::scope::ProfileScope;
 use super::types::{ProfileFact, ProfileSection};
 use super::ProfileError;
 use crate::archive::IndexEntry;
 use serde_json::Value;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -68,7 +70,49 @@ pub(super) fn distill_batch(
         &save_profile_facts_tool(scope),
         MAP_MAX_TOKENS,
     )?;
-    parse_facts(scope, &result)
+    let (facts, mut warnings) = parse_facts(scope, &result)?;
+    let known_ids: HashSet<&str> = batch.iter().map(|entry| entry.id.as_str()).collect();
+    let (facts, evidence_warnings) = validate_evidence(facts, &known_ids);
+    warnings.extend(evidence_warnings);
+    Ok((facts, warnings))
+}
+
+/// Validate each fact's `evidence` ids against the batch's exact id set
+/// (parse-time defence against hallucinated/truncated citations — see
+/// docs/internal/PROFILE_QUALITY_PLAN.md Phase 1a). An id that exactly
+/// matches a batch id is kept; an id that is a unique prefix (>= 8 chars) of
+/// exactly one batch id is repaired to that full id; anything else is
+/// dropped. A fact whose evidence becomes empty is dropped entirely (never
+/// fails the batch) with a warning.
+fn validate_evidence(
+    facts: Vec<ProfileFact>,
+    known_ids: &HashSet<&str>,
+) -> (Vec<ProfileFact>, Vec<String>) {
+    let mut kept = Vec::new();
+    let mut warnings = Vec::new();
+    for mut fact in facts {
+        let original = fact.evidence.clone();
+        let mut resolved = Vec::new();
+        for id in &original {
+            match resolve_id(id, known_ids) {
+                Some(canonical) => resolved.push(canonical.to_string()),
+                None => warnings.push(format!(
+                    "dropped invalid evidence id '{id}' from fact '{}'",
+                    fact.fact
+                )),
+            }
+        }
+        if resolved.is_empty() {
+            warnings.push(format!(
+                "dropped fact '{}' with no valid evidence ids",
+                fact.fact
+            ));
+            continue;
+        }
+        fact.evidence = resolved;
+        kept.push(fact);
+    }
+    (kept, warnings)
 }
 
 fn build_evidence_block(archive_dir: &Path, batch: &[&IndexEntry]) -> String {

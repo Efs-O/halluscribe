@@ -48,16 +48,31 @@ fn session_json(id: &str, provider: &str, ts: &str) -> serde_json::Value {
     })
 }
 
-fn canned_response(tool: &serde_json::Value) -> serde_json::Value {
+/// Evidence must cite a real id from the mapped batch (Phase 1a validation
+/// now drops evidence that doesn't belong to it), so this pulls whichever
+/// session id actually appears in the map call's user content instead of a
+/// fixed placeholder.
+fn first_session_id(user: &str) -> String {
+    user.lines()
+        .find_map(|line| line.strip_prefix("Session id: "))
+        .unwrap_or("s1")
+        .trim()
+        .to_string()
+}
+
+fn canned_response(user: &str, tool: &serde_json::Value) -> serde_json::Value {
     match tool["function"]["name"].as_str().unwrap_or("") {
-        "save_profile_facts" => serde_json::json!({
-            "facts": [{
-                "section": "projects",
-                "fact": "Works on proj.",
-                "evidence": ["s1"],
-                "date": "2026-06-01"
-            }]
-        }),
+        "save_profile_facts" => {
+            let id = first_session_id(user);
+            serde_json::json!({
+                "facts": [{
+                    "section": "projects",
+                    "fact": "Works on proj.",
+                    "evidence": [id],
+                    "date": "2026-06-01"
+                }]
+            })
+        }
         _ => serde_json::json!({ "content": "proj [s1]" }),
     }
 }
@@ -102,7 +117,7 @@ fn pending_file_resume_excludes_already_mapped_ids_and_seeds_facts() {
         if tool["function"]["name"].as_str() == Some("save_profile_facts") {
             map_inputs.lock().unwrap().push(user.to_string());
         }
-        Ok(canned_response(tool))
+        Ok(canned_response(user, tool))
     };
     let outcome = run_refresh(
         &dir,
@@ -149,7 +164,7 @@ fn pending_file_is_deleted_after_successful_run() {
         )],
     );
     let sources = vec!["claude_code".to_string()];
-    let tool_call: &ToolCallFn = &|_sys, _user, tool, _max| Ok(canned_response(tool));
+    let tool_call: &ToolCallFn = &|_sys, user, tool, _max| Ok(canned_response(user, tool));
     run_refresh(
         &dir,
         ProfileScope::Work,
@@ -184,7 +199,7 @@ fn failed_reduce_path_leaves_pending_file_for_next_run() {
     // file... that is OS-flaky, so instead assert the snapshot exists right
     // after the map stage via the progress callback.
     let snapshot_seen = AtomicUsize::new(0);
-    let tool_call: &ToolCallFn = &|_sys, _user, tool, _max| Ok(canned_response(tool));
+    let tool_call: &ToolCallFn = &|_sys, user, tool, _max| Ok(canned_response(user, tool));
     run_refresh(
         &dir,
         ProfileScope::Work,
@@ -222,7 +237,7 @@ fn skipped_fact_warning_still_advances_watermark_and_clears_pending() {
         )],
     );
     let sources = vec!["claude_code".to_string()];
-    let tool_call: &ToolCallFn = &|_sys, _user, tool, _max| {
+    let tool_call: &ToolCallFn = &|_sys, user, tool, _max| {
         if tool["function"]["name"].as_str() == Some("save_profile_facts") {
             Ok(serde_json::json!({
                 "facts": [
@@ -241,7 +256,7 @@ fn skipped_fact_warning_still_advances_watermark_and_clears_pending() {
                 ]
             }))
         } else {
-            Ok(canned_response(tool))
+            Ok(canned_response(user, tool))
         }
     };
     let outcome = run_refresh(
@@ -284,7 +299,7 @@ fn corrupt_pending_file_is_ignored_with_warning() {
     fs::write(scope_path.join("pending_facts.json"), "{ not json").unwrap();
 
     let sources = vec!["claude_code".to_string()];
-    let tool_call: &ToolCallFn = &|_sys, _user, tool, _max| Ok(canned_response(tool));
+    let tool_call: &ToolCallFn = &|_sys, user, tool, _max| Ok(canned_response(user, tool));
     let outcome = run_refresh(
         &dir,
         ProfileScope::Work,
@@ -323,7 +338,7 @@ fn recovery_run_with_zero_new_sessions_still_reduces_pending_facts() {
     assert!(has_pending_facts(&dir, ProfileScope::Work));
 
     let sources = vec!["claude_code".to_string()];
-    let tool_call: &ToolCallFn = &|_sys, _user, tool, _max| Ok(canned_response(tool));
+    let tool_call: &ToolCallFn = &|_sys, user, tool, _max| Ok(canned_response(user, tool));
     let outcome = run_refresh(
         &dir,
         ProfileScope::Work,
