@@ -3,6 +3,15 @@
 use super::{GemmaError, GemmaOutput, SessionType};
 use serde_json::Value;
 
+/// A char-boundary-safe preview of raw model text for error messages.
+/// Slicing by byte offset (`&s[..200]`) panics when the cut lands inside a
+/// multibyte UTF-8 char — e.g. Greek content, where every char is 2 bytes —
+/// which would unwind the whole sweep thread instead of surfacing a per-session
+/// error. Taking chars is always valid and keeps the preview readable.
+fn content_preview(content: &str) -> String {
+    content.chars().take(200).collect()
+}
+
 pub(crate) fn save_session_summary_tool() -> Value {
     serde_json::json!({
         "type": "function",
@@ -58,7 +67,7 @@ pub(crate) fn extract_openai_tool_args(value: &Value) -> Result<Value, GemmaErro
                 .unwrap_or("");
             GemmaError::BadToolCall(format!(
                 "tool_calls absent; content preview: {}",
-                &preview[..preview.len().min(200)]
+                content_preview(preview)
             ))
         })?;
     serde_json::from_str(args_raw).map_err(|e| {
@@ -89,7 +98,7 @@ pub(crate) fn extract_ollama_tool_args(value: &Value) -> Result<Value, GemmaErro
         };
         return Err(GemmaError::BadToolCall(format!(
             "tool_calls absent{hint}; content preview: {}",
-            &preview[..preview.len().min(200)]
+            content_preview(preview)
         )));
     }
     Ok(args.clone())
@@ -159,6 +168,30 @@ mod tests {
         assert_eq!(out.session_type, SessionType::Debugging);
         assert_eq!(out.error_tags, vec!["JWT", "middleware"]);
         assert_eq!(out.topic_tags, vec!["auth", "Rust"]);
+    }
+
+    #[test]
+    fn tool_call_absent_with_long_greek_content_does_not_panic() {
+        // Reproduces the sweep-halting panic: when the model returns plain text
+        // instead of a tool call, the error preview sliced the content at byte
+        // 200. Greek is 2 bytes/char, so byte 200 fell mid-char and panicked,
+        // killing the whole sweep thread. The preview must be char-safe.
+        let greek = "Δώσε μου την περίληψη της συνομιλίας ".repeat(20); // >200 bytes
+        assert!(greek.len() > 200 && !greek.is_char_boundary(200));
+
+        // llama.cpp (/v1/chat/completions) shape.
+        let openai = serde_json::json!({ "choices": [ { "message": { "content": greek } } ] });
+        assert!(matches!(
+            extract_openai_tool_args(&openai),
+            Err(GemmaError::BadToolCall(_))
+        ));
+
+        // Ollama (/api/chat) shape.
+        let ollama = serde_json::json!({ "message": { "content": greek } });
+        assert!(matches!(
+            extract_ollama_tool_args(&ollama),
+            Err(GemmaError::BadToolCall(_))
+        ));
     }
 
     #[test]
