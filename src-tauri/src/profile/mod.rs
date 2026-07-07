@@ -9,6 +9,7 @@ mod parse_md;
 mod pending;
 mod scope;
 mod select;
+mod stats;
 mod types;
 mod writer;
 
@@ -261,7 +262,13 @@ pub fn run_refresh(
         sources: effective_sources,
         facts_count: all_facts.len(),
     };
-    writer::write_profile(archive_dir, scope, &sections, &new_meta)?;
+    // Phase 2: the "Project Activity" table is deterministic and computed
+    // from the FULL scope-in index (not just this run's watermark-limited
+    // `selected`), so agents see every project the scope has ever touched.
+    // Reuses `select::select_sources` (no watermark) rather than a second
+    // filtering implementation.
+    let scope_entries = select::select_sources(&entries, &new_meta.sources, None);
+    writer::write_profile(archive_dir, scope, &sections, &new_meta, &scope_entries)?;
     writer::write_digest(archive_dir, scope, &selected, &all_facts, Utc::now())?;
     // The mapping run is safely folded into the written profile: the pending
     // snapshot has served its purpose. When a batch failed the watermark was
