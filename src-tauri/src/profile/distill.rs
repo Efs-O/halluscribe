@@ -12,9 +12,38 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-/// Max chars of a session's markdown body included per evidence block. Keeps
-/// a 30-session batch well within a single completion's context budget.
-const BODY_TRUNCATE_CHARS: usize = 1500;
+/// Chars of a session's markdown body kept from the START (goal/narrative).
+const HEAD_CHARS: usize = 1200;
+
+/// Chars of a session's markdown body kept from the END. The sweep template
+/// puts Key Decisions / Files Changed / Open Issues / Suggested Next Step at
+/// the END of every summary (verified 2026-07-07: 83% of 1,442 archived .md
+/// files exceed the old 1,500-char flat truncation, so that data was
+/// systematically never seen by the distiller). See
+/// docs/internal/PROFILE_QUALITY_PLAN.md Phase 2b.
+const TAIL_CHARS: usize = 1800;
+
+/// Marker joining head and tail when a body is truncated.
+const SNIP_MARKER: &str = "\n[...snip...]\n";
+
+/// Budget math (re-verified 2026-07-07 against the real constants):
+/// - `select::BATCH_SIZE` was 30 sessions/map-call under the old flat
+///   1,500-char window: 30 x 1,500 = 45,000 evidence chars/call.
+/// - HEAD_CHARS + TAIL_CHARS raises the per-session cap to ~3,000 chars, plus
+///   ~150-250 chars of metadata (id/title/date/project/tool/type/tags) per
+///   entry: 30 x (3,000 + ~200) ~= 96,000 chars/call - well past the ~60K
+///   char target (~15-30K tokens at a worst-case 2-4 chars/token for
+///   Greek-heavy content).
+/// - The deployed ctx_size (`~/.halluscribe/settings.json`) is 102,400
+///   tokens, so 96K chars (~24-48K tokens) would still technically fit
+///   alongside MAP_MAX_TOKENS=4096 output - but the settings UI allows
+///   ctx_size as low as 8,192 tokens
+///   (`src/components/settings/SettingsForm.svelte`), and the plan's budget
+///   target is meant to hold at the low end too, not just the one deployment
+///   observed live. `select::BATCH_SIZE` was therefore reduced from 30 to 18:
+///   18 x (3,000 + ~200) ~= 57,600 chars/call, under the ~60K target with
+///   margin for metadata variance (long titles/tags).
+const BODY_TRUNCATE_CHARS: usize = HEAD_CHARS + TAIL_CHARS;
 
 /// Facts requested per map call; the tool schema also caps this server-side.
 const MAX_FACTS_PER_BATCH: usize = 10;
@@ -29,7 +58,10 @@ summaries into durable facts about the user (their identity/context, active proj
 conventions and preferences, recurring problems, communication style, and timeline \
 highlights). Call save_profile_facts with up to 10 facts drawn ONLY from the evidence \
 provided. Every fact must include the session id(s) it is grounded in in `evidence`. Do \
-not invent facts not supported by the text.";
+not invent facts not supported by the text. Any task the user repeatedly re-solves is a \
+recurring problem regardless of domain - business workflows (e.g. catalog ingestion, \
+network administration, tax/ERP reconciliation) belong in recurring_problems just as much \
+as dev/AI issues.";
 
 /// Appended to `MAP_SYSTEM_PROMPT` only for the Personal scope (Phase 0
 /// refocus): Personal is now a life/character skeleton, so the map step
@@ -37,7 +69,11 @@ not invent facts not supported by the text.";
 /// coding detail that has no home in that skeleton.
 const PERSONAL_MAP_EXTRA: &str = " Also extract personal, life, and character facts — interests, \
 relationships, communication style, and life timeline — into the personal_context section; ignore \
-purely technical or coding detail such as project internals, conventions, or bug/error specifics.";
+purely technical or coding detail such as project internals, conventions, or bug/error specifics. \
+When the evidence supports it, also extract household and relationship structure — who lives \
+with or is cared for by the user, approximate ages, and roles — into personal_context, using \
+explicit hedging language such as \"likely\" or \"appears to\" when this is inferred rather than \
+stated outright.";
 
 /// The map step's system prompt for `scope`. Work is byte-identical to the
 /// original single-profile prompt; Personal appends one instruction sentence.
@@ -125,7 +161,7 @@ fn build_evidence_block(archive_dir: &Path, batch: &[&IndexEntry]) -> String {
 
 fn build_evidence_entry(archive_dir: &Path, entry: &IndexEntry) -> String {
     let body = read_body(archive_dir, entry);
-    let truncated = truncate_chars(&body, BODY_TRUNCATE_CHARS);
+    let truncated = head_tail_window(&body);
     let tags = entry
         .error_tags
         .iter()
@@ -153,6 +189,25 @@ fn read_body(archive_dir: &Path, entry: &IndexEntry) -> String {
 /// UTF-8 content is never cut mid-codepoint.
 fn truncate_chars(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
+}
+
+/// Head+tail evidence window (Phase 2b): bodies within the combined budget
+/// pass through verbatim; longer bodies keep the first `HEAD_CHARS` (the
+/// goal/narrative opening) and the last `TAIL_CHARS` (Key Decisions / Files
+/// Changed / Open Issues / Suggested Next Step, which the sweep template
+/// always places at the end), joined by `SNIP_MARKER`. Char-based throughout
+/// (`.chars()`, never byte slicing) so multi-byte content (Greek, etc.) is
+/// never cut mid-codepoint - see the v0.3.4 byte-slice panic this repo
+/// already hit once.
+fn head_tail_window(text: &str) -> String {
+    let total_chars = text.chars().count();
+    if total_chars <= BODY_TRUNCATE_CHARS {
+        return text.to_string();
+    }
+    let head = truncate_chars(text, HEAD_CHARS);
+    let tail_start = total_chars.saturating_sub(TAIL_CHARS);
+    let tail: String = text.chars().skip(tail_start).collect();
+    format!("{head}{SNIP_MARKER}{tail}")
 }
 
 fn save_profile_facts_tool(scope: ProfileScope) -> Value {

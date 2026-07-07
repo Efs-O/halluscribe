@@ -4,9 +4,13 @@
 
 use crate::archive::IndexEntry;
 
-/// Sessions per map-step batch (~30 index entries + summary bodies per call,
-/// per the plan's Phase 2 pipeline description).
-pub const BATCH_SIZE: usize = 30;
+/// Sessions per map-step batch. Reduced from 30 to 18 in Phase 2b when the
+/// per-session evidence window grew from a flat 1,500-char truncation to a
+/// ~3,000-char head+tail window (see `distill.rs` HEAD_CHARS/TAIL_CHARS):
+/// 18 x (~3,000 body + ~200 metadata) ~= 57,600 evidence chars/map-call,
+/// under the plan's ~60K char/call budget target (docs/internal/
+/// PROFILE_QUALITY_PLAN.md Phase 2b) with margin for metadata variance.
+pub const BATCH_SIZE: usize = 18;
 
 /// Filter `entries` to those whose provider is in `profile_sources` (consent)
 /// and, if `watermark` is set, whose timestamp is strictly newer than it
@@ -133,10 +137,11 @@ mod tests {
             .collect();
         let refs: Vec<&IndexEntry> = entries.iter().collect();
         let batches = chunk_batches(&refs, BATCH_SIZE);
-        assert_eq!(batches.len(), 3);
-        assert_eq!(batches[0].len(), 30);
-        assert_eq!(batches[1].len(), 30);
-        assert_eq!(batches[2].len(), 5);
+        assert_eq!(batches.len(), 4);
+        assert_eq!(batches[0].len(), 18);
+        assert_eq!(batches[1].len(), 18);
+        assert_eq!(batches[2].len(), 18);
+        assert_eq!(batches[3].len(), 11);
     }
 
     #[test]

@@ -187,9 +187,74 @@ fn build_evidence_entry_truncates_long_bodies() {
     fs::write(dir.join("s1.md"), &long_body).unwrap();
     let e = entry("s1", "s1.md");
     let block = build_evidence_entry(&dir, &e);
-    // Body section should contain at most BODY_TRUNCATE_CHARS x's, not 5000.
+    // Body section should be head + snip marker + tail, not the full 5000.
     let body_start = block.find("Body:\n").unwrap() + "Body:\n".len();
-    assert_eq!(block[body_start..].chars().count(), BODY_TRUNCATE_CHARS);
+    let body = &block[body_start..];
+    assert_eq!(
+        body.chars().count(),
+        HEAD_CHARS + SNIP_MARKER.chars().count() + TAIL_CHARS
+    );
+}
+
+#[test]
+fn head_tail_window_short_body_passes_through_verbatim() {
+    let short = "hello world, short body";
+    assert_eq!(head_tail_window(short), short);
+}
+
+#[test]
+fn head_tail_window_boundary_body_passes_through_verbatim() {
+    // Exactly HEAD_CHARS + TAIL_CHARS chars: still verbatim (<=, not <).
+    let body = "y".repeat(HEAD_CHARS + TAIL_CHARS);
+    let windowed = head_tail_window(&body);
+    assert_eq!(windowed, body);
+}
+
+#[test]
+fn head_tail_window_long_body_keeps_head_marker_and_exact_tail_count() {
+    let head_part = "A".repeat(HEAD_CHARS);
+    let middle = "M".repeat(2000);
+    let tail_part = "Z".repeat(TAIL_CHARS);
+    let body = format!("{head_part}{middle}{tail_part}");
+    let windowed = head_tail_window(&body);
+
+    assert!(windowed.starts_with(&head_part));
+    assert!(windowed.contains(SNIP_MARKER));
+    assert!(windowed.ends_with(&tail_part));
+    assert_eq!(
+        windowed.chars().count(),
+        HEAD_CHARS + SNIP_MARKER.chars().count() + TAIL_CHARS
+    );
+}
+
+#[test]
+fn head_tail_window_sentinel_at_end_of_oversized_body_survives() {
+    let filler = "x".repeat(10_000);
+    let sentinel = "SENTINEL_KEY_DECISION_MARKER";
+    let body = format!("{filler}{sentinel}");
+    let windowed = head_tail_window(&body);
+    assert!(
+        windowed.ends_with(sentinel),
+        "sentinel dropped from tail: {windowed}"
+    );
+}
+
+#[test]
+fn head_tail_window_greek_multibyte_never_splits_a_codepoint() {
+    // Greek content around both the head and tail cut points; must not
+    // panic (byte-slice mid-codepoint) and must preserve valid chars only.
+    let greek_head = "Καλημέρα κόσμε, ας δούμε πώς πάει η δουλειά σήμερα. ".repeat(50);
+    let greek_middle = "Ενδιάμεσο κείμενο που θα κοπεί εντελώς. ".repeat(200);
+    let greek_tail = "Οι αποφάσεις που πάρθηκαν και τα επόμενα βήματα είναι εδώ. ".repeat(60);
+    let body = format!("{greek_head}{greek_middle}{greek_tail}");
+    let windowed = head_tail_window(&body);
+    // No panic reaching here is itself the primary assertion; also assert
+    // the exact char budget and that the tail's final content survives.
+    assert_eq!(
+        windowed.chars().count(),
+        HEAD_CHARS + SNIP_MARKER.chars().count() + TAIL_CHARS
+    );
+    assert!(windowed.ends_with("εδώ. "));
 }
 
 #[test]
@@ -214,6 +279,23 @@ fn personal_map_prompt_adds_personal_context_instruction() {
     let prompt = map_system_prompt(ProfileScope::Personal);
     assert!(prompt.starts_with(MAP_SYSTEM_PROMPT));
     assert!(prompt.contains("personal_context"));
+}
+
+#[test]
+fn map_system_prompt_covers_domain_agnostic_recurring_problems() {
+    // Phase 3a regression guard: the domain-agnostic recurring_problems
+    // clause must not silently vanish from the map prompt.
+    assert!(MAP_SYSTEM_PROMPT.contains("regardless of domain"));
+    assert!(MAP_SYSTEM_PROMPT.contains("recurring_problems"));
+}
+
+#[test]
+fn personal_map_prompt_covers_hedged_household_structure() {
+    // Phase 3b regression guard: the household/relationship structure
+    // instruction must not silently vanish from the Personal map prompt.
+    let prompt = map_system_prompt(ProfileScope::Personal);
+    assert!(prompt.contains("household and relationship structure"));
+    assert!(prompt.contains("likely"));
 }
 
 #[test]
