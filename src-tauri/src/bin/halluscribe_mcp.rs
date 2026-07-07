@@ -19,6 +19,7 @@ async fn main() {
     };
 
     let server = HalluscribeServer::new(archive_dir);
+    eprintln!("halluscribe-mcp: serving archive {}", server.identity());
     let service = match server.serve(stdio()).await {
         Ok(service) => service,
         Err(error) => {

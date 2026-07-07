@@ -21,6 +21,78 @@ fn override_pointing_at_missing_dir_errors() {
     assert!(result.unwrap_err().contains("HALLUSCRIBE_DIR"));
 }
 
+mod identity {
+    use super::*;
+    use crate::workspace::{Workspace, WorkspaceRegistry};
+
+    fn registry_with(workspaces: Vec<Workspace>, default_name: Option<&str>) -> WorkspaceRegistry {
+        WorkspaceRegistry {
+            active: None,
+            workspaces,
+            default_name: default_name.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn default_root_uses_registry_label_when_named() {
+        let root = Path::new("/home/user/.halluscribe");
+        let registry = registry_with(vec![], Some("EFSO"));
+        let label = identity_label(root, Some(root), &registry);
+        assert!(label.contains("\"EFSO\" (host default)"));
+        assert!(label.contains(".halluscribe"));
+    }
+
+    #[test]
+    fn default_root_without_label_says_host_default() {
+        let root = Path::new("/home/user/.halluscribe");
+        let label = identity_label(root, Some(root), &registry_with(vec![], None));
+        assert!(label.contains("host default"));
+    }
+
+    #[test]
+    fn registered_workspace_is_named() {
+        let root = Path::new("/home/user/.halluscribe");
+        let guest = PathBuf::from("/data/guest_archive");
+        let registry = registry_with(
+            vec![Workspace {
+                name: "Maria".to_string(),
+                path: guest.clone(),
+                import_only: false,
+            }],
+            None,
+        );
+        let label = identity_label(&guest, Some(root), &registry);
+        assert!(label.contains("workspace \"Maria\""));
+        assert!(!label.contains("import-only"));
+    }
+
+    #[test]
+    fn import_only_workspace_is_flagged_as_guest() {
+        let guest = PathBuf::from("/data/guest_archive");
+        let registry = registry_with(
+            vec![Workspace {
+                name: "Maria".to_string(),
+                path: guest.clone(),
+                import_only: true,
+            }],
+            None,
+        );
+        let label = identity_label(&guest, None, &registry);
+        assert!(label.contains("workspace \"Maria\" (import-only guest)"));
+    }
+
+    #[test]
+    fn unknown_path_is_marked_unregistered() {
+        let root = Path::new("/home/user/.halluscribe");
+        let label = identity_label(
+            Path::new("/somewhere/else"),
+            Some(root),
+            &registry_with(vec![], None),
+        );
+        assert!(label.contains("unregistered archive"));
+    }
+}
+
 #[test]
 fn no_override_falls_back_to_home_dir_default() {
     // Without an override, resolution depends on the real HOME/USERPROFILE

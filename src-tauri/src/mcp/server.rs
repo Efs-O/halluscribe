@@ -111,11 +111,35 @@ fn scope_or_work(scope: Option<String>) -> ProfileScope {
 #[derive(Clone)]
 pub struct HalluscribeServer {
     archive_dir: PathBuf,
+    /// "path - owner" label from `mcp::archive_identity`, resolved once at
+    /// construction and stamped on profile/digest answers so a mixed-up
+    /// per-person registration surfaces immediately instead of as a subtly
+    /// wrong portrait.
+    identity: String,
 }
 
 impl HalluscribeServer {
     pub fn new(archive_dir: PathBuf) -> Self {
-        Self { archive_dir }
+        let identity = crate::mcp::archive_identity(&archive_dir);
+        Self {
+            archive_dir,
+            identity,
+        }
+    }
+
+    /// Whose archive this server is serving, for startup logging.
+    pub fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    /// One-line stamp prefixed to `get_profile` / `get_digest` answers naming
+    /// the archive (and therefore the person) the answer describes.
+    fn identity_header(&self, scope: ProfileScope) -> String {
+        format!(
+            "[HalluScribe archive: {}; scope: {}]",
+            self.identity,
+            scope.as_str()
+        )
     }
 }
 
@@ -211,7 +235,12 @@ impl HalluscribeServer {
         &self,
         Parameters(request): Parameters<ScopeRequest>,
     ) -> Result<String, McpError> {
-        Ok(self.do_get_profile(scope_or_work(request.scope)))
+        let scope = scope_or_work(request.scope);
+        Ok(format!(
+            "{}\n\n{}",
+            self.identity_header(scope),
+            self.do_get_profile(scope)
+        ))
     }
 
     #[tool(
@@ -221,11 +250,16 @@ impl HalluscribeServer {
         &self,
         Parameters(request): Parameters<DigestRequest>,
     ) -> Result<String, McpError> {
-        Ok(self.do_get_digest(
-            scope_or_work(request.scope),
-            request.offset.unwrap_or(0),
-            request.max_chars,
-        ))
+        let scope = scope_or_work(request.scope);
+        let offset = request.offset.unwrap_or(0);
+        let body = self.do_get_digest(scope, offset, request.max_chars);
+        // Stamp the first page only; continuation pages already belong to an
+        // identified digest and the stamp would just spend result budget.
+        Ok(if offset == 0 {
+            format!("{}\n{}", self.identity_header(scope), body)
+        } else {
+            body
+        })
     }
 }
 
@@ -239,14 +273,15 @@ impl ServerHandler for HalluscribeServer {
         implementation.version = env!("CARGO_PKG_VERSION").to_string();
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(implementation)
-            .with_instructions(
+            .with_instructions(format!(
                 "HalluScribe read-only archive server. Gives every future agent session memory \
                  of all previous ones: search_sessions and read_session query the user's archived \
                  AI coding sessions; get_profile and get_digest return the distilled profile for \
                  the requested scope (work by default, or personal - a superset that also carries \
-                 private-chat-derived life context). No write, redact, or delete tools are exposed."
-                    .to_string(),
-            )
+                 private-chat-derived life context). No write, redact, or delete tools are exposed. \
+                 Serving archive: {}.",
+                self.identity
+            ))
     }
 }
 

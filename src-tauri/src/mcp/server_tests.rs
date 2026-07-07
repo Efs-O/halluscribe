@@ -267,6 +267,47 @@ fn get_digest_offset_past_end_returns_empty_slice_not_panic() {
 }
 
 #[test]
+fn get_profile_tool_stamps_archive_identity_and_scope() {
+    let dir = tmp();
+    let work_dir = dir.path().join("profile").join("work");
+    fs::create_dir_all(&work_dir).unwrap();
+    fs::write(work_dir.join("profile.md"), "# User Profile").unwrap();
+    let server = HalluscribeServer::new(dir.path().to_path_buf());
+    let out = server
+        .get_profile(Parameters(ScopeRequest { scope: None }))
+        .unwrap();
+    assert!(out.starts_with("[HalluScribe archive: "));
+    assert!(out.contains("scope: work]"));
+    assert!(out.contains("# User Profile"));
+}
+
+#[test]
+fn get_digest_tool_stamps_first_page_only() {
+    let dir = tmp();
+    let server = server_with_work_digest(dir.path(), &"x".repeat(25));
+
+    let first = server
+        .get_digest(Parameters(DigestRequest {
+            scope: None,
+            offset: None,
+            max_chars: Some(10),
+        }))
+        .unwrap();
+    assert!(first.starts_with("[HalluScribe archive: "));
+    assert!(first.contains("scope: work]"));
+
+    let continuation = server
+        .get_digest(Parameters(DigestRequest {
+            scope: None,
+            offset: Some(10),
+            max_chars: Some(10),
+        }))
+        .unwrap();
+    assert!(!continuation.contains("[HalluScribe archive: "));
+    assert!(continuation.starts_with("[digest slice bytes 10..20 of 25"));
+}
+
+#[test]
 fn scope_or_work_defaults_and_falls_back_to_work() {
     assert_eq!(scope_or_work(None), ProfileScope::Work);
     assert_eq!(

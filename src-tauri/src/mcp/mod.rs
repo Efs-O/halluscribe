@@ -9,7 +9,7 @@ mod server;
 
 pub use server::HalluscribeServer;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Resolve the archive directory the MCP server should read from.
 ///
@@ -41,6 +41,61 @@ pub fn resolve_archive_dir(halluscribe_dir_override: Option<String>) -> Result<P
         ));
     }
     Ok(dir)
+}
+
+/// Human-readable identity of the archive this server is bound to: the
+/// resolved directory plus WHOSE archive it is according to the workspace
+/// registry in the default root. Registrations are long-lived and invisible,
+/// so a mixed-up per-person `HALLUSCRIBE_DIR` would otherwise only surface as
+/// a subtly wrong portrait; this label makes it visible in the first reply.
+pub fn archive_identity(archive_dir: &Path) -> String {
+    let default_root = home_dir().ok().map(crate::briefing::archive_dir_path);
+    let registry = default_root
+        .as_deref()
+        .map(crate::workspace::load_registry)
+        .unwrap_or_default();
+    identity_label(archive_dir, default_root.as_deref(), &registry)
+}
+
+/// Pure mapping behind `archive_identity`: "path - owner", where owner is the
+/// registry's default-root label, a registered workspace's name, or an
+/// explicit "unregistered" marker when the path matches neither.
+pub fn identity_label(
+    archive_dir: &Path,
+    default_root: Option<&Path>,
+    registry: &crate::workspace::WorkspaceRegistry,
+) -> String {
+    let owner = if default_root.is_some_and(|root| same_dir(archive_dir, root)) {
+        match &registry.default_name {
+            Some(name) => format!("\"{name}\" (host default)"),
+            None => "host default".to_string(),
+        }
+    } else if let Some(ws) = registry
+        .workspaces
+        .iter()
+        .find(|ws| same_dir(&ws.path, archive_dir))
+    {
+        if ws.import_only {
+            format!("workspace \"{}\" (import-only guest)", ws.name)
+        } else {
+            format!("workspace \"{}\"", ws.name)
+        }
+    } else {
+        "unregistered archive (not in workspaces.json)".to_string()
+    };
+    format!("{} - {owner}", archive_dir.display())
+}
+
+/// Path equality tolerant of case/slash/relative differences: literal match
+/// first, then canonicalized when both paths exist on disk.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(canon_a), Ok(canon_b)) => canon_a == canon_b,
+        _ => false,
+    }
 }
 
 #[cfg(windows)]
