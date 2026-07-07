@@ -102,34 +102,87 @@ fn maybe_add_import(
         return;
     }
     let base = PathBuf::from(normalized_path);
-    let Some(path) = resolve_import_path(&base, candidates).filter(|path| path.exists()) else {
-        return;
-    };
-    let Ok(meta) = fs::metadata(&path) else {
-        return;
-    };
-    let Ok(modified) = meta.modified() else {
-        return;
-    };
-    // Imported chat exports are user-selected archive files rather than live session logs.
-    // ZIP extraction and download flows can preserve stale mtimes, so gating on filesystem
-    // modified time causes valid imports to disappear entirely.
-    out.push(ScanTarget {
-        path,
-        kind: ScanTargetKind::Import(provider),
-        fill_pct: None,
-        mtime_secs: shared::mtime_secs(modified),
-    });
+    for path in resolve_import_paths(&base, candidates) {
+        let Ok(meta) = fs::metadata(&path) else {
+            continue;
+        };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
+        // Imported chat exports are user-selected archive files rather than live session logs.
+        // ZIP extraction and download flows can preserve stale mtimes, so gating on filesystem
+        // modified time causes valid imports to disappear entirely.
+        out.push(ScanTarget {
+            path,
+            kind: ScanTargetKind::Import(provider.clone()),
+            fill_pct: None,
+            mtime_secs: shared::mtime_secs(modified),
+        });
+    }
 }
 
-fn resolve_import_path(base: &Path, candidates: &[&str]) -> Option<PathBuf> {
+/// Resolve one or more import files for a configured base path.
+///
+/// A base that points directly at a file is used as-is. A base directory is
+/// searched for each expected candidate (e.g. `conversations.json`) plus any
+/// split-export siblings (e.g. `conversations-000.json` … `conversations-004.json`),
+/// which large ChatGPT/Claude.ai exports are chunked into. Each matching file is
+/// read independently, so every chunk contributes its conversations.
+fn resolve_import_paths(base: &Path, candidates: &[&str]) -> Vec<PathBuf> {
     if base.is_file() {
-        return Some(base.to_path_buf());
+        return vec![base.to_path_buf()];
     }
-    candidates
-        .iter()
-        .map(|candidate| base.join(candidate))
-        .find(|candidate| candidate.exists())
+    let mut found = Vec::new();
+    for candidate in candidates {
+        let direct = base.join(candidate);
+        if direct.exists() {
+            found.push(direct);
+        }
+        found.extend(split_export_siblings(base, candidate));
+    }
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// Find split-export chunks for `candidate` inside `base`, i.e. files named
+/// `<stem>-<suffix>.<ext>` next to the expected `<stem>.<ext>` (nested candidate
+/// paths are resolved relative to `base`).
+fn split_export_siblings(base: &Path, candidate: &str) -> Vec<PathBuf> {
+    let candidate_path = Path::new(candidate);
+    let dir = match candidate_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => base.join(parent),
+        _ => base.to_path_buf(),
+    };
+    let Some(file_name) = candidate_path.file_name().and_then(|name| name.to_str()) else {
+        return Vec::new();
+    };
+    let (stem, ext) = match file_name.rsplit_once('.') {
+        Some((stem, ext)) => (stem, Some(ext)),
+        None => (file_name, None),
+    };
+    let prefix = format!("{stem}-");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        let ext_ok = match ext {
+            Some(ext) => name.ends_with(&format!(".{ext}")),
+            None => !name.contains('.'),
+        };
+        if ext_ok {
+            out.push(entry.path());
+        }
+    }
+    out
 }
 
 fn scan_recorded_chat_sessions(archive_dir: &Path, _lookback_secs: u64) -> Vec<ScanTarget> {

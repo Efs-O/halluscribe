@@ -191,6 +191,39 @@ mod tests {
     }
 
     #[test]
+    fn scan_chat_imports_discovers_split_chatgpt_export() {
+        // Large ChatGPT exports arrive chunked as conversations-000.json, -001.json, …
+        // (no plain conversations.json). Every chunk must be picked up.
+        let dir = tempdir().unwrap();
+        for suffix in ["000", "001", "002"] {
+            fs::write(
+                dir.path().join(format!("conversations-{suffix}.json")),
+                "[]",
+            )
+            .unwrap();
+        }
+        // An unrelated json file must NOT be treated as an export chunk.
+        fs::write(dir.path().join("settings.json"), "{}").unwrap();
+
+        let settings = HalluScribeSettings {
+            chatgpt_import_path: dir.path().display().to_string(),
+            ..HalluScribeSettings::default()
+        };
+
+        let targets = scan_chat_imports(&settings, u64::MAX);
+        assert_eq!(targets.len(), 3);
+        for suffix in ["000", "001", "002"] {
+            assert!(targets.iter().any(|target| target
+                .path
+                .ends_with(format!("conversations-{suffix}.json"))));
+        }
+        assert!(targets.iter().all(|target| matches!(
+            target.kind,
+            super::super::ScanTargetKind::Import(ChatProvider::ChatGPT)
+        )));
+    }
+
+    #[test]
     fn scan_sessions_includes_recorded_gemma_chats() {
         let dir = tempdir().unwrap();
         let archive_dir = dir.path().join(".halluscribe");
