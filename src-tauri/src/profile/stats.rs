@@ -22,6 +22,23 @@ const QUIET_MAX_DAYS: i64 = 180;
 /// Row cap so a many-project archive doesn't bloat the profile.
 const MAX_ROWS: usize = 40;
 
+/// Bucket label for entries whose project name is a date artifact rather
+/// than a real project. Codex stores rollouts under `sessions/YYYY/MM/DD/`,
+/// so `project_from_parent` records the day-of-month ("03", "13") as the
+/// project for every Codex session; without folding, those buckets crowd
+/// out real projects (22 of 40 rows on the live archive).
+const UNLABELED_PROJECT: &str = "(unlabeled)";
+
+/// Display name for grouping: purely numeric project names are date
+/// artifacts, folded into one honest bucket; everything else is untouched.
+fn display_project(name: &str) -> &str {
+    if !name.is_empty() && name.bytes().all(|b| b.is_ascii_digit()) {
+        UNLABELED_PROJECT
+    } else {
+        name
+    }
+}
+
 struct ProjectRow {
     project: String,
     sessions: usize,
@@ -42,11 +59,9 @@ pub(super) fn project_activity_markdown(entries: &[&IndexEntry], generated_date:
 
     let mut by_project: HashMap<&str, (usize, &str, &str)> = HashMap::new();
     for entry in entries {
-        let stats = by_project.entry(entry.project.as_str()).or_insert((
-            0,
-            entry.date.as_str(),
-            entry.date.as_str(),
-        ));
+        let stats = by_project
+            .entry(display_project(&entry.project))
+            .or_insert((0, entry.date.as_str(), entry.date.as_str()));
         stats.0 += 1;
         if entry.date.as_str() < stats.1 {
             stats.1 = entry.date.as_str();

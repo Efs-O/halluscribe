@@ -124,6 +124,41 @@ fn no_more_line_when_under_cap() {
 }
 
 #[test]
+fn numeric_day_buckets_fold_into_one_unlabeled_row() {
+    // Codex day-of-month "projects" ("03", "13", "20") are date artifacts,
+    // not projects; they must merge into a single (unlabeled) row carrying
+    // the combined count and the widest date range.
+    let entries = [
+        entry("a", "03", "2026-04-03"),
+        entry("b", "13", "2026-06-13"),
+        entry("c", "20", "2026-05-20"),
+        entry("d", "real-proj", "2026-07-01"),
+    ];
+    let refs: Vec<&IndexEntry> = entries.iter().collect();
+    let md = project_activity_markdown(&refs, "2026-07-07");
+    assert!(md.contains("| (unlabeled) | 3 | 2026-04-03 | 2026-06-13 | active |"));
+    assert!(md.contains("| real-proj | 1 | 2026-07-01 | 2026-07-01 | active |"));
+    assert!(!md.contains("| 03 |"));
+    assert!(!md.contains("| 13 |"));
+    assert!(!md.contains("| 20 |"));
+}
+
+#[test]
+fn non_numeric_and_mixed_project_names_are_not_folded() {
+    // Only purely numeric names are date artifacts; names that merely
+    // contain digits (or are empty) must keep their own row.
+    let entries = [
+        entry("a", "proj-05", "2026-07-01"),
+        entry("b", "2026-plan", "2026-07-01"),
+    ];
+    let refs: Vec<&IndexEntry> = entries.iter().collect();
+    let md = project_activity_markdown(&refs, "2026-07-07");
+    assert!(md.contains("| proj-05 | 1 |"));
+    assert!(md.contains("| 2026-plan | 1 |"));
+    assert!(!md.contains("(unlabeled)"));
+}
+
+#[test]
 fn unparsable_generation_date_fails_safe_to_active() {
     let entries = [entry("a", "proj", "2026-01-01")];
     let refs: Vec<&IndexEntry> = entries.iter().collect();
