@@ -290,6 +290,16 @@ fn map_system_prompt_covers_domain_agnostic_recurring_problems() {
 }
 
 #[test]
+fn map_system_prompt_demands_tool_call_even_with_no_facts() {
+    // Regression guard: a batch with nothing to extract (e.g. pure coding
+    // sessions under the life-only Personal scope) must still produce a
+    // save_profile_facts call; without this clause the model answers in
+    // prose and the whole batch hard-fails (seen live 2026-07-08).
+    assert!(MAP_SYSTEM_PROMPT.contains("empty facts array"));
+    assert!(MAP_SYSTEM_PROMPT.contains("never reply in plain text"));
+}
+
+#[test]
 fn personal_map_prompt_covers_hedged_household_structure() {
     // Phase 3b regression guard: the household/relationship structure
     // instruction must not silently vanish from the Personal map prompt.

@@ -61,7 +61,8 @@ provided. Every fact must include the session id(s) it is grounded in in `eviden
 not invent facts not supported by the text. Any task the user repeatedly re-solves is a \
 recurring problem regardless of domain - business workflows (e.g. catalog ingestion, \
 network administration, tax/ERP reconciliation) belong in recurring_problems just as much \
-as dev/AI issues.";
+as dev/AI issues. If the batch contains no qualifying facts, still call save_profile_facts \
+with an empty facts array - never reply in plain text.";
 
 /// Appended to `MAP_SYSTEM_PROMPT` only for the Personal scope (Phase 0
 /// refocus): Personal is now a life/character skeleton, so the map step
