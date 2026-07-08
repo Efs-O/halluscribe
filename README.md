@@ -86,6 +86,8 @@ The model distills your archived sessions into a living **profile** — identity
 
 The Profile panel shows each scope in its own tab and lets you rebuild on demand. The same profiles back the `get_profile` MCP tool, so external agents can read them too.
 
+Every fact carries session-id citations that are validated against the archive index at write time — a claim you can't trace to a real session is dropped, never invented. Each profile also ends with a deterministic **Project Activity** table (per-project session counts, first/last seen, active/quiet/dormant status) computed straight from the index, untouched by the model.
+
 ### Persona Pack export
 Export a portable **persona pack** (`~/.halluscribe/exports/<user>-<scope>-persona-<date>.zip`) — the distilled profile, weekly digests, redacted session Markdown, a filtered index, and a manifest. A consent filter governs what leaves the machine; raw transcripts are excluded unless you explicitly opt in, and embeddings are never included.
 
