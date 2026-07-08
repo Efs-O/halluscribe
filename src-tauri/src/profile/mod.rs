@@ -2,12 +2,14 @@
 // `<archive_dir>/profile/profile.md` + `profile_meta.json` + a weekly digest.
 // See docs/internal/PERSONA_PROTOCOL_PLAN.md Phase 2 for the full design.
 
+mod citations;
 mod distill;
 mod merge;
 mod parse_md;
 mod pending;
 mod scope;
 mod select;
+mod stats;
 mod types;
 mod writer;
 
@@ -204,7 +206,7 @@ pub fn run_refresh(
     // A failed merge must not discard the outcome (and with it the collected
     // map-batch errors): record it, skip the write, and keep the watermark so
     // the next run retries — the UI then shows every error, not a bare abort.
-    let sections = match merge::run_reduce(
+    let mut sections = match merge::run_reduce(
         scope,
         previous_md.as_deref(),
         &all_facts,
@@ -221,6 +223,20 @@ pub fn run_refresh(
             });
         }
     };
+
+    // Write-time sanitizer (Phase 1b): the merge step can still corrupt
+    // bracket citation refs that were valid in its input, so scrub each
+    // section's prose against the FULL index id set before writing.
+    let known_ids: std::collections::HashSet<&str> =
+        entries.iter().map(|entry| entry.id.as_str()).collect();
+    for section in ProfileSection::ALL {
+        let (sanitized, warnings) =
+            citations::sanitize_citations(sections.get(section), &known_ids);
+        for warning in warnings {
+            errors.push(format!("{}: {warning}", section.as_str()));
+        }
+        sections.set(section, sanitized);
+    }
 
     on_progress(1, 1, Stage::Writing);
     // The recovered snapshot's last_ts participates in the watermark max, so
@@ -246,7 +262,13 @@ pub fn run_refresh(
         sources: effective_sources,
         facts_count: all_facts.len(),
     };
-    writer::write_profile(archive_dir, scope, &sections, &new_meta)?;
+    // Phase 2: the "Project Activity" table is deterministic and computed
+    // from the FULL scope-in index (not just this run's watermark-limited
+    // `selected`), so agents see every project the scope has ever touched.
+    // Reuses `select::select_sources` (no watermark) rather than a second
+    // filtering implementation.
+    let scope_entries = select::select_sources(&entries, &new_meta.sources, None);
+    writer::write_profile(archive_dir, scope, &sections, &new_meta, &scope_entries)?;
     writer::write_digest(archive_dir, scope, &selected, &all_facts, Utc::now())?;
     // The mapping run is safely folded into the written profile: the pending
     // snapshot has served its purpose. When a batch failed the watermark was
