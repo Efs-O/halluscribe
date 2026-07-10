@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
   import type { WorkspaceInfo, WorkspaceListDto } from "../../lib/types";
+  import PathPickerField from "./PathPickerField.svelte";
 
   let list = $state<WorkspaceListDto | null>(null);
   let busy = $state(false);
@@ -15,6 +16,8 @@
   let defaultNameInput = $state("");
   // Path of the guest row currently awaiting delete confirmation, or null.
   let confirmingDelete = $state<string | null>(null);
+  // Expansion state per guest row, keyed by workspace path. All start collapsed.
+  let expanded = $state<Record<string, boolean>>({});
 
   // Create-form fields. Import-only defaults ON: a new workspace is almost always
   // a guest (another person's imports), and leaving it off would sweep THIS
@@ -49,6 +52,18 @@
   function setInfo(text: string) {
     message = text;
     messageIsError = false;
+  }
+
+  // Collapsing a row cancels any pending confirmation for it (simpler than
+  // forcing the row to stay expanded) — the confirm prompt is discarded, not
+  // preserved, so re-opening the row starts from the non-destructive state.
+  function toggleExpanded(path: string) {
+    const next = !expanded[path];
+    expanded = { ...expanded, [path]: next };
+    if (!next) {
+      if (confirmingDelete === path) confirmingDelete = null;
+      if (confirmingHostAccess === path) confirmingHostAccess = null;
+    }
   }
 
   function isActive(path: string | null): boolean {
@@ -237,109 +252,138 @@
 
       {#each list.workspaces as w (w.path)}
         <div class="ws-row">
-          <div class="ws-head">
+          <div
+            class="ws-head ws-head-toggle"
+            role="button"
+            tabindex="0"
+            aria-expanded={!!expanded[w.path]}
+            onclick={() => toggleExpanded(w.path)}
+            onkeydown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toggleExpanded(w.path);
+              }
+            }}
+          >
+            <span class="ws-chevron">{expanded[w.path] ? "▾" : "▸"}</span>
             <span class="ws-name">{w.name}</span>
             {#if isActive(w.path)}
               <span class="ws-active">● active</span>
-            {:else}
+            {/if}
+            <span class="ws-head-spacer"></span>
+            {#if !isActive(w.path)}
               <button
                 class="action-btn"
                 type="button"
-                onclick={() => switchTo(w.path)}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  switchTo(w.path);
+                }}
                 disabled={busy}
               >
                 Switch
               </button>
             {/if}
           </div>
-          <p class="field-note ws-path">{w.path}</p>
 
-          <div class="ws-inline">
-            <input
-              type="text"
-              bind:value={renameInputs[w.path]}
-              placeholder="Workspace name"
-              aria-label="Rename workspace"
-            />
-            <button class="action-btn" type="button" onclick={() => saveRename(w)} disabled={busy}>
-              Save
-            </button>
-          </div>
+          {#if expanded[w.path]}
+            <div class="ws-body">
+              <p class="field-note ws-path">{w.path}</p>
 
-          <label class="row-label ws-check">
-            <span>Import-only (guest workspace)</span>
-            <input
-              type="checkbox"
-              checked={w.import_only}
-              onchange={(e) => onToggleImportOnly(w, (e.currentTarget as HTMLInputElement).checked)}
-              disabled={busy || confirmingHostAccess === w.path}
-            />
-          </label>
-          <p class="field-note">
-            Guest workspace — the sweep ingests only this workspace's chat imports, never the host
-            machine's local coding-tool logs.
-          </p>
-
-          {#if confirmingHostAccess === w.path}
-            <div class="ws-warn">
-              <p class="ws-warn-text">
-                Turning this off lets the next sweep read <strong>this machine's</strong> Claude
-                Code / Codex / Continue / Forge logs and file them into "{w.name}"'s profile. Only do
-                this if this workspace is meant to track your own coding activity.
-              </p>
-              <div class="ws-warn-actions">
-                <button
-                  class="action-btn action-btn-danger"
-                  type="button"
-                  onclick={() => applyImportOnly(w, false)}
-                  disabled={busy}
-                >
-                  Turn off anyway
-                </button>
+              <div class="ws-inline">
+                <input
+                  type="text"
+                  bind:value={renameInputs[w.path]}
+                  placeholder="Workspace name"
+                  aria-label="Rename workspace"
+                />
                 <button
                   class="action-btn"
                   type="button"
-                  onclick={cancelHostAccess}
+                  onclick={() => saveRename(w)}
                   disabled={busy}
                 >
-                  Keep import-only
+                  Save
                 </button>
+              </div>
+
+              <label class="row-label ws-check">
+                <span>Import-only (guest workspace)</span>
+                <input
+                  type="checkbox"
+                  checked={w.import_only}
+                  onchange={(e) =>
+                    onToggleImportOnly(w, (e.currentTarget as HTMLInputElement).checked)}
+                  disabled={busy || confirmingHostAccess === w.path}
+                />
+              </label>
+              <p class="field-note">
+                Guest workspace — the sweep ingests only this workspace's chat imports, never the
+                host machine's local coding-tool logs.
+              </p>
+
+              {#if confirmingHostAccess === w.path}
+                <div class="ws-warn">
+                  <p class="ws-warn-text">
+                    Turning this off lets the next sweep read <strong>this machine's</strong> Claude
+                    Code / Codex / Continue / Forge logs and file them into "{w.name}"'s profile.
+                    Only do this if this workspace is meant to track your own coding activity.
+                  </p>
+                  <div class="ws-warn-actions">
+                    <button
+                      class="action-btn action-btn-danger"
+                      type="button"
+                      onclick={() => applyImportOnly(w, false)}
+                      disabled={busy}
+                    >
+                      Turn off anyway
+                    </button>
+                    <button
+                      class="action-btn"
+                      type="button"
+                      onclick={cancelHostAccess}
+                      disabled={busy}
+                    >
+                      Keep import-only
+                    </button>
+                  </div>
+                </div>
+              {/if}
+
+              <div class="ws-delete">
+                {#if confirmingDelete === w.path}
+                  <span class="ws-confirm-text">
+                    Remove "{w.name}" from the list? Its folder on disk is kept.
+                  </span>
+                  <button
+                    class="action-btn action-btn-danger"
+                    type="button"
+                    onclick={() => deleteWorkspace(w)}
+                    disabled={busy}
+                  >
+                    Remove
+                  </button>
+                  <button
+                    class="action-btn"
+                    type="button"
+                    onclick={() => (confirmingDelete = null)}
+                    disabled={busy}
+                  >
+                    Cancel
+                  </button>
+                {:else}
+                  <button
+                    class="action-btn action-btn-danger"
+                    type="button"
+                    onclick={() => (confirmingDelete = w.path)}
+                    disabled={busy}
+                  >
+                    Delete workspace
+                  </button>
+                {/if}
               </div>
             </div>
           {/if}
-
-          <div class="ws-delete">
-            {#if confirmingDelete === w.path}
-              <span class="ws-confirm-text">
-                Remove "{w.name}" from the list? Its folder on disk is kept.
-              </span>
-              <button
-                class="action-btn action-btn-danger"
-                type="button"
-                onclick={() => deleteWorkspace(w)}
-                disabled={busy}
-              >
-                Remove
-              </button>
-              <button
-                class="action-btn"
-                type="button"
-                onclick={() => (confirmingDelete = null)}
-                disabled={busy}
-              >
-                Cancel
-              </button>
-            {:else}
-              <button
-                class="action-btn action-btn-danger"
-                type="button"
-                onclick={() => (confirmingDelete = w.path)}
-                disabled={busy}
-              >
-                Delete workspace
-              </button>
-            {/if}
-          </div>
         </div>
       {/each}
     </div>
@@ -347,25 +391,21 @@
     <div class="ws-create">
       <h3 class="section-title">ADD WORKSPACE</h3>
       <p class="field-note">
-        Type or paste the absolute folder path for this person's archive. Host-level model settings
-        are copied from your default workspace; import paths and history start fresh.
+        Type or paste the absolute folder path for this person's archive, or use Browse. Host-level
+        model settings are copied from your default workspace; import paths and history start fresh.
       </p>
-      <p class="field-note">A native folder picker is coming in a later update.</p>
 
       <label class="row-label">
         <span>Name</span>
         <input type="text" bind:value={newName} placeholder="Alex" aria-label="New workspace name" />
       </label>
 
-      <label class="row-label">
-        <span>Folder path</span>
-        <input
-          type="text"
-          bind:value={newPath}
-          placeholder="D:\personas\alex"
-          aria-label="New workspace path"
-        />
-      </label>
+      <PathPickerField
+        label="Folder path"
+        bind:value={newPath}
+        mode="folder"
+        placeholder="D:\personas\alex"
+      />
 
       <label class="row-label">
         <span>Import-only (guest workspace)</span>
@@ -426,6 +466,25 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+  }
+
+  .ws-head-toggle {
+    cursor: pointer;
+    user-select: none;
+  }
+  .ws-head-spacer { flex: 1; }
+  .ws-chevron {
+    font-size: 12px;
+    color: var(--dim);
+    width: 1em;
+    flex: 0 0 auto;
+  }
+
+  .ws-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
   }
 
   .ws-name { font-size: 14px; color: var(--text); }

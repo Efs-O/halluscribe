@@ -110,6 +110,7 @@ pub fn run() {
         .manage(SweepCancel(Arc::new(AtomicBool::new(false))))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let saved_settings = archive_dir(app.handle())
                 .ok()

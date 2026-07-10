@@ -1,6 +1,6 @@
 [package]
 name = "halluscribe"
-version = "0.3.5"
+version = "0.3.6"
 # Two [[bin]] targets exist (the app + halluscribe-mcp); the Tauri bundler
 # needs default-run to know which one is the application binary.
 default-run = "halluscribe"
@@ -37,6 +37,7 @@ rmcp       = { version = "2.1", features = ["transport-io"] }
 tokio      = { version = "1", features = ["rt-multi-thread", "macros", "io-std"] }
 zstd       = "0.13"
 zip        = { version = "2", default-features = false, features = ["deflate"] }
+tauri-plugin-dialog = "2"
 
 [dev-dependencies]
 tempfile = "3"

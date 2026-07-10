@@ -6,6 +6,7 @@
   import type { BackfillResult, EmbeddingRebuildProgress, HalluScribeSettings } from "../../lib/types";
   import WorkspaceSwitcher from "./WorkspaceSwitcher.svelte";
   import TtsVoiceSettings from "./TtsVoiceSettings.svelte";
+  import PathPickerField from "./PathPickerField.svelte";
 
   interface ApiKeyValidationResult {
     status: "valid" | "invalid" | "unreachable" | "empty";
@@ -209,28 +210,24 @@
       <section>
         <h2 class="section-title">LLAMA.CPP</h2>
 
-        <label class="row-label">
-          <span>llama-server binary path</span>
-          <input
-            type="text"
-            bind:value={s.llama_server_bin}
-            onblur={onBlur}
-            placeholder="/path/to/llama-server"
-          />
-        </label>
-
-        <p class="field-note">Used for local Gemma generation when backend is llama.cpp, and always used for EmbeddingGemma semantic retrieval.</p>
+        <PathPickerField
+          label="llama-server binary path"
+          bind:value={s.llama_server_bin}
+          mode="file"
+          placeholder="/path/to/llama-server"
+          note="Used for local Gemma generation when backend is llama.cpp, and always used for EmbeddingGemma semantic retrieval."
+          onchange={onBlur}
+        />
 
         {#if s.backend === "llamacpp"}
-          <label class="row-label">
-            <span>Gemma GGUF model path</span>
-            <input
-              type="text"
-              bind:value={s.gemma_model_path}
-              onblur={onBlur}
-              placeholder="/path/to/model.gguf"
-            />
-          </label>
+          <PathPickerField
+            label="Gemma GGUF model path"
+            bind:value={s.gemma_model_path}
+            mode="file"
+            placeholder="/path/to/model.gguf"
+            filters={[{ name: "GGUF model", extensions: ["gguf"] }]}
+            onchange={onBlur}
+          />
 
           <label class="row-label">
             <span>GPU layers (-1 = all)</span>
@@ -300,17 +297,15 @@
       <section>
         <h2 class="section-title">SEMANTIC SEARCH</h2>
 
-        <label class="row-label">
-          <span>EmbeddingGemma GGUF model path</span>
-          <input
-            type="text"
-            bind:value={s.embedding_model_path}
-            onblur={onBlur}
-            placeholder=".../embeddinggemma-300m-q4_0.gguf"
-          />
-        </label>
-
-        <p class="field-note">Semantic search uses llama.cpp locally with this EmbeddingGemma GGUF model. Session embeddings are updated during sweeps and rebuilds, not on every chat query.</p>
+        <PathPickerField
+          label="EmbeddingGemma GGUF model path"
+          bind:value={s.embedding_model_path}
+          mode="file"
+          placeholder=".../embeddinggemma-300m-q4_0.gguf"
+          note="Semantic search uses llama.cpp locally with this EmbeddingGemma GGUF model. Session embeddings are updated during sweeps and rebuilds, not on every chat query."
+          filters={[{ name: "GGUF model", extensions: ["gguf"] }]}
+          onchange={onBlur}
+        />
 
         <div class="semantic-actions">
           <button
@@ -418,68 +413,57 @@
       <section>
         <h2 class="section-title">CHAT IMPORTS</h2>
 
-        <label class="row-label">
-          <span>ChatGPT import path</span>
-          <input
-            type="text"
-            bind:value={s.chatgpt_import_path}
-            onblur={onBlur}
-            placeholder=".../chat_sessions/chatgpt"
-          />
-        </label>
+        <PathPickerField
+          label="ChatGPT import path"
+          bind:value={s.chatgpt_import_path}
+          mode="folder"
+          placeholder=".../chat_sessions/chatgpt"
+          onchange={onBlur}
+        />
 
-        <label class="row-label">
-          <span>Claude.ai import path</span>
-          <input
-            type="text"
-            bind:value={s.claudeai_import_path}
-            onblur={onBlur}
-            placeholder=".../chat_sessions/claude"
-          />
-        </label>
+        <PathPickerField
+          label="Claude.ai import path"
+          bind:value={s.claudeai_import_path}
+          mode="folder"
+          placeholder=".../chat_sessions/claude"
+          onchange={onBlur}
+        />
 
-        <label class="row-label">
-          <span>Gemini import path</span>
-          <input
-            type="text"
-            bind:value={s.gemini_import_path}
-            onblur={onBlur}
-            placeholder=".../chat_sessions/gemini"
-          />
-        </label>
+        <PathPickerField
+          label="Gemini import path"
+          bind:value={s.gemini_import_path}
+          mode="folder"
+          placeholder=".../chat_sessions/gemini"
+          onchange={onBlur}
+        />
 
-        <label class="row-label">
-          <span>Ollama Chat database path</span>
-          <input
-            type="text"
-            bind:value={s.ollama_chat_db_path}
-            onblur={onBlur}
-            placeholder="Auto-detected on Windows — leave blank to use default"
-          />
-        </label>
-        <p class="field-note">Path to the Ollama desktop app's local chat database (db.sqlite). Leave blank to auto-detect on Windows (%LOCALAPPDATA%\Ollama\db.sqlite). Set manually on macOS/Linux.</p>
+        <PathPickerField
+          label="Ollama Chat database path"
+          bind:value={s.ollama_chat_db_path}
+          mode="file"
+          placeholder="Auto-detected on Windows — leave blank to use default"
+          note="Path to the Ollama desktop app's local chat database (db.sqlite). Leave blank to auto-detect on Windows (%LOCALAPPDATA%\Ollama\db.sqlite). Set manually on macOS/Linux."
+          filters={[{ name: "SQLite database", extensions: ["sqlite", "db"] }]}
+          onchange={onBlur}
+        />
 
-        <label class="row-label">
-          <span>Continue data directory</span>
-          <input
-            type="text"
-            bind:value={s.continue_data_path}
-            onblur={onBlur}
-            placeholder="Auto-detected — leave blank to use default"
-          />
-        </label>
-        <p class="field-note">Root .continue directory. Leave blank to auto-detect (Windows: %APPDATA%\.continue; Linux/macOS: ~/.continue).</p>
+        <PathPickerField
+          label="Continue data directory"
+          bind:value={s.continue_data_path}
+          mode="folder"
+          placeholder="Auto-detected — leave blank to use default"
+          note="Root .continue directory. Leave blank to auto-detect (Windows: %APPDATA%\.continue; Linux/macOS: ~/.continue)."
+          onchange={onBlur}
+        />
 
-        <label class="row-label">
-          <span>Forge sessions directory</span>
-          <input
-            type="text"
-            bind:value={s.forge_sessions_path}
-            onblur={onBlur}
-            placeholder="Auto-detected — leave blank to use default"
-          />
-        </label>
-        <p class="field-note">Path to the Forge VS Code extension sessions folder. Leave blank to auto-detect (~/.forge/sessions).</p>
+        <PathPickerField
+          label="Forge sessions directory"
+          bind:value={s.forge_sessions_path}
+          mode="folder"
+          placeholder="Auto-detected — leave blank to use default"
+          note="Path to the Forge VS Code extension sessions folder. Leave blank to auto-detect (~/.forge/sessions)."
+          onchange={onBlur}
+        />
       </section>
 
       <section>

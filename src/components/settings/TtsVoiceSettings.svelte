@@ -2,6 +2,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
+  import PathPickerField from "./PathPickerField.svelte";
 
   interface VoiceInfo {
     name: string;
@@ -87,16 +88,14 @@
     {/if}
   </label>
 
-  <label class="row-label">
-    <span>Piper binary path</span>
-    <input
-      type="text"
-      bind:value={piperBin}
-      onblur={onPathBlur}
-      placeholder="auto-detect under ~/.halluscribe/tts/piper"
-    />
-  </label>
-  <p class="field-note">Leave blank to auto-search the piper folder under the HalluScribe archive.</p>
+  <PathPickerField
+    label="Piper binary path"
+    bind:value={piperBin}
+    mode="file"
+    placeholder="auto-detect under ~/.halluscribe/tts/piper"
+    note="Leave blank to auto-search the piper folder under the HalluScribe archive."
+    onchange={onPathBlur}
+  />
 
   <details class="setup-details">
     <summary>Setup instructions</summary>
@@ -134,7 +133,6 @@
 
   .row-label span { flex: 1; }
 
-  .row-label input[type="text"],
   .row-label select {
     flex: 0 0 300px;
     background: var(--surface);
@@ -147,7 +145,6 @@
     outline: none;
   }
 
-  .row-label input:focus,
   .row-label select:focus { border-color: var(--muted); }
 
   .voice-empty-hint {

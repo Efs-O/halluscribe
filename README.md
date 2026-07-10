@@ -92,7 +92,9 @@ Every fact carries session-id citations that are validated against the archive i
 Export a portable **persona pack** (`~/.halluscribe/exports/<user>-<scope>-persona-<date>.zip`) — the distilled profile, weekly digests, redacted session Markdown, a filtered index, and a manifest. A consent filter governs what leaves the machine; raw transcripts are excluded unless you explicitly opt in, and embeddings are never included.
 
 ### Workspaces
-Hold more than one person's archive on a single machine. Each **workspace** is an isolated root with its own index, profiles, raw copies, and settings. Switch the active workspace from Settings; guest workspaces can be set **import-only** so a sweep ingests only that person's chat exports, never the host machine's coding sessions.
+Hold more than one person's archive on a single machine. Each **workspace** is an isolated root with its own index, profiles, raw copies, and settings. Switch the active workspace from Settings; guest workspaces can be set **import-only** so a sweep ingests only that person's chat exports, never the host machine's coding sessions. Workspace entries collapse to a compact header row (name, active marker, Switch) so a long list stays manageable; expand a row to rename, toggle import-only, or delete.
+
+Every path field in Settings — model files, binaries, chat-import folders, workspace roots — pairs its text input with a native **Browse…** dialog, so paths can be picked from the OS file/folder picker or typed as before.
 
 ### Privacy &amp; redaction
 A secret scanner flags likely credentials (API keys, tokens) in each session, and a per-session redaction panel lets you review and strip sensitive spans before anything is exported or exposed over MCP. Redaction is applied to archive Markdown and MCP reads; raw copies are never redacted and never leave unless you opt in.
