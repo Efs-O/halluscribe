@@ -277,3 +277,32 @@ fn global_group_cap_retains_newest_but_counts_overflow_hits() {
     assert_eq!(result.sessions.last().unwrap().session_id, "session-001");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+// Manual benchmark against a real archive (plan step 3 — decides whether
+// rayon is worth asking for). Never runs in CI: gated on an env var AND
+// `#[ignore]`. Usage:
+//   HALLUSCRIBE_BENCH_ARCHIVE=<archive dir> \
+//     cargo test --release bench_search_raw -- --ignored --nocapture
+#[test]
+#[ignore = "manual benchmark; set HALLUSCRIBE_BENCH_ARCHIVE"]
+fn bench_search_raw_real_archive() {
+    let Ok(dir) = std::env::var("HALLUSCRIBE_BENCH_ARCHIVE") else {
+        eprintln!("HALLUSCRIBE_BENCH_ARCHIVE not set; skipping");
+        return;
+    };
+    let dir = PathBuf::from(dir);
+    for needle in ["netsh winsock reset", "cargo clippy", "zzz_no_such_token"] {
+        let started = std::time::Instant::now();
+        let result = search_raw(&dir, needle, None).unwrap();
+        eprintln!(
+            "needle {needle:?}: {:?} — scanned {}, without_raw {}, failed {}, hits {} in {} sessions{}",
+            started.elapsed(),
+            result.sessions_scanned,
+            result.sessions_without_raw,
+            result.sessions_failed.len(),
+            result.total_hits,
+            result.sessions.len(),
+            if result.results_truncated { " (truncated)" } else { "" },
+        );
+    }
+}
