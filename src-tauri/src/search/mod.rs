@@ -6,10 +6,15 @@
 mod content;
 mod filtering;
 mod params;
+// Step 1 exposes the pure scanner before Step 2 adds its production caller.
+#[cfg_attr(not(test), allow(dead_code))]
+mod raw;
 mod tokenize;
 
 pub(crate) use content::{body_contains, body_find};
 pub use params::SearchParams;
+#[cfg_attr(not(test), allow(unused_imports))]
+pub(crate) use raw::{json_escaped, scan_text};
 
 use crate::archive::{read_sessions, IndexEntry};
 use std::collections::HashSet;
@@ -152,6 +157,8 @@ pub fn read_session_in_scope(
     content::read_session(archive_dir, session_id)
 }
 
+#[cfg(test)]
+mod raw_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
