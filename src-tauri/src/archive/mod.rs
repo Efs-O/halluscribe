@@ -45,7 +45,7 @@ pub use index::{
     archived_source_size, delete_sessions, find_session, is_archived, read_sessions, session_id,
     set_raw_path, set_secret_flags,
 };
-pub use raw::{preserve_raw, raw_rel_path, read_raw, RAW_DIR};
+pub use raw::{preserve_raw, raw_rel_path, read_raw, read_raw_at, RAW_DIR};
 pub use redact::{
     apply_redaction, load_rules, preview_redaction, rules_for_session, RedactionOutcome,
     RedactionPreview, RedactionRule,

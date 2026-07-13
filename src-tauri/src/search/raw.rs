@@ -1,8 +1,15 @@
-// HalluScribe - raw transcript pure matcher: dual-needle scan + excerpts.
+// HalluScribe - raw transcript matching and archive search orchestration.
+
+use crate::archive::{read_raw_at, read_sessions, IndexEntry};
+use std::collections::HashSet;
+use std::fmt;
+use std::path::Path;
 
 const EXCERPT_CHARS: usize = 200;
+const MAX_EXCERPTS_PER_SESSION: usize = 20;
+pub(crate) const MAX_SESSION_GROUPS: usize = 200;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
 pub struct RawExcerpt {
     pub line_no: usize,
     pub excerpt: String,
@@ -13,6 +20,117 @@ pub struct RawScanOutcome {
     pub total_hits: usize,
     pub excerpts: Vec<RawExcerpt>,
     pub excerpts_truncated: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RawSessionMatches {
+    pub session_id: String,
+    pub total_hits: usize,
+    pub excerpts: Vec<RawExcerpt>,
+    pub excerpts_truncated: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RawSearchResult {
+    pub sessions: Vec<RawSessionMatches>,
+    pub sessions_scanned: usize,
+    pub sessions_without_raw: usize,
+    pub sessions_failed: Vec<String>,
+    pub total_hits: usize,
+    pub results_truncated: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum RawSearchError {
+    EmptyQuery,
+    Archive(String),
+}
+
+impl fmt::Display for RawSearchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyQuery => write!(f, "raw transcript search query cannot be empty"),
+            Self::Archive(message) => write!(f, "failed to read archive index: {message}"),
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ArchiveIndexValidation {
+    #[serde(rename = "sessions")]
+    _sessions: Vec<IndexEntry>,
+}
+
+pub fn search_raw(
+    archive_dir: &Path,
+    needle: &str,
+    allowed_ids: Option<&HashSet<String>>,
+) -> Result<RawSearchResult, RawSearchError> {
+    if needle.trim().is_empty() {
+        return Err(RawSearchError::EmptyQuery);
+    }
+    validate_index(archive_dir)?;
+
+    let mut entries = read_sessions(archive_dir);
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.date.clone()));
+    let mut result = RawSearchResult {
+        sessions: Vec::new(),
+        sessions_scanned: 0,
+        sessions_without_raw: 0,
+        sessions_failed: Vec::new(),
+        total_hits: 0,
+        results_truncated: false,
+    };
+
+    for entry in entries.into_iter().filter(|entry| {
+        allowed_ids
+            .map(|ids| ids.contains(&entry.id))
+            .unwrap_or(true)
+    }) {
+        if entry.raw_path.is_empty() {
+            result.sessions_without_raw += 1;
+            continue;
+        }
+        let text = match read_raw_at(archive_dir, &entry.raw_path) {
+            Ok(text) => text,
+            Err(_) => {
+                result.sessions_failed.push(entry.id);
+                continue;
+            }
+        };
+
+        result.sessions_scanned += 1;
+        let outcome = scan_text(&text, needle, MAX_EXCERPTS_PER_SESSION);
+        if outcome.total_hits == 0 {
+            continue;
+        }
+
+        result.total_hits += outcome.total_hits;
+        if result.sessions.len() < MAX_SESSION_GROUPS {
+            result.sessions.push(RawSessionMatches {
+                session_id: entry.id,
+                total_hits: outcome.total_hits,
+                excerpts: outcome.excerpts,
+                excerpts_truncated: outcome.excerpts_truncated,
+            });
+        } else {
+            result.results_truncated = true;
+        }
+    }
+
+    Ok(result)
+}
+
+fn validate_index(archive_dir: &Path) -> Result<(), RawSearchError> {
+    let index_path = archive_dir.join("index.json");
+    let raw = match std::fs::read_to_string(index_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(RawSearchError::Archive(error.to_string())),
+    };
+    serde_json::from_str::<ArchiveIndexValidation>(&raw)
+        .map(|_| ())
+        .map_err(|error| RawSearchError::Archive(error.to_string()))
 }
 
 /// Return the representation stored inside a JSON string value, without the

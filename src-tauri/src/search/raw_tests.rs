@@ -1,6 +1,6 @@
 // HalluScribe - unit tests for raw transcript pure matching and excerpts.
 
-use super::{json_escaped, scan_text};
+use super::raw::{json_escaped, scan_text};
 
 #[test]
 fn finds_tool_call_args_and_user_message() {
