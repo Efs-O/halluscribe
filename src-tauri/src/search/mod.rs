@@ -6,13 +6,11 @@
 mod content;
 mod filtering;
 mod params;
-#[cfg_attr(not(test), allow(dead_code))]
 mod raw;
 mod tokenize;
 
 pub(crate) use content::{body_contains, body_find};
 pub use params::SearchParams;
-#[cfg_attr(not(test), allow(unused_imports))]
 pub use raw::{search_raw, RawExcerpt, RawSearchError, RawSearchResult, RawSessionMatches};
 
 use crate::archive::{read_sessions, IndexEntry};

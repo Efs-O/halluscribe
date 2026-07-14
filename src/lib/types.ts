@@ -167,6 +167,27 @@ export interface BackfillResult {
   total: number;
 }
 
+export interface RawExcerpt {
+  line_no: number;
+  excerpt: string;
+}
+
+export interface RawSessionMatches {
+  session_id: string;
+  total_hits: number;
+  excerpts: RawExcerpt[];
+  excerpts_truncated: boolean;
+}
+
+export interface RawSearchResult {
+  sessions: RawSessionMatches[];
+  sessions_scanned: number;
+  sessions_without_raw: number;
+  sessions_failed: string[];
+  total_hits: number;
+  results_truncated: boolean;
+}
+
 /** Payload from briefing-token / chat-token Tauri events. */
 export interface TokenPayload {
   text: string;

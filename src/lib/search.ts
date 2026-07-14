@@ -3,7 +3,7 @@
 // Pure functions — no Tauri calls. All filtering done in-memory on the loaded
 // IndexEntry list so the search bar is instant with no round-trips.
 
-import type { IndexEntry } from "./types";
+import type { IndexEntry, RawSearchResult, RawSessionMatches } from "./types";
 
 export type SessionSortKey = "date" | "title" | "project" | "tool" | "fill" | "tags";
 export type SessionSortDirection = "asc" | "desc";
@@ -44,6 +44,24 @@ export function sortSessions(
 ): IndexEntry[] {
   const sorted = [...sessions].sort((a, b) => compareSessions(a, b, key));
   return direction === "asc" ? sorted : sorted.reverse();
+}
+
+/** Map a RawSearchResult to the set of matching session ids. */
+export function rawMatchIds(result: RawSearchResult): Set<string> {
+  return new Set(result.sessions.map((session) => session.session_id));
+}
+
+/** Per-session lookup: id -> RawSessionMatches (for badges + expansion). */
+export function rawMatchesById(result: RawSearchResult): Map<string, RawSessionMatches> {
+  return new Map(result.sessions.map((session) => [session.session_id, session]));
+}
+
+/** Summarise how much of the archive had a readable raw transcript. */
+export function rawCoverageLine(result: RawSearchResult): string {
+  const base = `searched ${result.sessions_scanned} raw transcripts — ${result.sessions_without_raw} archived sessions have no raw copy`;
+  return result.sessions_failed.length > 0
+    ? `${base}, ${result.sessions_failed.length} raw copies failed to read`
+    : base;
 }
 
 function compareSessions(a: IndexEntry, b: IndexEntry, key: SessionSortKey): number {
@@ -92,6 +110,16 @@ if (import.meta.vitest) {
     topic_tags: [],
     archive_path: "",
     source_jsonl: "",
+  });
+
+  const rawResult = (overrides: Partial<RawSearchResult> = {}): RawSearchResult => ({
+    sessions: [],
+    sessions_scanned: 0,
+    sessions_without_raw: 0,
+    sessions_failed: [],
+    total_hits: 0,
+    results_truncated: false,
+    ...overrides,
   });
 
   describe("filterSessions", () => {
@@ -181,6 +209,60 @@ if (import.meta.vitest) {
       ];
       expect(sortSessions(sessions, "date", "desc").map((session) => session.title))
         .toEqual(["Newer", "Older"]);
+    });
+  });
+
+  describe("raw search helpers", () => {
+    const twoSessions = rawResult({
+      sessions: [
+        {
+          session_id: "session-a",
+          total_hits: 2,
+          excerpts: [{ line_no: 4, excerpt: "first" }],
+          excerpts_truncated: false,
+        },
+        {
+          session_id: "session-b",
+          total_hits: 1,
+          excerpts: [{ line_no: 9, excerpt: "second" }],
+          excerpts_truncated: true,
+        },
+      ],
+      total_hits: 3,
+    });
+
+    it("builds ids and per-session lookup from two matches", () => {
+      expect([...rawMatchIds(twoSessions)]).toEqual(["session-a", "session-b"]);
+      const lookup = rawMatchesById(twoSessions);
+      expect(lookup.size).toBe(2);
+      expect(lookup.get("session-b")).toEqual(twoSessions.sessions[1]);
+    });
+
+    it("formats coverage without failures", () => {
+      const result = rawResult({ sessions_scanned: 68, sessions_without_raw: 1374 });
+      expect(rawCoverageLine(result)).toBe(
+        "searched 68 raw transcripts — 1374 archived sessions have no raw copy",
+      );
+    });
+
+    it("appends failed raw-copy count", () => {
+      const result = rawResult({
+        sessions_scanned: 68,
+        sessions_without_raw: 1374,
+        sessions_failed: ["broken-a", "broken-b"],
+      });
+      expect(rawCoverageLine(result)).toBe(
+        "searched 68 raw transcripts — 1374 archived sessions have no raw copy, 2 raw copies failed to read",
+      );
+    });
+
+    it("handles an empty result", () => {
+      const result = rawResult();
+      expect(rawMatchIds(result).size).toBe(0);
+      expect(rawMatchesById(result).size).toBe(0);
+      expect(rawCoverageLine(result)).toBe(
+        "searched 0 raw transcripts — 0 archived sessions have no raw copy",
+      );
     });
   });
 }
