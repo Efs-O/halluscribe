@@ -166,6 +166,22 @@ pub(crate) fn search_sessions_fulltext(
     Ok(search::search_fulltext(&dir, &query))
 }
 
+/// Brute-force scan of preserved raw transcripts (SESSION SUMMARY raw scope).
+/// Gated on `preserve_raw_transcripts` — the single consent point for keeping
+/// unredacted raws.
+#[tauri::command]
+pub(crate) fn search_raw_transcripts(
+    app: tauri::AppHandle,
+    query: String,
+) -> Result<search::RawSearchResult, String> {
+    let dir = archive_dir(&app)?;
+    let settings = settings::load_settings(&dir);
+    if !settings.preserve_raw_transcripts {
+        return Err("Enable 'Preserve raw transcripts' before searching raw history.".to_string());
+    }
+    search::search_raw(&dir, &query, None).map_err(|error| error.to_string())
+}
+
 /// Semantic search over archived session summaries.
 #[tauri::command]
 pub(crate) fn search_sessions_semantic(

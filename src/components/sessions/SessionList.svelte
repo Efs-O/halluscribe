@@ -4,21 +4,38 @@
   import { listen } from "@tauri-apps/api/event";
   import { onMount } from "svelte";
   import "./SessionList.css";
-  import type { IndexEntry, SessionStats } from "../../lib/types";
-  import { filterSessions, sortSessions, type SessionSortDirection, type SessionSortKey } from "../../lib/search";
+  import type { IndexEntry, RawSearchResult, SessionStats } from "../../lib/types";
+  import {
+    filterSessions, rawCoverageLine, rawMatchesById, rawMatchIds, sortSessions,
+    type SessionSortDirection, type SessionSortKey,
+  } from "../../lib/search";
   import StatsStrip from "./StatsStrip.svelte";
   import SessionBulkBar from "./SessionBulkBar.svelte";
   import SessionRow from "./SessionRow.svelte";
   import SessionTableHeader from "./SessionTableHeader.svelte";
   import SessionDetail from "./SessionDetail.svelte";
+  import RawMatchDetails from "./RawMatchDetails.svelte";
 
   interface Props {
     onSendToBriefing: (sessionIds: string[]) => void | Promise<unknown>;
+    // Lifted to App.svelte so search scope/query and a completed raw scan
+    // survive tab switches (this component is destroyed on every tab change).
+    searchScope?: "summaries" | "raw";
+    query?: string;
+    rawResult?: RawSearchResult | null;
+    rawError?: string | null;
   }
 
-  let { onSendToBriefing }: Props = $props();
+  let {
+    onSendToBriefing,
+    searchScope = $bindable("summaries"),
+    query = $bindable(""),
+    rawResult = $bindable(null),
+    rawError = $bindable(null),
+  }: Props = $props();
 
   const SEARCH_DEBOUNCE_MS = 300;
+  const RAW_MIN_QUERY_CHARS = 3;
   const PAGE_SIZE = 25;
   const STORAGE_KEY = "hs-col-widths";
   const DIV_W = 10;
@@ -82,7 +99,6 @@
   let all = $state<IndexEntry[]>([]);
   let searchResults = $state<IndexEntry[]>([]);
   let stats = $state<SessionStats | null>(null);
-  let query = $state("");
   let fillMin = $state("");
   let fillMax = $state("");
   let sortKey = $state<SessionSortKey>("date");
@@ -91,8 +107,20 @@
   let selectedId = $state<string | null>(null);
   let checkedIds = $state<Set<string>>(new Set());
 
+  let rawLoading = $state(false);
+  let expandedRawIds = $state<Set<string>>(new Set());
+
+  let rawIds = $derived(rawResult ? rawMatchIds(rawResult) : null);
+  let rawById = $derived(rawResult ? rawMatchesById(rawResult) : null);
+  // Raw scope with no completed scan shows the plain unfiltered list; a scan
+  // filters the same table by matching ids (no separate results table).
+  let baseRows = $derived(
+    searchScope === "raw"
+      ? (rawIds ? all.filter((session) => rawIds.has(session.id)) : all)
+      : (query.trim() ? searchResults : all),
+  );
   let filtered = $derived(filterSessions(
-    query.trim() ? searchResults : all,
+    baseRows,
     "",
     fillMin ? parseFloat(fillMin) : undefined,
     fillMax ? parseFloat(fillMax) : undefined,
@@ -102,15 +130,64 @@
   let pageRows = $derived(sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE));
   let selected = $derived(all.find((session) => session.id === selectedId) ?? null);
 
+  // Generation counters so a slow response never overwrites a newer one
+  // (raw scans can take seconds once the backfilled corpus grows).
+  let summaryGen = 0;
+  let rawGen = 0;
+
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   $effect(() => {
     const q = query;
+    const scope = searchScope;
     clearTimeout(debounceTimer);
+    if (scope !== "summaries") return;
+    const gen = ++summaryGen;
     debounceTimer = setTimeout(() => {
       invoke<IndexEntry[]>("search_sessions_fulltext", { query: q })
-        .then((results) => { searchResults = results; });
+        .then((results) => { if (gen === summaryGen) searchResults = results; });
     }, SEARCH_DEBOUNCE_MS);
   });
+
+  async function runRawSearch() {
+    const q = query.trim();
+    const gen = ++rawGen;
+    expandedRawIds = new Set();
+    if (q.length < RAW_MIN_QUERY_CHARS) {
+      // Empty query = back to the unfiltered list; a too-short one gets a hint.
+      rawResult = null;
+      rawError = q ? `raw search needs at least ${RAW_MIN_QUERY_CHARS} characters` : null;
+      return;
+    }
+    rawLoading = true;
+    rawError = null;
+    try {
+      const result = await invoke<RawSearchResult>("search_raw_transcripts", { query: q });
+      if (gen !== rawGen) return;
+      rawResult = result;
+      page = 0;
+    } catch (error) {
+      if (gen !== rawGen) return;
+      rawError = String(error);
+      rawResult = null;
+    } finally {
+      if (gen === rawGen) rawLoading = false;
+    }
+  }
+
+  function setScope(scope: "summaries" | "raw") {
+    if (searchScope === scope) return;
+    searchScope = scope;
+    rawError = null;
+    expandedRawIds = new Set();
+    page = 0;
+  }
+
+  function toggleRawDetails(id: string) {
+    const next = new Set(expandedRawIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    expandedRawIds = next;
+  }
 
   function reload() {
     invoke<IndexEntry[]>("get_recent_sessions").then((sessions) => { all = sessions; });
@@ -206,9 +283,28 @@
         class="search-input"
         type="text"
         name="session-search"
-        placeholder="search sessions..."
+        placeholder={searchScope === "raw" ? "exact search in raw transcripts..." : "search sessions..."}
         bind:value={query}
+        onkeydown={(e) => { if (searchScope === "raw" && e.key === "Enter") runRawSearch(); }}
       />
+      <div class="scope-group" role="group" aria-label="Search scope">
+        <button
+          class="scope-btn"
+          class:active={searchScope === "summaries"}
+          onclick={() => setScope("summaries")}
+          title="Search the Gemma-generated session summaries (as you type)."
+        >
+          summaries
+        </button>
+        <button
+          class="scope-btn"
+          class:active={searchScope === "raw"}
+          onclick={() => setScope("raw")}
+          title="Exact substring scan of preserved raw transcripts. Press Enter to search."
+        >
+          raw
+        </button>
+      </div>
       <span class="fill-label">fill%</span>
       <input class="fill-input" type="number" min="0" max="100" placeholder="min" bind:value={fillMin} title="Minimum fill%" />
       <span class="fill-sep">-</span>
@@ -234,15 +330,38 @@
           checked={checkedIds.has(session.id)}
           onclick={(e) => selectRow(session.id, "ctrlKey" in e && e.ctrlKey)}
           ontogglecheck={(checked) => setChecked(session.id, checked)}
+          rawHits={searchScope === "raw" ? (rawById?.get(session.id)?.total_hits ?? null) : null}
+          onToggleRaw={() => toggleRawDetails(session.id)}
         />
+        {#if searchScope === "raw" && expandedRawIds.has(session.id) && rawById?.get(session.id)}
+          <RawMatchDetails matches={rawById.get(session.id)!} />
+        {/if}
       {/each}
 
       {#if pageRows.length === 0}
         <p class="empty">
-          {query ? "no sessions match that search" : "no sessions archived yet"}
+          {#if searchScope === "raw"}
+            {rawResult ? `no matches in ${rawResult.sessions_scanned} raw transcripts searched` : "no sessions archived yet"}
+          {:else}
+            {query ? "no sessions match that search" : "no sessions archived yet"}
+          {/if}
         </p>
       {/if}
     </div>
+
+    {#if searchScope === "raw"}
+      <p class="raw-coverage" class:error={rawError !== null}>
+        {#if rawLoading}
+          scanning raw transcripts...
+        {:else if rawError}
+          {rawError}
+        {:else if rawResult}
+          {rawCoverageLine(rawResult)}{rawResult.results_truncated ? " — results truncated to the newest 200 matching sessions" : ""}
+        {:else}
+          exact match only — press Enter to scan raw transcripts
+        {/if}
+      </p>
+    {/if}
 
     {#if pageCount > 1}
       <div class="pagination">

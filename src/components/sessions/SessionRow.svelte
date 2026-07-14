@@ -9,9 +9,12 @@
     checked: boolean;
     onclick: (e: MouseEvent | KeyboardEvent) => void;
     ontogglecheck: (checked: boolean) => void;
+    /** Raw-scope match count; null/undefined hides the badge (summaries scope). */
+    rawHits?: number | null;
+    onToggleRaw?: () => void;
   }
 
-  let { session, selected, checked, onclick, ontogglecheck }: Props = $props();
+  let { session, selected, checked, onclick, ontogglecheck, rawHits = null, onToggleRaw }: Props = $props();
 
   let fillCls = $derived(fillClass(session.fill_pct));
   let fillText = $derived(displayFillPct(session.fill_pct, session.fill_estimated ?? false));
@@ -43,6 +46,15 @@
   <span class="title">
     {#if session.secret_flags?.length}
       <span class="secret-badge" title={"Possible secrets: " + session.secret_flags.join(", ")}>⚠</span>
+    {/if}
+    {#if rawHits != null}
+      <button
+        class="raw-badge"
+        title="Show matching raw transcript excerpts"
+        onclick={(e) => { e.stopPropagation(); onToggleRaw?.(); }}
+      >
+        {rawHits} {rawHits === 1 ? "hit" : "hits"}
+      </button>
     {/if}
     {session.title}
   </span>
@@ -129,6 +141,23 @@
     font-size: 11px;
     margin-right: 6px;
     line-height: 1;
+  }
+
+  .raw-badge {
+    background: none;
+    border: 1px solid var(--amber);
+    border-radius: 9px;
+    color: var(--amber);
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 7px;
+    margin-right: 6px;
+    cursor: pointer;
+  }
+
+  .raw-badge:hover {
+    background: color-mix(in srgb, var(--amber) 15%, transparent);
   }
 
   .project,

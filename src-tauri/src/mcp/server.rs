@@ -40,6 +40,26 @@ pub struct SearchSessionsRequest {
     pub offset: Option<usize>,
 }
 
+/// Parameters for `search_raw_transcripts`. Only the query is required.
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SearchRawTranscriptsRequest {
+    /// Case-insensitive text scanned verbatim against every preserved raw
+    /// transcript. Matched as a literal substring, not tokenized — spaces and
+    /// punctuation are significant.
+    pub query: String,
+    /// Max session groups serialized into the result (default 20, hard-capped
+    /// at 60). Fewer groups keep the response under MCP client token caps;
+    /// `results_truncated` reports when groups were dropped.
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// Default / hard-cap session groups returned by `search_raw_transcripts`. The
+/// core matcher already caps excerpts per session; this caps the group count so
+/// a broad needle can't overflow an MCP client's per-result token budget.
+const RAW_DEFAULT_LIMIT: usize = 20;
+const RAW_LIMIT_CAP: usize = 60;
+
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ReadSessionRequest {
     /// The session `id` field from a `search_sessions` result.
@@ -164,6 +184,37 @@ impl HalluscribeServer {
             .map_err(|error| McpError::internal_error(error.to_string(), None))
     }
 
+    fn do_search_raw_transcripts(
+        &self,
+        request: SearchRawTranscriptsRequest,
+    ) -> Result<String, McpError> {
+        // Same consent point as the desktop command: raws only exist while
+        // `preserve_raw_transcripts` is on, so refuse rather than return a
+        // misleading all-zero page when the toggle is off.
+        let settings = crate::settings::load_settings(&self.archive_dir);
+        if !settings.preserve_raw_transcripts {
+            return Err(McpError::internal_error(
+                "Raw transcript search is unavailable: 'Preserve raw transcripts' is disabled for \
+                 this archive, so no verbatim transcripts are retained. Use search_sessions to \
+                 search the distilled summaries instead."
+                    .to_string(),
+                None,
+            ));
+        }
+        let mut result = search::search_raw(&self.archive_dir, &request.query, None)
+            .map_err(|error| McpError::invalid_params(error.to_string(), None))?;
+        let limit = request
+            .limit
+            .unwrap_or(RAW_DEFAULT_LIMIT)
+            .clamp(1, RAW_LIMIT_CAP);
+        if result.sessions.len() > limit {
+            result.sessions.truncate(limit);
+            result.results_truncated = true;
+        }
+        serde_json::to_string_pretty(&result)
+            .map_err(|error| McpError::internal_error(error.to_string(), None))
+    }
+
     fn do_read_session(&self, session_id: &str) -> Result<String, McpError> {
         search::read_session(&self.archive_dir, session_id)
             .map_err(|error| McpError::resource_not_found(error, None))
@@ -216,6 +267,16 @@ impl HalluscribeServer {
         Parameters(request): Parameters<SearchSessionsRequest>,
     ) -> Result<String, McpError> {
         self.do_search_sessions(request)
+    }
+
+    #[tool(
+        description = "Brute-force search the user's PRESERVED RAW TRANSCRIPTS - the verbatim, unredacted JSONL captured before distillation, including full tool outputs, code, and file contents that never survive into the session summaries. Use this only when search_sessions (which searches the distilled summaries and is far cheaper) misses something you believe was actually said or done: exact error strings, a variable/function name, a path, a command. `query` is matched as a LITERAL case-insensitive substring - NOT tokenized - so spaces and punctuation are significant and there is no phrase/keyword mode. This tool reads and decompresses every retained raw transcript, so it is significantly slower than search_sessions; prefer that first. Requires 'Preserve raw transcripts' to be enabled for the archive - otherwise it returns an error because no raws are retained. Returns a JSON object: {sessions, sessions_scanned, sessions_without_raw, sessions_failed, total_hits, results_truncated}. `sessions` are per-session match groups, NEWEST FIRST, each {session_id, total_hits, excerpts:[{line_no, excerpt}], excerpts_truncated}; pass a session_id to read_session for the full body. `total_hits` counts ALL matches across the archive even when only some session groups are returned. At most `limit` groups are serialized (default 20, cap 60); `results_truncated` is true when groups were dropped - narrow the query rather than assuming the results are complete."
+    )]
+    fn search_raw_transcripts(
+        &self,
+        Parameters(request): Parameters<SearchRawTranscriptsRequest>,
+    ) -> Result<String, McpError> {
+        self.do_search_raw_transcripts(request)
     }
 
     #[tool(
@@ -276,10 +337,11 @@ impl ServerHandler for HalluscribeServer {
             .with_instructions(format!(
                 "HalluScribe read-only archive server. Gives every future agent session memory \
                  of all previous ones: search_sessions and read_session query the user's archived \
-                 AI coding sessions; get_profile and get_digest return the distilled profile for \
-                 the requested scope (work by default, or personal - a superset that also carries \
-                 private-chat-derived life context). No write, redact, or delete tools are exposed. \
-                 Serving archive: {}.",
+                 AI coding sessions; search_raw_transcripts falls back to the verbatim preserved \
+                 raws when the distilled summaries miss an exact string; get_profile and get_digest \
+                 return the distilled profile for the requested scope (work by default, or personal \
+                 - a superset that also carries private-chat-derived life context). No write, \
+                 redact, or delete tools are exposed. Serving archive: {}.",
                 self.identity
             ))
     }

@@ -6,10 +6,12 @@
 mod content;
 mod filtering;
 mod params;
+mod raw;
 mod tokenize;
 
 pub(crate) use content::{body_contains, body_find};
 pub use params::SearchParams;
+pub use raw::{search_raw, RawExcerpt, RawSearchError, RawSearchResult, RawSessionMatches};
 
 use crate::archive::{read_sessions, IndexEntry};
 use std::collections::HashSet;
@@ -152,6 +154,10 @@ pub fn read_session_in_scope(
     content::read_session(archive_dir, session_id)
 }
 
+#[cfg(test)]
+mod raw_search_tests;
+#[cfg(test)]
+mod raw_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

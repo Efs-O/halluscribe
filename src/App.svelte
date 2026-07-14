@@ -29,6 +29,7 @@
     ChatScope,
     ChatSearchMode,
     ProfileScope,
+    RawSearchResult,
     SweepProgress,
     HalluScribeSettings,
     WebSearchStatus,
@@ -53,6 +54,14 @@
   let chatScope = $state<ChatScope>({ kind: "archive-wide" });
   let chatSearchMode = $state<ChatSearchMode>("archive");
   let chatProfileScope = $state<ProfileScope>("work");
+  // Session-list search state lifted here so the raw/summaries scope, the query,
+  // and a completed raw scan survive tab switches (App is never destroyed —
+  // SessionList is re-created on every tab change). Matches how chat scope/turns
+  // persist above.
+  let sessionScope = $state<"summaries" | "raw">("summaries");
+  let sessionQuery = $state("");
+  let sessionRawResult = $state<RawSearchResult | null>(null);
+  let sessionRawError = $state<string | null>(null);
   let turns = $state<Turn[]>([]);
   let ctxUsedPct = $state(0);
   let chatStreaming = $state(false);
@@ -581,7 +590,13 @@
         onClearScope={clearSelectedScope}
       />
     {:else if activeTab === "sessions"}
-      <SessionList onSendToBriefing={sendSelectedSessionsToBriefing} />
+      <SessionList
+        onSendToBriefing={sendSelectedSessionsToBriefing}
+        bind:searchScope={sessionScope}
+        bind:query={sessionQuery}
+        bind:rawResult={sessionRawResult}
+        bind:rawError={sessionRawError}
+      />
     {:else if activeTab === "profile"}
       <ProfilePanel />
     {:else}

@@ -13,7 +13,7 @@
 // never leave the machine implicitly.
 
 use super::ArchiveError;
-use std::path::Path;
+use std::path::{Component, Path};
 
 /// Archive-relative directory holding preserved raw transcripts.
 pub const RAW_DIR: &str = "raw";
@@ -53,6 +53,29 @@ pub fn preserve_raw(
 pub fn read_raw(archive_dir: &Path, session_id: &str) -> Result<String, ArchiveError> {
     let path = archive_dir.join(raw_rel_path(session_id));
     let bytes = std::fs::read(&path)?;
+    let decoded = zstd::decode_all(bytes.as_slice())?;
+    String::from_utf8(decoded).map_err(|error| ArchiveError::Invalid(error.to_string()))
+}
+
+/// Read and decompress a raw transcript by its archive-relative path (the
+/// index entry's recorded `raw_path`). Rejects paths that are absolute or
+/// contain `..` components — index data must not escape the archive dir.
+pub fn read_raw_at(archive_dir: &Path, rel_path: &str) -> Result<String, ArchiveError> {
+    let rel = Path::new(rel_path);
+    if rel_path.is_empty()
+        || rel.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(ArchiveError::Invalid(format!(
+            "invalid archive-relative raw path: {rel_path}"
+        )));
+    }
+
+    let bytes = std::fs::read(archive_dir.join(rel))?;
     let decoded = zstd::decode_all(bytes.as_slice())?;
     String::from_utf8(decoded).map_err(|error| ArchiveError::Invalid(error.to_string()))
 }

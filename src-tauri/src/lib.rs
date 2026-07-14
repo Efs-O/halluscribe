@@ -37,8 +37,8 @@ use commands::{
     apply_redaction, cancel_briefing, cancel_chat, cancel_sweep, delete_sessions,
     get_raw_session_total, get_recent_sessions, get_settings, get_stats, preview_redaction,
     read_session, rebuild_session_embeddings, run_briefing, save_recorded_chat_session,
-    save_settings, search_sessions, search_sessions_fulltext, search_sessions_semantic,
-    send_chat_message, trigger_sweep, validate_ollama_api_key,
+    save_settings, search_raw_transcripts, search_sessions, search_sessions_fulltext,
+    search_sessions_semantic, send_chat_message, trigger_sweep, validate_ollama_api_key,
 };
 use commands_profile::{
     backfill_raw, count_available_raw, export_persona_pack, get_latest_digest, get_profile,
@@ -242,6 +242,7 @@ pub fn run() {
             cancel_chat,
             save_recorded_chat_session,
             send_chat_message,
+            search_raw_transcripts,
             search_sessions_fulltext,
             delete_sessions,
             cancel_sweep,
