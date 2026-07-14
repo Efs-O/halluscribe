@@ -18,9 +18,21 @@
 
   interface Props {
     onSendToBriefing: (sessionIds: string[]) => void | Promise<unknown>;
+    // Lifted to App.svelte so search scope/query and a completed raw scan
+    // survive tab switches (this component is destroyed on every tab change).
+    searchScope?: "summaries" | "raw";
+    query?: string;
+    rawResult?: RawSearchResult | null;
+    rawError?: string | null;
   }
 
-  let { onSendToBriefing }: Props = $props();
+  let {
+    onSendToBriefing,
+    searchScope = $bindable("summaries"),
+    query = $bindable(""),
+    rawResult = $bindable(null),
+    rawError = $bindable(null),
+  }: Props = $props();
 
   const SEARCH_DEBOUNCE_MS = 300;
   const RAW_MIN_QUERY_CHARS = 3;
@@ -87,7 +99,6 @@
   let all = $state<IndexEntry[]>([]);
   let searchResults = $state<IndexEntry[]>([]);
   let stats = $state<SessionStats | null>(null);
-  let query = $state("");
   let fillMin = $state("");
   let fillMax = $state("");
   let sortKey = $state<SessionSortKey>("date");
@@ -96,9 +107,6 @@
   let selectedId = $state<string | null>(null);
   let checkedIds = $state<Set<string>>(new Set());
 
-  let searchScope = $state<"summaries" | "raw">("summaries");
-  let rawResult = $state<RawSearchResult | null>(null);
-  let rawError = $state<string | null>(null);
   let rawLoading = $state(false);
   let expandedRawIds = $state<Set<string>>(new Set());
 
