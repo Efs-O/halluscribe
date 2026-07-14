@@ -134,6 +134,110 @@ fn read_session_errors_cleanly_for_unknown_id() {
     assert!(!error.message.is_empty());
 }
 
+/// Build an index whose entries carry a `raw_path`, so `search_raw` has raws
+/// to scan. Entries: (id, date, raw_path relative to the archive dir).
+fn make_raw_index(dir: &Path, entries: &[(&str, &str, &str)]) {
+    let sessions: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|(id, date, raw_path)| {
+            serde_json::json!({
+                "id": id,
+                "project": "proj",
+                "date": date,
+                "title": format!("Session {id}"),
+                "tool": "codex",
+                "fill_pct": 42.0,
+                "session_type": "coding",
+                "error_tags": [],
+                "topic_tags": ["fixture"],
+                "archive_path": format!("sessions/{id}.md"),
+                "source_jsonl": format!("sources/{id}.jsonl"),
+                "raw_path": raw_path,
+            })
+        })
+        .collect();
+    let idx = serde_json::json!({ "sessions": sessions });
+    fs::write(dir.join("index.json"), serde_json::to_string(&idx).unwrap()).unwrap();
+}
+
+/// Write a zstd-compressed raw transcript where `read_raw_at` expects it.
+fn write_raw(dir: &Path, rel_path: &str, fixture: &str) {
+    let compressed = zstd::encode_all(fixture.as_bytes(), 3).unwrap();
+    let path = dir.join(rel_path);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, compressed).unwrap();
+}
+
+#[test]
+fn search_raw_transcripts_groups_newest_first_and_honors_limit() {
+    let dir = tmp();
+    make_raw_index(
+        dir.path(),
+        &[
+            ("older", "2026-01-01", "raw/older.jsonl.zst"),
+            ("newer", "2026-07-01", "raw/newer.jsonl.zst"),
+        ],
+    );
+    write_raw(
+        dir.path(),
+        "raw/older.jsonl.zst",
+        "the widget failed to load\n",
+    );
+    write_raw(
+        dir.path(),
+        "raw/newer.jsonl.zst",
+        "widget rendered\nwidget clicked\n",
+    );
+    // Default settings preserve raws, so no settings.json is needed here.
+    let server = HalluscribeServer::new(dir.path().to_path_buf());
+
+    let json = server
+        .do_search_raw_transcripts(SearchRawTranscriptsRequest {
+            query: "widget".into(),
+            limit: None,
+        })
+        .unwrap();
+    let result: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(result["total_hits"], 3);
+    assert_eq!(result["sessions"][0]["session_id"], "newer"); // newest first
+    assert_eq!(result["sessions"][0]["total_hits"], 2);
+    assert_eq!(result["sessions"][1]["session_id"], "older");
+    assert_eq!(result["results_truncated"], false);
+
+    // limit drops the older group but total_hits stays honest across the archive.
+    let json = server
+        .do_search_raw_transcripts(SearchRawTranscriptsRequest {
+            query: "widget".into(),
+            limit: Some(1),
+        })
+        .unwrap();
+    let result: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(result["sessions"].as_array().unwrap().len(), 1);
+    assert_eq!(result["sessions"][0]["session_id"], "newer");
+    assert_eq!(result["results_truncated"], true);
+    assert_eq!(result["total_hits"], 3);
+}
+
+#[test]
+fn search_raw_transcripts_refuses_when_preserve_disabled() {
+    let dir = tmp();
+    make_raw_index(dir.path(), &[("s", "2026-07-01", "raw/s.jsonl.zst")]);
+    write_raw(dir.path(), "raw/s.jsonl.zst", "widget\n");
+    let settings = crate::settings::HalluScribeSettings {
+        preserve_raw_transcripts: false,
+        ..Default::default()
+    };
+    crate::settings::save_settings(dir.path(), &settings).unwrap();
+    let server = HalluscribeServer::new(dir.path().to_path_buf());
+    let error = server
+        .do_search_raw_transcripts(SearchRawTranscriptsRequest {
+            query: "widget".into(),
+            limit: None,
+        })
+        .unwrap_err();
+    assert!(error.message.contains("Preserve raw transcripts"));
+}
+
 #[test]
 fn get_profile_returns_placeholder_when_absent() {
     let dir = tmp();
