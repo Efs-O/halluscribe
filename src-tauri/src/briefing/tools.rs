@@ -9,8 +9,8 @@ use std::path::Path;
 /// Default / hard-cap session groups returned by `search_raw_transcripts`. Raw
 /// excerpts are verbose and Gemma 4's context window is small, so the model can
 /// still page wider via the `limit` arg when it needs more groups.
-const RAW_DEFAULT_LIMIT: usize = 10;
-const RAW_LIMIT_CAP: usize = 30;
+const RAW_DEFAULT_LIMIT: usize = 20;
+const RAW_LIMIT_CAP: usize = 60;
 
 pub(crate) enum ToolCallResult {
     ToolCall {
@@ -141,12 +141,12 @@ fn raw_search_tool() -> Value {
         "type": "function",
         "function": {
             "name": "search_raw_transcripts",
-            "description": "Brute-force search the PRESERVED RAW TRANSCRIPTS - the verbatim, unredacted text of each session, including full tool output and code that never survives into the summaries. Use this only when search_sessions (cheaper - it searches the distilled summaries) misses something you believe was actually said or done: an exact error string, a variable/function name, a path, a command. 'query' is matched as a LITERAL case-insensitive substring, NOT tokenized, so spaces and punctuation matter. It is slower than search_sessions because it decompresses every retained transcript, so try search_sessions first. Returns JSON {sessions, sessions_scanned, sessions_without_raw, sessions_failed, total_hits, results_truncated}. 'sessions' are per-session match groups, NEWEST FIRST, each {session_id, total_hits, excerpts:[{line_no, excerpt}], excerpts_truncated}; pass a session_id to read_session for the full body. 'total_hits' counts all matches across the archive even when only some groups are returned. At most 'limit' groups are returned (default 10, capped at 30); when results_truncated is true, narrow the query rather than assuming you have seen everything.",
+            "description": "Brute-force search the PRESERVED RAW TRANSCRIPTS - the verbatim, unredacted text of each session, including full tool output and code that never survives into the summaries. Use this only when search_sessions (cheaper - it searches the distilled summaries) misses something you believe was actually said or done: an exact error string, a variable/function name, a path, a command. 'query' is matched as a LITERAL case-insensitive substring, NOT tokenized, so spaces and punctuation matter. It is slower than search_sessions because it decompresses every retained transcript, so try search_sessions first. Returns JSON {sessions, sessions_scanned, sessions_without_raw, sessions_failed, total_hits, results_truncated}. 'sessions' are per-session match groups, NEWEST FIRST, each {session_id, total_hits, excerpts:[{line_no, excerpt}], excerpts_truncated}; pass a session_id to read_session for the full body. 'total_hits' counts all matches across the archive even when only some groups are returned. At most 'limit' groups are returned (default 20, capped at 60); when results_truncated is true, narrow the query rather than assuming you have seen everything.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": { "type": "string" },
-                    "limit": { "type": "integer", "description": "Max session groups returned (default 10, capped at 30)" }
+                    "limit": { "type": "integer", "description": "Max session groups returned (default 20, capped at 60)" }
                 },
                 "required": ["query"]
             }

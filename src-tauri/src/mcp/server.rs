@@ -47,8 +47,8 @@ pub struct SearchRawTranscriptsRequest {
     /// transcript. Matched as a literal substring, not tokenized — spaces and
     /// punctuation are significant.
     pub query: String,
-    /// Max session groups serialized into the result (default 10, hard-capped
-    /// at 30). Fewer groups keep the response under MCP client token caps;
+    /// Max session groups serialized into the result (default 20, hard-capped
+    /// at 60). Fewer groups keep the response under MCP client token caps;
     /// `results_truncated` reports when groups were dropped.
     #[serde(default)]
     pub limit: Option<usize>,
@@ -57,8 +57,8 @@ pub struct SearchRawTranscriptsRequest {
 /// Default / hard-cap session groups returned by `search_raw_transcripts`. The
 /// core matcher already caps excerpts per session; this caps the group count so
 /// a broad needle can't overflow an MCP client's per-result token budget.
-const RAW_DEFAULT_LIMIT: usize = 10;
-const RAW_LIMIT_CAP: usize = 30;
+const RAW_DEFAULT_LIMIT: usize = 20;
+const RAW_LIMIT_CAP: usize = 60;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ReadSessionRequest {
@@ -270,7 +270,7 @@ impl HalluscribeServer {
     }
 
     #[tool(
-        description = "Brute-force search the user's PRESERVED RAW TRANSCRIPTS - the verbatim, unredacted JSONL captured before distillation, including full tool outputs, code, and file contents that never survive into the session summaries. Use this only when search_sessions (which searches the distilled summaries and is far cheaper) misses something you believe was actually said or done: exact error strings, a variable/function name, a path, a command. `query` is matched as a LITERAL case-insensitive substring - NOT tokenized - so spaces and punctuation are significant and there is no phrase/keyword mode. This tool reads and decompresses every retained raw transcript, so it is significantly slower than search_sessions; prefer that first. Requires 'Preserve raw transcripts' to be enabled for the archive - otherwise it returns an error because no raws are retained. Returns a JSON object: {sessions, sessions_scanned, sessions_without_raw, sessions_failed, total_hits, results_truncated}. `sessions` are per-session match groups, NEWEST FIRST, each {session_id, total_hits, excerpts:[{line_no, excerpt}], excerpts_truncated}; pass a session_id to read_session for the full body. `total_hits` counts ALL matches across the archive even when only some session groups are returned. At most `limit` groups are serialized (default 10, cap 30); `results_truncated` is true when groups were dropped - narrow the query rather than assuming the results are complete."
+        description = "Brute-force search the user's PRESERVED RAW TRANSCRIPTS - the verbatim, unredacted JSONL captured before distillation, including full tool outputs, code, and file contents that never survive into the session summaries. Use this only when search_sessions (which searches the distilled summaries and is far cheaper) misses something you believe was actually said or done: exact error strings, a variable/function name, a path, a command. `query` is matched as a LITERAL case-insensitive substring - NOT tokenized - so spaces and punctuation are significant and there is no phrase/keyword mode. This tool reads and decompresses every retained raw transcript, so it is significantly slower than search_sessions; prefer that first. Requires 'Preserve raw transcripts' to be enabled for the archive - otherwise it returns an error because no raws are retained. Returns a JSON object: {sessions, sessions_scanned, sessions_without_raw, sessions_failed, total_hits, results_truncated}. `sessions` are per-session match groups, NEWEST FIRST, each {session_id, total_hits, excerpts:[{line_no, excerpt}], excerpts_truncated}; pass a session_id to read_session for the full body. `total_hits` counts ALL matches across the archive even when only some session groups are returned. At most `limit` groups are serialized (default 20, cap 60); `results_truncated` is true when groups were dropped - narrow the query rather than assuming the results are complete."
     )]
     fn search_raw_transcripts(
         &self,
