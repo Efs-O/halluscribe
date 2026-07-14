@@ -1,6 +1,6 @@
 {
   "productName": "HalluScribe",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "identifier": "com.halluscribe.app",
   "build": {
     "beforeDevCommand": "npm run dev",
