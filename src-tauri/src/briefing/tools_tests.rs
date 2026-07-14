@@ -17,14 +17,74 @@ fn runtime(web_search_enabled: bool, api_key: Option<&str>) -> ChatRuntimeOption
 
 #[test]
 fn chat_tools_only_include_web_tools_when_enabled_and_configured() {
+    // Base archive tools: search_sessions, read_session, search_raw_transcripts.
     let disabled = chat_tools(&runtime(false, Some("key")));
-    assert_eq!(disabled.len(), 2);
+    assert_eq!(disabled.len(), 3);
 
     let missing_key = chat_tools(&runtime(true, None));
-    assert_eq!(missing_key.len(), 2);
+    assert_eq!(missing_key.len(), 3);
 
     let enabled = chat_tools(&runtime(true, Some("key")));
-    assert_eq!(enabled.len(), 4);
+    assert_eq!(enabled.len(), 5);
+}
+
+#[test]
+fn chat_tools_always_include_raw_transcript_search() {
+    let names = chat_tools(&runtime(false, None))
+        .iter()
+        .filter_map(|tool| tool["function"]["name"].as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"search_raw_transcripts".to_string()));
+}
+
+#[test]
+fn execute_raw_search_returns_grouped_hits_and_honors_scope_gate() {
+    use std::fs;
+    let dir = tempfile::tempdir().unwrap();
+    let sessions = json!({ "sessions": [{
+        "id": "s1", "project": "proj", "date": "2026-07-01",
+        "title": "Session s1", "tool": "codex", "fill_pct": 42.0,
+        "session_type": "coding", "error_tags": [], "topic_tags": ["fixture"],
+        "archive_path": "sessions/s1.md", "source_jsonl": "sources/s1.jsonl",
+        "raw_path": "raw/s1.jsonl.zst"
+    }]});
+    fs::write(
+        dir.path().join("index.json"),
+        serde_json::to_string(&sessions).unwrap(),
+    )
+    .unwrap();
+    let raw_path = dir.path().join("raw/s1.jsonl.zst");
+    fs::create_dir_all(raw_path.parent().unwrap()).unwrap();
+    fs::write(
+        &raw_path,
+        zstd::encode_all(&b"widget rendered\nwidget clicked\n"[..], 3).unwrap(),
+    )
+    .unwrap();
+
+    // Default settings preserve raws -> real hits.
+    let out = execute_tool(
+        dir.path(),
+        &runtime(false, None),
+        "search_raw_transcripts",
+        &json!({ "query": "widget" }),
+    );
+    let result: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(result["total_hits"], 2);
+    assert_eq!(result["sessions"][0]["session_id"], "s1");
+
+    // Consent gate: with preservation off the tool refuses instead of returning zeros.
+    let settings = crate::settings::HalluScribeSettings {
+        preserve_raw_transcripts: false,
+        ..Default::default()
+    };
+    crate::settings::save_settings(dir.path(), &settings).unwrap();
+    let refused = execute_tool(
+        dir.path(),
+        &runtime(false, None),
+        "search_raw_transcripts",
+        &json!({ "query": "widget" }),
+    );
+    assert!(refused.contains("Preserve raw transcripts"));
 }
 
 #[test]
