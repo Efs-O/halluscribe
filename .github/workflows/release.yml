@@ -55,6 +55,26 @@ jobs:
       - name: Tauri build
         run: npm run tauri build
 
+      # The standalone MCP binary is built by `tauri build` alongside the app but
+      # lives outside bundle/ and is not packed into any installer. Stage it under
+      # a platform-unique name so external agents can download it per release
+      # (Linux and macOS both emit a bare `halluscribe-mcp`, which would collide
+      # as a release asset otherwise).
+      - name: Stage MCP binary (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cp src-tauri/target/release/halluscribe-mcp.exe halluscribe-mcp-windows-x64.exe
+
+      - name: Stage MCP binary (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: cp src-tauri/target/release/halluscribe-mcp halluscribe-mcp-macos-arm64
+
+      - name: Stage MCP binary (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cp src-tauri/target/release/halluscribe-mcp halluscribe-mcp-linux-x64
+
       - name: Publish release assets (Windows)
         if: runner.os == 'Windows'
         uses: softprops/action-gh-release@v2
@@ -63,6 +83,7 @@ jobs:
           files: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
+            halluscribe-mcp-windows-x64.exe
 
       - name: Publish release assets (macOS)
         if: runner.os == 'macOS'
@@ -71,6 +92,7 @@ jobs:
           generate_release_notes: true
           files: |
             src-tauri/target/release/bundle/dmg/*.dmg
+            halluscribe-mcp-macos-arm64
 
       - name: Publish release assets (Linux)
         if: runner.os == 'Linux'
@@ -80,3 +102,29 @@ jobs:
           files: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
+            halluscribe-mcp-linux-x64
+
+  # Runs once after all platform builds so the MCP setup note is appended a
+  # single time (not three times, once per matrix leg).
+  mcp-note:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Append MCP setup instructions to the release notes
+        uses: softprops/action-gh-release@v2
+        with:
+          append_body: true
+          body: |
+
+            ---
+            ### Optional: `halluscribe-mcp` — give external agents memory of your archive
+
+            This release also ships the standalone **halluscribe-mcp** binary (the per-OS asset above). It is **not** needed to use the HalluScribe app — the app and its built-in chat are fully self-contained. Install it only if you want an external agent (Claude Code, Codex, etc.) to search your archive over MCP.
+
+            1. Download the asset for your OS — `halluscribe-mcp-windows-x64.exe`, `halluscribe-mcp-macos-arm64`, or `halluscribe-mcp-linux-x64`. On macOS/Linux, `chmod +x` it.
+            2. Register it with your agent. Claude Code (user scope, available everywhere):
+               `claude mcp add --scope user halluscribe -- /path/to/halluscribe-mcp`
+               Codex: add a `[mcp_servers.halluscribe]` entry with `command = "/path/to/halluscribe-mcp"`.
+            3. It reads `~/.halluscribe` by default; set `HALLUSCRIBE_DIR` to point at a different archive.
+
+            Full details are in the README under **halluscribe-mcp**. Note: this binary does not self-update — after each release, replace your copy with this one, or agents keep talking to the old tool schema.
