@@ -53,6 +53,50 @@
 .search-input:focus,
 .fill-input:focus { border-color: var(--muted); }
 
+.scope-group {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Same pill language as the chat panel's search-mode buttons. */
+.scope-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--dim);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 5px 10px;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  transition: color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.scope-btn:hover {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+.scope-btn.active {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.raw-coverage {
+  margin: 0;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.raw-coverage.error {
+  color: var(--red);
+}
+
 .fill-label,
 .fill-sep {
   font-size: 13px;
