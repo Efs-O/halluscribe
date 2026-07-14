@@ -28,6 +28,10 @@
   let resultIsError = $state(false);
   let confirmingFullRebuild = $state(false);
   let digestOpen = $state(false);
+  // Profile bodies (Work and Personal both) stay behind an explicit reveal so
+  // they never just sit on screen. Re-hidden every time the user enters a scope
+  // or a build finishes.
+  let profileRevealed = $state(false);
 
   // Persona Pack export — per scope (Persona Parity Phase B): both Work and
   // Personal panels export their own pack; the user chooses which scope's
@@ -71,6 +75,7 @@
     resultIsError = false;
     confirmingFullRebuild = false;
     digestOpen = false;
+    profileRevealed = false;
     exportOpen = false;
     exportNote = null;
     exportIsError = false;
@@ -154,6 +159,8 @@
           resultNote = `Distilled ${payload.session_count} sessions → ${payload.facts_count} facts.`;
           resultIsError = false;
         }
+        // A finished build must not auto-expose the refreshed profile.
+        profileRevealed = false;
         void loadProfile();
       }),
     );
@@ -271,6 +278,17 @@
             <button class="btn" onclick={() => (confirmingFullRebuild = false)}>Cancel</button>
           </div>
         {/if}
+      </div>
+    {:else if !profileRevealed}
+      <div class="reveal-gate">
+        <p class="reveal-text">
+          {scope === "personal"
+            ? "Personal context is hidden — this profile carries private life details."
+            : "Profile is hidden."}
+        </p>
+        <button class="btn-primary" onclick={() => (profileRevealed = true)}>
+          ▸ Show {scope === "personal" ? "personal" : "work"} profile
+        </button>
       </div>
     {:else}
       <div class="generated-line">{firstLine(profile)}</div>
@@ -479,6 +497,23 @@
 
   .digest-content {
     padding-top: 4px;
+  }
+
+  .reveal-gate {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    max-width: 520px;
+    padding: 20px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+  }
+
+  .reveal-text {
+    font-size: 13px;
+    color: var(--dim);
+    margin: 0;
   }
 
   .loading, .err { font-size: 14px; color: var(--muted); }
