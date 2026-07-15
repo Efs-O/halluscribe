@@ -361,6 +361,22 @@ mod tests {
     }
 
     #[test]
+    fn stale_preserve_raw_transcripts_field_is_ignored_not_a_parse_error() {
+        // L3: the toggle was removed entirely (raw preservation is now
+        // unconditional), but a settings.json written before the removal
+        // still has the field on disk. Serde ignores unknown fields by
+        // default, so this must still load successfully rather than error.
+        let dir = tmp();
+        fs::write(
+            dir.path().join("settings.json"),
+            r#"{"schedule_time": "04:00", "preserve_raw_transcripts": true}"#,
+        )
+        .unwrap();
+        let settings = load_settings(dir.path());
+        assert_eq!(settings.schedule_time, "04:00");
+    }
+
+    #[test]
     fn generation_limits_require_non_zero_values() {
         let settings = HalluScribeSettings::default();
         assert!(settings.generation_limits().is_err());

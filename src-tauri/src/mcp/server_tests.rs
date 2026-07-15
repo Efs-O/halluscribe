@@ -219,23 +219,42 @@ fn search_raw_transcripts_groups_newest_first_and_honors_limit() {
 }
 
 #[test]
-fn search_raw_transcripts_refuses_when_preserve_disabled() {
+fn do_read_raw_session_returns_paged_json_shape() {
     let dir = tmp();
     make_raw_index(dir.path(), &[("s", "2026-07-01", "raw/s.jsonl.zst")]);
-    write_raw(dir.path(), "raw/s.jsonl.zst", "widget\n");
-    let settings = crate::settings::HalluScribeSettings {
-        preserve_raw_transcripts: false,
-        ..Default::default()
-    };
-    crate::settings::save_settings(dir.path(), &settings).unwrap();
+    write_raw(dir.path(), "raw/s.jsonl.zst", "the widget failed to load\n");
+    let server = HalluscribeServer::new(dir.path().to_path_buf());
+
+    let json = server
+        .do_read_raw_session(ReadRawSessionRequest {
+            session_id: "s".into(),
+            offset: None,
+            max_chars: None,
+        })
+        .unwrap();
+    let result: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(result["session_id"], "s");
+    assert_eq!(result["text"], "the widget failed to load\n");
+    assert_eq!(result["offset"], 0);
+    assert!(result["next_offset"].is_null());
+    assert_eq!(result["total_bytes"], "the widget failed to load\n".len());
+    assert_eq!(result["truncated"], false);
+}
+
+#[test]
+fn do_read_raw_session_unknown_id_is_an_error_not_fabricated_content() {
+    let dir = tmp();
     let server = HalluscribeServer::new(dir.path().to_path_buf());
     let error = server
-        .do_search_raw_transcripts(SearchRawTranscriptsRequest {
-            query: "widget".into(),
-            limit: None,
+        .do_read_raw_session(ReadRawSessionRequest {
+            session_id: "no-such-session".into(),
+            offset: None,
+            max_chars: None,
         })
         .unwrap_err();
-    assert!(error.message.contains("Preserve raw transcripts"));
+    assert!(error
+        .message
+        .contains("no raw copy exists for this session"));
 }
 
 #[test]

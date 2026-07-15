@@ -9,8 +9,13 @@ use std::path::Path;
 /// Default / hard-cap session groups returned by `search_raw_transcripts`. Raw
 /// excerpts are verbose and Gemma 4's context window is small, so the model can
 /// still page wider via the `limit` arg when it needs more groups.
-const RAW_DEFAULT_LIMIT: usize = 20;
-const RAW_LIMIT_CAP: usize = 60;
+const RAW_DEFAULT_LIMIT: usize = 40;
+const RAW_LIMIT_CAP: usize = 120;
+
+/// Default / hard-cap slice sizes for `read_raw_session`, matching the MCP
+/// tool's paging so both surfaces behave identically.
+const RAW_SESSION_DEFAULT_MAX_CHARS: usize = 20_000;
+const RAW_SESSION_MAX_CHARS_CAP: usize = 50_000;
 
 pub(crate) enum ToolCallResult {
     ToolCall {
@@ -36,6 +41,7 @@ pub(crate) fn chat_tools(runtime: &ChatRuntimeOptions) -> Vec<Value> {
         search_sessions_tool(),
         read_session_tool(),
         raw_search_tool(),
+        read_raw_session_tool(),
     ];
     if runtime.web_search_enabled && super::web_search::web_search_available(runtime) {
         tools.push(web_search_tool());
@@ -86,6 +92,7 @@ pub(crate) fn execute_tool(
             search::read_session_in_scope(archive_dir, id, allowed_ids).unwrap_or_else(|e| e)
         }
         "search_raw_transcripts" => execute_raw_search(archive_dir, runtime, args),
+        "read_raw_session" => execute_read_raw_session(archive_dir, args),
         "web_search" => execute_web_search(runtime, args),
         "web_fetch" => execute_web_fetch(runtime, args),
         _ => format!("unknown tool: {name}"),
@@ -101,7 +108,7 @@ fn search_sessions_tool() -> Value {
         "type": "function",
         "function": {
             "name": "search_sessions",
-            "description": "Search the session archive (matches title, tags, and summary body). Returns a JSON object: {searched, total_matches, returned, offset, results}. 'searched' is how many sessions were examined (the whole archive scope for this chat); 'total_matches' is how many of them matched the query; 'results' is only one page of metadata rows (at most 'limit', default 20, max 30). When asked how many sessions you searched, report 'searched' (not 'total_matches'). When total_matches is greater than returned there are more matches than shown - do not claim you have seen them all; page through them by re-calling with an increasing 'offset'.",
+            "description": "Search the session archive (matches title, tags, and summary body). Multi-word queries are AND-of-words: every word must appear somewhere in the session, in any order; wrap the query in double quotes to force exact-phrase matching instead. This makes it the right tool for 'which sessions mention X and Y' questions - total_matches covers the whole archive scope. Returns a JSON object: {searched, total_matches, returned, offset, results}. 'searched' is how many sessions were examined (the whole archive scope for this chat); 'total_matches' is how many of them matched the query; 'results' is only one page of metadata rows (at most 'limit', default 20, max 30). When asked how many sessions you searched, report 'searched' (not 'total_matches'). When total_matches is greater than returned there are more matches than shown - do not claim you have seen them all; page through them by re-calling with an increasing 'offset'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -141,14 +148,33 @@ fn raw_search_tool() -> Value {
         "type": "function",
         "function": {
             "name": "search_raw_transcripts",
-            "description": "Brute-force search the PRESERVED RAW TRANSCRIPTS - the verbatim, unredacted text of each session, including full tool output and code that never survives into the summaries. Use this only when search_sessions (cheaper - it searches the distilled summaries) misses something you believe was actually said or done: an exact error string, a variable/function name, a path, a command. 'query' is matched as a LITERAL case-insensitive substring, NOT tokenized, so spaces and punctuation matter. It is slower than search_sessions because it decompresses every retained transcript, so try search_sessions first. Returns JSON {sessions, sessions_scanned, sessions_without_raw, sessions_failed, total_hits, results_truncated}. 'sessions' are per-session match groups, NEWEST FIRST, each {session_id, total_hits, excerpts:[{line_no, excerpt}], excerpts_truncated}; pass a session_id to read_session for the full body. 'total_hits' counts all matches across the archive even when only some groups are returned. At most 'limit' groups are returned (default 20, capped at 60); when results_truncated is true, narrow the query rather than assuming you have seen everything.",
+            "description": "Brute-force search the PRESERVED RAW TRANSCRIPTS - the verbatim, unredacted text of each session, including full tool output and code that never survives into the summaries. Use this only when search_sessions (cheaper - it searches the distilled summaries) misses something you believe was actually said or done: an exact error string, a variable/function name, a path, a command. 'query' is matched as a LITERAL case-insensitive substring, NOT tokenized, so spaces and punctuation matter and there are no AND/OR operators. For 'which sessions mention X and Y' questions use search_sessions instead: its unquoted words are ANDed and its total_matches covers the whole archive, whereas raw groups are capped and newest-first, so intersecting raw results is NOT exhaustive. It is slower than search_sessions because it decompresses every retained transcript, so try search_sessions first. Returns JSON {sessions, sessions_scanned, sessions_without_raw, sessions_failed, total_hits, results_truncated}. 'sessions' are per-session match groups, NEWEST FIRST, each {session_id, total_hits, excerpts:[{line_no, excerpt}], excerpts_truncated, summarised, title, date}; pass a session_id to read_session for the full body only when 'summarised' is true. A group with summarised:false is an unsummarised raw - a session captured before any sweep summarised it (no read_session body exists), so use its 'title' (source filename) and 'date' instead and treat the excerpts as the only detail available. 'total_hits' counts all matches across the archive even when only some groups are returned. At most 'limit' groups are returned (default 40, capped at 120); when results_truncated is true, narrow the query rather than assuming you have seen everything, and tell the user any session list you report only covers the newest matching sessions.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": { "type": "string" },
-                    "limit": { "type": "integer", "description": "Max session groups returned (default 20, capped at 60)" }
+                    "limit": { "type": "integer", "description": "Max session groups returned (default 40, capped at 120)" }
                 },
                 "required": ["query"]
+            }
+        }
+    })
+}
+
+fn read_raw_session_tool() -> Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "read_raw_session",
+            "description": "Read one session's PRESERVED RAW TRANSCRIPT verbatim - the untouched source file, not a summary. Use it to open the full raw of a search_sessions or search_raw_transcripts hit. Also works for unsummarised captured sessions (search_raw_transcripts groups with summarised:false) that have no read_session body. Paged by BYTE offsets clamped to UTF-8 character boundaries: pass offset/max_chars (default 20000, capped at 50000). Returns JSON {session_id, text, offset, next_offset, total_bytes, truncated}; if truncated is true, call again with offset set to next_offset. For multi-chat providers the file may also contain sibling chats. Errors instead of fabricating content when no raw exists or it isn't valid UTF-8.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "offset": { "type": "integer", "description": "Byte offset to continue from (default 0)" },
+                    "max_chars": { "type": "integer", "description": "Max bytes per page (default 20000, capped at 50000)" }
+                },
+                "required": ["session_id"]
             }
         }
     })
@@ -190,16 +216,6 @@ fn web_fetch_tool() -> Value {
 }
 
 fn execute_raw_search(archive_dir: &Path, runtime: &ChatRuntimeOptions, args: &Value) -> String {
-    // Same consent point as the desktop command and MCP tool: raws only exist
-    // while `preserve_raw_transcripts` is on, so tell the model to fall back to
-    // summaries rather than return a misleading all-zero page.
-    let settings = crate::settings::load_settings(archive_dir);
-    if !settings.preserve_raw_transcripts {
-        return "Raw transcript search is unavailable: 'Preserve raw transcripts' is disabled, so \
-                no verbatim transcripts are retained. Use search_sessions to search the distilled \
-                summaries instead."
-            .to_string();
-    }
     let query = args["query"].as_str().unwrap_or("");
     let allowed_ids = match &runtime.chat_scope {
         ChatScope::ArchiveWide => None,
@@ -218,6 +234,20 @@ fn execute_raw_search(archive_dir: &Path, runtime: &ChatRuntimeOptions, args: &V
             }
             serde_json::to_string_pretty(&result).unwrap_or_default()
         }
+        Err(error) => error.to_string(),
+    }
+}
+
+fn execute_read_raw_session(archive_dir: &Path, args: &Value) -> String {
+    let session_id = args["session_id"].as_str().unwrap_or("");
+    let offset = args["offset"].as_u64().map(|n| n as usize).unwrap_or(0);
+    let max_chars = args["max_chars"]
+        .as_u64()
+        .map(|n| n as usize)
+        .unwrap_or(RAW_SESSION_DEFAULT_MAX_CHARS)
+        .clamp(1, RAW_SESSION_MAX_CHARS_CAP);
+    match crate::archive::read_raw_session(archive_dir, session_id, offset, max_chars) {
+        Ok(page) => serde_json::to_string_pretty(&page).unwrap_or_default(),
         Err(error) => error.to_string(),
     }
 }

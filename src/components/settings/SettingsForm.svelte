@@ -163,7 +163,7 @@
   }
 
   async function recoverRawTranscripts() {
-    if (backfillRunning || !s?.preserve_raw_transcripts) return;
+    if (backfillRunning) return;
     backfillRunning = true;
     backfillMessage = "";
     try {
@@ -340,13 +340,8 @@
           when you want that person's archive kept up to date automatically.
         </p>
 
-        <label class="row-label">
-          <span>Preserve raw transcripts</span>
-          <input type="checkbox" bind:checked={s.preserve_raw_transcripts} onchange={onToggle} />
-        </label>
-
         <p class="field-note">
-          Keeps a compressed copy of each session's original transcript in <code>~/.halluscribe/raw/</code>
+          A compressed copy of each session's original transcript is kept in <code>~/.halluscribe/raw/</code>
           so raw detail survives after the source tool prunes its logs. Raw copies are the untouched
           source — they are never redacted, and Persona Pack exports exclude them unless you opt in per-export.
         </p>
@@ -356,13 +351,10 @@
             class="action-btn"
             type="button"
             onclick={recoverRawTranscripts}
-            disabled={backfillRunning || !s.preserve_raw_transcripts}
+            disabled={backfillRunning}
           >
             {#if backfillRunning}recovering raw transcripts...{:else}recover raw transcripts{/if}
           </button>
-          {#if !s.preserve_raw_transcripts}
-            <p class="field-note">Enable Preserve raw transcripts above to recover history for existing sessions.</p>
-          {/if}
           {#if backfillMessage}
             <p class="field-note" class:field-note-warn={backfillMessage.includes("failed")}>
               {backfillMessage}

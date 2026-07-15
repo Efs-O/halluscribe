@@ -1,6 +1,6 @@
 // HalluScribe - raw transcript matching and archive search orchestration.
 
-use crate::archive::{read_raw_at, read_sessions, IndexEntry};
+use crate::archive::{load_captured, raw_rel_path, read_raw_at, read_sessions, IndexEntry};
 use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
@@ -28,6 +28,21 @@ pub struct RawSessionMatches {
     pub total_hits: usize,
     pub excerpts: Vec<RawExcerpt>,
     pub excerpts_truncated: bool,
+    /// True for sessions present in the archive index (the normal, summarised
+    /// case) — `read_session` returns their distilled summary. False for
+    /// sessions the startup capture pass (`archive::capture`) preserved a raw
+    /// copy of that no sweep has summarised yet: these have no summary/title
+    /// to read, only the raw transcript, so `title`/`date` below stand in for
+    /// the metadata `read_session` would otherwise supply.
+    pub summarised: bool,
+    /// Display title for an unsummarised session, derived from the source
+    /// filename. Empty for summarised sessions (use `read_session` instead).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    /// Display date (`YYYY-MM-DD`, from the source file's mtime) for an
+    /// unsummarised session. Empty for summarised sessions.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub date: String,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -73,6 +88,10 @@ pub fn search_raw(
 
     let mut entries = read_sessions(archive_dir);
     entries.sort_by_key(|entry| std::cmp::Reverse(entry.date.clone()));
+    // Captured-only sessions (below) are only ever added when the caller has
+    // no allowed_ids scope, so this set is only needed for that path — but
+    // it's cheap to build either way and keeps the two loops independent.
+    let indexed_ids: HashSet<String> = entries.iter().map(|entry| entry.id.clone()).collect();
     let mut result = RawSearchResult {
         sessions: Vec::new(),
         sessions_scanned: 0,
@@ -112,13 +131,85 @@ pub fn search_raw(
                 total_hits: outcome.total_hits,
                 excerpts: outcome.excerpts,
                 excerpts_truncated: outcome.excerpts_truncated,
+                summarised: true,
+                title: String::new(),
+                date: String::new(),
             });
         } else {
             result.results_truncated = true;
         }
     }
 
+    // Sessions the startup capture pass preserved a raw copy of but that no
+    // sweep has summarised yet (`archive::capture`) are invisible to the loop
+    // above — they have no index entry at all. Surface them too, flagged
+    // `summarised: false`, so L1's rescue copies are actually reachable
+    // before a sweep gets to them (or forever, if the source was pruned
+    // first). Restricted to the unscoped (allowed_ids: None) case only:
+    // an allowed_ids set is always built from index session ids by its
+    // callers (chat/briefing scope selection), so a captured-only session
+    // was never a candidate for that scope in the first place — including
+    // it anyway would silently widen a scope the caller deliberately
+    // narrowed.
+    if allowed_ids.is_none() {
+        let mut captured: Vec<_> = load_captured(archive_dir)
+            .into_iter()
+            .filter(|(id, _)| !indexed_ids.contains(id))
+            .collect();
+        captured.sort_by_key(|(_, record)| std::cmp::Reverse(record.mtime_secs));
+
+        for (id, record) in captured {
+            let text = match read_raw_at(archive_dir, &raw_rel_path(&id)) {
+                Ok(text) => text,
+                Err(_) => {
+                    result.sessions_failed.push(id);
+                    continue;
+                }
+            };
+
+            result.sessions_scanned += 1;
+            let outcome = scan_text(&text, needle, MAX_EXCERPTS_PER_SESSION);
+            if outcome.total_hits == 0 {
+                continue;
+            }
+
+            result.total_hits += outcome.total_hits;
+            if result.sessions.len() < MAX_SESSION_GROUPS {
+                result.sessions.push(RawSessionMatches {
+                    session_id: id,
+                    total_hits: outcome.total_hits,
+                    excerpts: outcome.excerpts,
+                    excerpts_truncated: outcome.excerpts_truncated,
+                    summarised: false,
+                    title: display_title(&record.source_path),
+                    date: display_date(record.mtime_secs),
+                });
+            } else {
+                result.results_truncated = true;
+            }
+        }
+    }
+
     Ok(result)
+}
+
+/// Display title for a captured-only (unsummarised) session: the source
+/// file's name, since there is no distilled title to show instead.
+fn display_title(source_path: &str) -> String {
+    Path::new(source_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("unknown session")
+        .to_string()
+}
+
+/// Display date for a captured-only (unsummarised) session, derived from the
+/// source file's mtime at capture time. Empty (never fabricated) if the
+/// timestamp doesn't convert to a valid date.
+fn display_date(mtime_secs: i64) -> String {
+    chrono::DateTime::from_timestamp(mtime_secs, 0)
+        .map(|dt: chrono::DateTime<chrono::Utc>| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_default()
 }
 
 fn validate_index(archive_dir: &Path) -> Result<(), RawSearchError> {

@@ -139,10 +139,10 @@ pub fn run_sweep(
         };
 
         // Preserve the untouched source transcript (compressed) so raw detail
-        // survives the source tool pruning its own logs (Phase 1). A copy
-        // failure is non-fatal: the summary still archives, just without a raw
-        // pointer. Skipped entirely when the setting is off.
-        let raw_path = if config.settings.preserve_raw_transcripts {
+        // survives the source tool pruning its own logs (Phase 1). Always on
+        // (L3): a copy failure is non-fatal, the summary still archives, just
+        // without a raw pointer.
+        let raw_path =
             match archive::preserve_raw(&config.archive_dir, &session.id, &session.source_path) {
                 Ok(rel) => Some(rel),
                 Err(error) => {
@@ -151,10 +151,7 @@ pub fn run_sweep(
                         .push(format!("{}: raw preserve: {error}", session.id));
                     None
                 }
-            }
-        } else {
-            None
-        };
+            };
 
         let meta = SessionMeta {
             id: session.id.clone(),

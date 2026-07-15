@@ -1,7 +1,7 @@
 // HalluScribe - archive traversal tests for raw transcript search.
 
 use super::raw::{search_raw, RawSearchError, MAX_SESSION_GROUPS};
-use crate::archive::read_raw_at;
+use crate::archive::{read_raw_at, save_captured, CapturedManifest, CapturedRecord};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -54,6 +54,23 @@ fn write_raw(dir: &Path, rel_path: &str, fixture: &str) {
     let path = dir.join(rel_path);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, compressed).unwrap();
+}
+
+/// Write a `raw/captured.json` recording one captured-but-unsummarised
+/// session, mirroring what `archive::capture::run_capture` would have
+/// written for a coding-tool source file with no index entry yet.
+fn write_captured(dir: &Path, id: &str, source_filename: &str, mtime_secs: i64) {
+    let mut manifest = CapturedManifest::new();
+    manifest.insert(
+        id.to_string(),
+        CapturedRecord {
+            source_path: format!("C:/fake/home/.claude/projects/proj/{source_filename}"),
+            size: 123,
+            mtime_secs,
+            captured_at: "2026-07-15T00:00:00Z".to_string(),
+        },
+    );
+    save_captured(dir, &manifest).unwrap();
 }
 
 #[test]
@@ -275,6 +292,128 @@ fn global_group_cap_retains_newest_but_counts_overflow_hits() {
     assert!(result.results_truncated);
     assert_eq!(result.sessions[0].session_id, "session-200");
     assert_eq!(result.sessions.last().unwrap().session_id, "session-001");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn captured_only_session_appears_flagged_unsummarised() {
+    let dir = tmp_dir("captured_only");
+    write_index(
+        &dir,
+        &[TestEntry {
+            id: "indexed",
+            date: "2026-07-10",
+            raw_path: Some("raw/indexed.jsonl.zst"),
+        }],
+    );
+    write_raw(
+        &dir,
+        "raw/indexed.jsonl.zst",
+        r#"{"type":"user","message":{"content":"needle in indexed session"}}"#,
+    );
+    // Captured-only session: present in captured.json, absent from index.json.
+    // Uses the standard raw_rel_path layout, exactly like preserve_raw writes.
+    write_captured(&dir, "captured-only", "session-x.jsonl", 1_752_000_000);
+    write_raw(
+        &dir,
+        "raw/captured-only.jsonl.zst",
+        r#"{"type":"user","message":{"content":"needle in captured-only session"}}"#,
+    );
+
+    let result = search_raw(&dir, "needle", None).unwrap();
+    assert_eq!(result.sessions.len(), 2);
+
+    let indexed = result
+        .sessions
+        .iter()
+        .find(|s| s.session_id == "indexed")
+        .unwrap();
+    assert!(indexed.summarised);
+    assert!(indexed.title.is_empty());
+    assert!(indexed.date.is_empty());
+
+    let captured = result
+        .sessions
+        .iter()
+        .find(|s| s.session_id == "captured-only")
+        .unwrap();
+    assert!(!captured.summarised);
+    assert_eq!(captured.title, "session-x.jsonl");
+    assert!(!captured.date.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn captured_only_session_hidden_when_allowed_ids_scopes_the_search() {
+    let dir = tmp_dir("captured_scoped");
+    write_index(
+        &dir,
+        &[TestEntry {
+            id: "indexed",
+            date: "2026-07-10",
+            raw_path: Some("raw/indexed.jsonl.zst"),
+        }],
+    );
+    write_raw(
+        &dir,
+        "raw/indexed.jsonl.zst",
+        r#"{"type":"user","message":{"content":"needle"}}"#,
+    );
+    write_captured(&dir, "captured-only", "session-x.jsonl", 1_752_000_000);
+    write_raw(
+        &dir,
+        "raw/captured-only.jsonl.zst",
+        r#"{"type":"user","message":{"content":"needle"}}"#,
+    );
+
+    let allowed_ids = HashSet::from(["indexed".to_string()]);
+    let result = search_raw(&dir, "needle", Some(&allowed_ids)).unwrap();
+    assert_eq!(result.sessions.len(), 1);
+    assert_eq!(result.sessions[0].session_id, "indexed");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn captured_only_session_not_duplicated_when_also_indexed() {
+    let dir = tmp_dir("captured_also_indexed");
+    write_index(
+        &dir,
+        &[TestEntry {
+            id: "both",
+            date: "2026-07-10",
+            raw_path: Some("raw/both.jsonl.zst"),
+        }],
+    );
+    write_raw(
+        &dir,
+        "raw/both.jsonl.zst",
+        r#"{"type":"user","message":{"content":"needle"}}"#,
+    );
+    // Same id recorded in captured.json (as capture would after a sweep later
+    // summarises it) - must not produce a second, unsummarised group.
+    write_captured(&dir, "both", "session-both.jsonl", 1_752_000_000);
+
+    let result = search_raw(&dir, "needle", None).unwrap();
+    assert_eq!(result.sessions.len(), 1);
+    assert!(result.sessions[0].summarised);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn captured_only_session_matches_utf8_greek_needle() {
+    let dir = tmp_dir("captured_greek");
+    write_captured(&dir, "greek-session", "session-greek.jsonl", 1_752_000_000);
+    write_raw(
+        &dir,
+        "raw/greek-session.jsonl.zst",
+        r#"{"type":"user","message":{"content":"αυτή είναι μια δοκιμή στα ελληνικά"}}"#,
+    );
+
+    let result = search_raw(&dir, "δοκιμή", None).unwrap();
+    assert_eq!(result.sessions.len(), 1);
+    assert_eq!(result.sessions[0].session_id, "greek-session");
+    assert!(!result.sessions[0].summarised);
+    assert_eq!(result.total_hits, 1);
     std::fs::remove_dir_all(dir).unwrap();
 }
 

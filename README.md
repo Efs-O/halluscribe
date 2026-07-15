@@ -100,7 +100,9 @@ Every path field in Settings — model files, binaries, chat-import folders, wor
 A secret scanner flags likely credentials (API keys, tokens) in each session, and a per-session redaction panel lets you review and strip sensitive spans before anything is exported or exposed over MCP. Redaction is applied to archive Markdown and MCP reads; raw copies are never redacted and never leave unless you opt in.
 
 ### Raw transcript preservation
-With `preserve_raw_transcripts` enabled, the sweep keeps a compressed verbatim copy of each new transcript (`raw/<id>.jsonl.zst`) alongside the summary. Raw copies are never redacted and are excluded from exports by default. A backfill action can capture raw for already-archived sessions.
+With `preserve_raw_transcripts` enabled, the sweep keeps a compressed verbatim copy of each new transcript (`raw/<id>.jsonl.zst`) alongside the summary. In addition, a **startup capture pass** preserves raws of new coding sessions as soon as the app launches — so transcripts pruned by their source tool before the nightly sweep are no longer lost; captured-but-not-yet-summarised sessions show up in raw search flagged accordingly. Raw copies are never redacted and are excluded from exports by default. A backfill action can capture raw for already-archived sessions.
+
+Raw transcripts are searchable (literal substring, in-app and over MCP) and readable in full (paged) by any agent with archive access — including credentials or secrets that appeared in terminal output during a session. Review what your transcripts contain before pointing external agents at the archive.
 
 ### Voice (text-to-speech)
 Finished assistant replies in every chat scope get a **Speak** button, backed by a local [piper](https://github.com/rhasspy/piper) voice — no cloud TTS. Configure the voice and piper path in Settings; playback runs off the UI thread.
@@ -111,12 +113,14 @@ Finished assistant replies in every chat scope get a **Speak** button, backed by
 
 `halluscribe-mcp` is a second, standalone binary (no Tauri runtime) that exposes your archive over the [Model Context Protocol](https://modelcontextprotocol.io/) via stdio JSON-RPC — so any MCP client (Claude Code, Codex, etc.) can query it directly. The point: give every future agent session memory of all previous ones, without re-explaining context that's already sitting in your archive.
 
-It is **strictly read-only** — four tools, no write/redact/delete surface:
+It is **strictly read-only** — six tools, no write/redact/delete surface:
 
 | Tool | What it returns |
 |---|---|
-| `search_sessions` | A paginated page of matching session index entries (title, tags, tool, date) |
+| `search_sessions` | A paginated page of matching session index entries (title, tags, tool, date). Unquoted multi-word queries are AND-of-keywords; quote the query for exact-phrase matching |
 | `read_session` | The full redaction-applied Markdown body of one session, by id |
+| `search_raw_transcripts` | Literal case-insensitive substring search over the preserved raw transcripts, grouped per session with excerpts (newest first, default 40 session groups, capped at 120) — for exact strings that never survive into the summaries |
+| `read_raw_session` | One session's preserved raw transcript verbatim, paged (default 20 000 bytes per page, capped at 50 000) |
 | `get_profile` | The distilled profile for the requested `scope` (`work` default, or `personal`) — identity, projects, conventions, recurring problems, style, timeline (Personal is life-focused) |
 | `get_digest` | The latest weekly digest for the requested profile `scope` (`work` default \| `personal`) |
 

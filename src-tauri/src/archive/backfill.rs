@@ -1,7 +1,7 @@
 // HalluScribe - one-time raw transcript backfill (Persona Parity Phase A).
 //
 // Raw preservation (`archive::raw`) only ever runs during a sweep, so the
-// ~1300 sessions archived before `preserve_raw_transcripts` existed have no
+// ~1300 sessions archived before raw preservation existed have no
 // raw copy. This is a non-destructive, no-inference recovery pass: for every
 // already-archived session missing a raw copy, if its original
 // `source_jsonl` still exists on disk, compress and record it exactly as the

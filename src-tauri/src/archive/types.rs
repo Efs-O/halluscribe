@@ -17,8 +17,8 @@ pub struct SessionMeta {
     pub updated_at: Option<DateTime<Utc>>,
     pub transcript_hash: String,
     /// Relative path (e.g. `raw/<id>.jsonl.zst`) to the preserved raw transcript,
-    /// set by the sweep runner when `preserve_raw_transcripts` is on. `None` when
-    /// preservation is off or the copy failed; recorded into the index entry.
+    /// set unconditionally by the sweep runner. `None` when the copy failed;
+    /// recorded into the index entry.
     pub raw_path: Option<String>,
 }
 

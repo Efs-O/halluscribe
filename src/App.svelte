@@ -9,6 +9,7 @@
   import NavBar from "./components/NavBar.svelte";
   import WorkspaceBadge from "./components/WorkspaceBadge.svelte";
   import RunNowButton from "./components/RunNowButton.svelte";
+  import CaptureStatusLine from "./components/CaptureStatusLine.svelte";
   import BriefingPanel from "./components/briefing/BriefingPanel.svelte";
   import SessionList from "./components/sessions/SessionList.svelte";
   import ProfilePanel from "./components/profile/ProfilePanel.svelte";
@@ -503,6 +504,7 @@
     <NavBar active={activeTab} onchange={(tab) => { activeTab = tab; }} />
     <div class="top-bar-actions">
       <WorkspaceBadge />
+      <CaptureStatusLine />
       {#if activeTab === "sessions"}
         <RunNowButton
           running={sweepRunning}

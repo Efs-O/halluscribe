@@ -2,10 +2,10 @@
 //
 // The archive normally keeps only the Gemma summary plus a `source_jsonl`
 // pointer to the original. Coding tools prune old logs, so that pointer dangles
-// and the raw detail is lost forever. When `preserve_raw_transcripts` is on, the
-// sweep copies each archived session's original transcript here, compressed with
-// zstd (agent JSONL compresses roughly 10:1), so a persona layer built on
-// summaries can always drill back to ground truth.
+// and the raw detail is lost forever. The sweep unconditionally copies each
+// archived session's original transcript here, compressed with zstd (agent
+// JSONL compresses roughly 10:1), so a persona layer built on summaries can
+// always drill back to ground truth.
 //
 // Raw copies are the UNTOUCHED source: redaction and the secret scan apply only
 // to the shareable `.md` summaries, never to these files. Persona Pack exports
@@ -31,6 +31,10 @@ pub fn raw_rel_path(session_id: &str) -> String {
 /// any existing copy (a re-swept, changed session replaces its raw copy — the
 /// transcript hash already detected the change). Returns the archive-relative
 /// path to record in the index entry.
+///
+/// Written atomically (`.zst.tmp` then rename) so a startup capture pass and a
+/// concurrent sweep preserving the same session never race onto a torn file —
+/// whichever rename lands last wins, and the content is identical either way.
 pub fn preserve_raw(
     archive_dir: &Path,
     session_id: &str,
@@ -43,7 +47,12 @@ pub fn preserve_raw(
     }
     let bytes = std::fs::read(source)?;
     let compressed = zstd::encode_all(bytes.as_slice(), ZSTD_LEVEL)?;
-    std::fs::write(&dest, compressed)?;
+    let tmp_dest = dest.with_file_name(format!(
+        "{}.tmp",
+        dest.file_name().and_then(|n| n.to_str()).unwrap_or("raw")
+    ));
+    std::fs::write(&tmp_dest, compressed)?;
+    std::fs::rename(&tmp_dest, &dest)?;
     Ok(rel)
 }
 
@@ -147,6 +156,19 @@ mod tests {
         let dir = tmp_dir("missing");
         let result = preserve_raw(&dir, "id", &dir.join("does-not-exist.jsonl"));
         assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn preserve_leaves_no_tmp_file_behind() {
+        let dir = tmp_dir("atomic");
+        let source = dir.join("session.jsonl");
+        std::fs::write(&source, "{\"role\":\"user\"}\n").unwrap();
+
+        let rel = preserve_raw(&dir, "abc-123", &source).unwrap();
+        assert!(dir.join(&rel).exists());
+        assert!(!dir.join("raw/abc-123.jsonl.zst.tmp").exists());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

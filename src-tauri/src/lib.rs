@@ -5,6 +5,7 @@ mod app_state;
 mod app_support;
 mod chat_prompt;
 mod commands;
+mod commands_capture;
 mod commands_profile;
 mod commands_tts;
 mod commands_workspace;
@@ -30,8 +31,10 @@ pub mod search;
 pub mod settings;
 pub mod workspace;
 
-use app_state::{BriefingCancel, ChatCancel, SweepCancel};
-use app_support::{archive_dir, clear_first_run, record_sweep_date, sweep_config};
+use app_state::{BriefingCancel, CaptureCancel, CaptureStatusState, ChatCancel, SweepCancel};
+use app_support::{
+    archive_dir, clear_first_run, default_archive_dir, record_sweep_date, sweep_config,
+};
 use chrono::{Datelike, Local, Timelike};
 use commands::{
     apply_redaction, cancel_briefing, cancel_chat, cancel_sweep, delete_sessions,
@@ -40,6 +43,7 @@ use commands::{
     save_settings, search_raw_transcripts, search_sessions, search_sessions_fulltext,
     search_sessions_semantic, send_chat_message, trigger_sweep, validate_ollama_api_key,
 };
+use commands_capture::{cancel_capture, get_capture_status};
 use commands_profile::{
     backfill_raw, count_available_raw, export_persona_pack, get_latest_digest, get_profile,
     get_profile_refresh_status, run_profile_refresh,
@@ -108,6 +112,10 @@ pub fn run() {
         .manage(BriefingCancel(Arc::new(AtomicBool::new(false))))
         .manage(ChatCancel(Arc::new(AtomicBool::new(false))))
         .manage(SweepCancel(Arc::new(AtomicBool::new(false))))
+        .manage(CaptureCancel(Arc::new(AtomicBool::new(false))))
+        .manage(CaptureStatusState(Arc::new(std::sync::Mutex::new(
+            archive::CaptureStatus::default(),
+        ))))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
@@ -224,6 +232,42 @@ pub fn run() {
                 }
             });
 
+            // Startup raw capture (coding sources only, no settings gate): a
+            // background pass so a coding tool that prunes its own JSONL logs
+            // before its first sweep never loses that session's raw detail.
+            // Never blocks app startup - spawned and forgotten; progress is
+            // observable via managed state + the "raw-capture-progress" event.
+            let capture_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let Ok(dir) = archive_dir(&capture_handle) else {
+                    return;
+                };
+                let import_only = default_archive_dir(&capture_handle)
+                    .map(|default_root| {
+                        crate::workspace::is_active_import_only(&default_root, &dir)
+                    })
+                    .unwrap_or(false);
+                let loaded_settings = settings::load_settings(&dir);
+                let cancel = capture_handle.state::<CaptureCancel>().0.clone();
+                let status_state = capture_handle.state::<CaptureStatusState>().0.clone();
+                let progress_handle = capture_handle.clone();
+                // `run_capture` calls this once per file plus once more with the
+                // final Done/Cancelled status, so managed state and the event
+                // are always in sync - no separate "after it returns" emit needed.
+                archive::run_capture(
+                    &dir,
+                    &loaded_settings,
+                    import_only,
+                    &cancel,
+                    move |status| {
+                        *status_state
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner()) = status.clone();
+                        let _ = progress_handle.emit("raw-capture-progress", status.clone());
+                    },
+                );
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -266,6 +310,8 @@ pub fn run() {
             tts_list_voices,
             tts_status,
             tts_speak,
+            get_capture_status,
+            cancel_capture,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -57,7 +57,6 @@ export interface HalluScribeSettings {
   ctx_size: number;
   max_tokens: number;
   briefing_window_hours: number;
-  preserve_raw_transcripts: boolean;
   tts_piper_bin: string;
   tts_voice: string;
 }
@@ -167,6 +166,15 @@ export interface BackfillResult {
   total: number;
 }
 
+/** Emitted by `raw-capture-progress` events during the startup raw capture
+ *  pass and returned by `get_capture_status`. Mirrors the Rust
+ *  `archive::CaptureStatus` enum's internally-tagged JSON shape. */
+export type CaptureStatus =
+  | { state: "idle" }
+  | { state: "running"; done: number; total: number; captured: number }
+  | { state: "done"; done: number; total: number; captured: number }
+  | { state: "cancelled" };
+
 export interface RawExcerpt {
   line_no: number;
   excerpt: string;
@@ -177,6 +185,14 @@ export interface RawSessionMatches {
   total_hits: number;
   excerpts: RawExcerpt[];
   excerpts_truncated: boolean;
+  /** True for sessions in the archive index. False for sessions the startup
+   *  raw capture pass preserved but no sweep has summarised yet - `title`/
+   *  `date` stand in for the metadata a summary would otherwise supply. */
+  summarised: boolean;
+  /** Source filename, only set when `summarised` is false. */
+  title?: string;
+  /** Source file mtime (`YYYY-MM-DD`), only set when `summarised` is false. */
+  date?: string;
 }
 
 export interface RawSearchResult {

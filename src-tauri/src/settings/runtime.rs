@@ -7,7 +7,7 @@ use std::path::PathBuf;
 impl HalluScribeSettings {
     /// Seed a NEW workspace's settings from this (the default root's) settings.
     /// Host-level fields — the machine's inference setup — are inherited so a guest
-    /// doesn't re-enter model config. Archive-level fields (import paths, preserve_raw,
+    /// doesn't re-enter model config. Archive-level fields (import paths,
     /// profile_sources, schedule, first_run, last_sweep_date, …) start fresh at their
     /// defaults. See docs/internal/PERSONAL_PARITY_PLAN.md §E cautions.
     pub fn seed_workspace_settings(&self) -> HalluScribeSettings {
@@ -113,7 +113,6 @@ mod tests {
             max_tokens: 500,
             first_run: false,
             chatgpt_import_path: "X".to_string(),
-            preserve_raw_transcripts: false,
             tts_piper_bin: "/tools/piper/piper".to_string(),
             tts_voice: "el_GR-joy-medium".to_string(),
             ..Default::default()
@@ -134,7 +133,6 @@ mod tests {
         // Archive-level fields are reset to defaults.
         assert!(seeded.first_run);
         assert_eq!(seeded.chatgpt_import_path, "");
-        assert!(seeded.preserve_raw_transcripts);
         assert_eq!(
             seeded.profile_sources,
             HalluScribeSettings::default().profile_sources
