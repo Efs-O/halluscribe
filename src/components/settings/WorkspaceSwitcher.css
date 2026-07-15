@@ -1,0 +1,133 @@
+/* HalluScribe - namespaced layout and controls for workspace settings. */
+
+.workspace-switcher .field-note { color: var(--dim); font-size: 12px; margin: 0; }
+.workspace-switcher .field-note.field-note-warn { color: #f0c07a; }
+.workspace-switcher .section-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+.workspace-switcher .ws-list { display: flex; flex-direction: column; gap: 14px; }
+.workspace-switcher .ws-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.workspace-switcher .ws-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.workspace-switcher .ws-head-toggle { cursor: pointer; user-select: none; }
+.workspace-switcher .ws-head-spacer { flex: 1; }
+.workspace-switcher .ws-chevron {
+  font-size: 12px;
+  color: var(--dim);
+  width: 1em;
+  flex: 0 0 auto;
+}
+.workspace-switcher .ws-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.workspace-switcher .ws-name { font-size: 14px; color: var(--text); }
+.workspace-switcher .ws-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.workspace-switcher .ws-active { font-size: 12px; color: var(--green); letter-spacing: 0.06em; }
+.workspace-switcher .ws-path { word-break: break-all; }
+.workspace-switcher .ws-delete {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.workspace-switcher .ws-confirm-text { font-size: 12px; color: var(--amber); }
+.workspace-switcher .ws-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--amber);
+  border-radius: 5px;
+  background: rgba(240, 192, 122, 0.08);
+}
+.workspace-switcher .ws-warn-text { font-size: 12px; color: var(--amber); margin: 0; line-height: 1.5; }
+.workspace-switcher .ws-warn-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.workspace-switcher .action-btn-danger:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
+.workspace-switcher .ws-inline { display: flex; gap: 8px; align-items: center; }
+.workspace-switcher .ws-inline input[type="text"] {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 12px;
+  outline: none;
+}
+.workspace-switcher .ws-inline input:focus { border-color: var(--muted); }
+.workspace-switcher .row-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: 14px;
+  color: var(--text);
+}
+.workspace-switcher .row-label span { flex: 1; }
+.workspace-switcher .row-label input[type="text"] {
+  flex: 0 0 300px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 12px;
+  outline: none;
+}
+.workspace-switcher .row-label input[type="text"]:focus { border-color: var(--muted); }
+.workspace-switcher .row-label input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+.workspace-switcher .ws-check { font-size: 13px; }
+.workspace-switcher .ws-create { display: flex; flex-direction: column; gap: 12px; margin-top: 18px; }
+.workspace-switcher .ws-actions { display: flex; align-items: flex-start; }
+.workspace-switcher .action-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, opacity 0.15s;
+}
+.workspace-switcher .action-btn:hover:not(:disabled) { border-color: var(--amber); color: var(--amber); }
+.workspace-switcher .action-btn:disabled { cursor: default; opacity: 0.6; }
