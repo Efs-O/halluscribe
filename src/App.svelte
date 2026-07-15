@@ -2,7 +2,6 @@
 <script lang="ts">
   import { exit } from "@tauri-apps/plugin-process";
   import { invoke } from "@tauri-apps/api/core";
-  import { listen } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-shell";
   import { onMount } from "svelte";
@@ -14,26 +13,14 @@
   import SessionList from "./components/sessions/SessionList.svelte";
   import ProfilePanel from "./components/profile/ProfilePanel.svelte";
   import SettingsForm from "./components/settings/SettingsForm.svelte";
-  import { appendAssistantToken } from "./lib/chatTurns";
+  import { BriefingController } from "./lib/briefing.svelte";
+  import { ChatController } from "./lib/chat.svelte";
+  import { SweepController } from "./lib/sweep.svelte";
   import { SpeakController } from "./lib/tts.svelte.ts";
   import type {
-    ChatAttachment,
-    ChatUsagePayload,
-    TokenPayload,
-    ToolCallPayload,
-    ChatMessage,
-    RecordedChatTurn,
-    RecordedSessionSaveResult,
-    Turn,
-    BriefingFilters,
     BriefingScope,
-    ChatScope,
-    ChatSearchMode,
-    ProfileScope,
     RawSearchResult,
-    SweepProgress,
     HalluScribeSettings,
-    WebSearchStatus,
   } from "./lib/types";
 
   type Tab = "briefing" | "sessions" | "profile" | "settings";
@@ -46,15 +33,6 @@
   let ctxVisible = $state(false);
   let ctxX = $state(0);
   let ctxY = $state(0);
-  let briefingAnswer = $state("");
-  let briefingHeader = $state("");
-  let briefingStreaming = $state(false);
-  let briefingError = $state<string | null>(null);
-  let briefingWarning = $state<string | null>(null);
-  let briefingScope = $state<BriefingScope>({ kind: "archive-wide" });
-  let chatScope = $state<ChatScope>({ kind: "archive-wide" });
-  let chatSearchMode = $state<ChatSearchMode>("archive");
-  let chatProfileScope = $state<ProfileScope>("work");
   // Session-list search state lifted here so the raw/summaries scope, the query,
   // and a completed raw scan survive tab switches (App is never destroyed —
   // SessionList is re-created on every tab change). Matches how chat scope/turns
@@ -63,62 +41,12 @@
   let sessionQuery = $state("");
   let sessionRawResult = $state<RawSearchResult | null>(null);
   let sessionRawError = $state<string | null>(null);
-  let turns = $state<Turn[]>([]);
-  let ctxUsedPct = $state(0);
-  let chatStreaming = $state(false);
-  let webSearchEnabled = $state(false);
-  let saveSessionEnabled = $state(false);
-  let activeRecordedSessionPath = $state<string | null>(null);
-  let saveSessionNote = $state<string | null>(null);
-  let saveSessionNoteIsError = $state(false);
-  let thinkingEnabled = $state(false);
-  let thinkingChangePending = $state(false);
   let settingsSnapshot = $state<HalluScribeSettings | null>(null);
-  let sweepRunning = $state(false);
-  let sweepProgress = $state<SweepProgress | null>(null);
-  let sweepToast = $state<{ msg: string; ok: boolean } | null>(null);
-  let sweepToastTimer: ReturnType<typeof setTimeout> | undefined;
+  const briefing = new BriefingController();
+  const chat = new ChatController(() => settingsSnapshot, () => briefing.scope);
+  const sweep = new SweepController();
   let isMaximized = $state(false);
   const appWindow = getCurrentWindow();
-  let turnIdCounter = 0;
-  function nextTurnId(): string {
-    turnIdCounter += 1;
-    return `t${turnIdCounter}`;
-  }
-
-  function formatToolActivity(tool: string, args: Record<string, unknown>): string {
-    if (tool === "web_search") {
-      const query = typeof args.query === "string" ? args.query : "";
-      return query
-        ? `searching the web: ${query}`
-        : "searching the web...";
-    }
-    if (tool === "web_fetch") {
-      const url = typeof args.url === "string" ? args.url : "";
-      return url
-        ? `fetching page: ${url}`
-        : "fetching page...";
-    }
-    if (tool === "search_sessions") {
-      const query = typeof args.query === "string" ? args.query : "";
-      return query
-        ? `searching archives: ${query}`
-        : "searching archives...";
-    }
-    if (tool === "search_sessions_semantic") {
-      const query = typeof args.query === "string" ? args.query : "";
-      return query
-        ? `semantic search: ${query}`
-        : "semantic search...";
-    }
-    if (tool === "read_session") {
-      const sessionId = typeof args.session_id === "string" ? args.session_id : "";
-      return sessionId
-        ? `reading session: ${sessionId}`
-        : "reading session...";
-    }
-    return `running tool: ${tool}`;
-  }
 
   function onContextMenu(e: MouseEvent) {
     e.preventDefault();
@@ -136,67 +64,16 @@
     });
 
     void refreshSettingsSnapshot();
-
-    await listen<string>("briefing-header", (ev) => {
-      briefingHeader = ev.payload;
-    });
-
-    await listen<string | null>("briefing-warning", (ev) => {
-      briefingWarning = ev.payload;
-    });
-
-    await listen<TokenPayload>("briefing-token", (ev) => {
-      briefingAnswer += ev.payload.text;
-    });
-
-    await listen("briefing-done", () => {
-      briefingStreaming = false;
-    });
-
-    await listen<TokenPayload>("chat-token", (ev) => {
-      const last = turns[turns.length - 1];
-      const next = appendAssistantToken(last, ev.payload);
-      if (last && next) Object.assign(last, next);
-    });
-
-    await listen("chat-done", () => {
-      const last = turns[turns.length - 1];
-      if (last) last.streaming = false;
-      chatStreaming = false;
-      thinkingChangePending = false;
-      void persistRecordedChatSnapshot("assistant_done");
-    });
-
-    await listen<ChatUsagePayload>("chat-usage", (ev) => {
-      const { prompt_tokens, completion_tokens, ctx_size } = ev.payload;
-      const used = prompt_tokens + completion_tokens;
-      ctxUsedPct = Math.min(100, Math.round((used / ctx_size) * 10) * 10);
-    });
-
-    await listen<ToolCallPayload>("chat-tool-call", (ev) => {
-      const last = turns[turns.length - 1];
-      if (last) last.toolActivity = formatToolActivity(ev.payload.tool, ev.payload.args);
-      void persistRecordedChatSnapshot("tool_call");
-    });
-
-    await listen<SweepProgress>("sweep-progress", (ev) => {
-      sweepRunning = true;
-      sweepProgress = ev.payload;
-      if (!sweepToast) {
-        sweepToast = { msg: "Sweep running...", ok: true };
-      }
-    });
-
-    await listen<string>("sweep-done", (ev) => {
-      sweepProgress = null;
-      sweepToast = { msg: ev.payload, ok: true };
-      sweepRunning = false;
-      clearTimeout(sweepToastTimer);
-      sweepToastTimer = setTimeout(() => { sweepToast = null; }, 5000);
-    });
+    const listeners = (await Promise.all([
+      briefing.registerListeners(),
+      chat.registerListeners(),
+      sweep.registerListeners(),
+    ])).flat();
 
     return () => {
       unlistenResize();
+      listeners.forEach((unlisten) => unlisten());
+      sweep.dispose();
     };
   });
 
@@ -217,282 +94,26 @@
     settingsSnapshot = await invoke<HalluScribeSettings>("get_settings");
   }
 
-  function webSearchStatus(): WebSearchStatus {
-    if (!settingsSnapshot) return "loading";
-    if (!settingsSnapshot.ollama_api_key.trim() && !settingsSnapshot.tavily_api_key.trim()) {
-      return "missing-api-key";
-    }
-    return "ready";
-  }
-
-  function currentBackendName(): string {
-    return settingsSnapshot?.backend === "ollama" ? "ollama" : "llama.cpp";
-  }
-
-  function currentModelName(): string {
-    if (!settingsSnapshot) return "Gemma 4";
-    return settingsSnapshot.backend === "llamacpp"
-      ? settingsSnapshot.gemma_model_path.trim() || "Gemma 4"
-      : settingsSnapshot.ollama_model.trim() || "gemma4:26b";
-  }
-
-  function imageAttachEnabled(): boolean {
-    return Boolean(
-      settingsSnapshot
-      && (settingsSnapshot.backend === "ollama" || settingsSnapshot.backend === "llamacpp")
-    );
-  }
-
-  async function cancelBriefing() {
-    await invoke("cancel_briefing");
-  }
-
-  function clearBriefingOutput() {
-    briefingAnswer = "";
-    briefingHeader = "";
-    briefingError = null;
-    briefingWarning = null;
-  }
-
-  function resetForScopeChange(nextScope: BriefingScope) {
-    void cancelBriefing();
-    briefingScope = nextScope;
-    chatScope = nextScope.kind === "selected-session-ids"
-      ? { kind: "briefing-scope" }
-      : { kind: "archive-wide" };
-    briefingStreaming = false;
-    turns = [];
-    clearBriefingOutput();
-  }
-
-  function hasActiveFilters(filters: BriefingFilters): boolean {
-    return Boolean(
-      filters.dateFrom ||
-      filters.dateTo ||
-      filters.fillMin ||
-      filters.fillMax ||
-      filters.keyword.trim()
-    );
-  }
-
-  function scopeLabel(scope: BriefingScope): string {
-    if (scope.kind === "selected-session-ids") return scope.label;
-    if (scope.kind === "filter-based") return "Scope: filtered briefing";
-    return "Scope: all archive";
-  }
-
-  async function runNow() {
-    if (sweepRunning) return;
-    sweepRunning = true;
-    sweepProgress = null;
-    clearTimeout(sweepToastTimer);
-    sweepToast = null;
-    try {
-      await invoke("trigger_sweep");
-      sweepToast = { msg: "Sweep running...", ok: true };
-    } catch (e) {
-      sweepToast = { msg: String(e), ok: false };
-      sweepRunning = false;
-      sweepToastTimer = setTimeout(() => { sweepToast = null; }, 5000);
-    }
-  }
-
-  async function cancelSweep() {
-    await invoke("cancel_sweep");
-    sweepToast = { msg: "Stopping - waiting for current session to finish...", ok: true };
-  }
-
-  async function runBriefing(filters: BriefingFilters) {
-    const nextScope: BriefingScope = briefingScope.kind === "selected-session-ids"
-      ? briefingScope
-      : hasActiveFilters(filters)
-        ? { kind: "filter-based", filters }
-        : { kind: "archive-wide" };
-
-    briefingScope = nextScope;
-    clearBriefingOutput();
-    briefingStreaming = true;
-    try {
-      await invoke("run_briefing", {
-        dateFrom: filters.dateFrom || null,
-        dateTo: filters.dateTo || null,
-        fillMin: filters.fillMin ? parseFloat(filters.fillMin) : null,
-        fillMax: filters.fillMax ? parseFloat(filters.fillMax) : null,
-        keyword: filters.keyword || null,
-        sessionIds: nextScope.kind === "selected-session-ids" ? nextScope.sessionIds : null,
-      });
-    } catch (e) {
-      briefingError = String(e);
-      briefingStreaming = false;
-    }
-  }
-
-  async function sendChat(text: string, attachment: ChatAttachment | null) {
-    if (chatStreaming) return;
-    chatStreaming = true;
-    thinkingChangePending = false;
-    saveSessionNote = null;
-    const visibleText = text.trim();
-    const backendText = visibleText || (attachment ? "Describe the attached image." : "");
-    const turnState = {
-      searchMode: chatSearchMode,
-      webSearchEnabled: webSearchEnabled && webSearchStatus() === "ready",
-      thinkingEnabled,
-      backendName: currentBackendName(),
-      modelName: currentModelName(),
-    };
-    turns.push({
-      id: nextTurnId(),
-      role: "user",
-      thinkingText: "",
-      answerText: visibleText,
-      toolActivity: null,
-      streaming: false,
-      attachmentName: attachment?.name,
-      ...turnState,
-    });
-    turns.push({
-      id: nextTurnId(),
-      role: "assistant",
-      thinkingText: "",
-      answerText: "",
-      toolActivity: null,
-      streaming: true,
-      ...turnState,
-    });
-    try {
-      await persistRecordedChatSnapshot("user_message");
-      const messages: ChatMessage[] = turns
-        .filter((turn) => turn.role === "user" || (turn.role === "assistant" && turn.answerText))
-        .map((turn) => ({ role: turn.role, content: turn.answerText }));
-      const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
-      if (lastUserMessage) {
-        lastUserMessage.content = backendText;
-      }
-      if (attachment) {
-        if (lastUserMessage) {
-          lastUserMessage.images = [{
-            mime_type: attachment.mimeType,
-            data: attachment.base64,
-          }];
-        }
-      }
-      const allowedSessionIds = chatScope.kind === "briefing-scope" && briefingScope.kind === "selected-session-ids"
-        ? briefingScope.sessionIds
-        : null;
-      await invoke("send_chat_message", {
-        messages,
-        allowedSessionIds,
-        webSearchEnabled: webSearchEnabled && webSearchStatus() === "ready",
-        thinkingEnabled,
-        searchMode: chatSearchMode,
-        profileScope: chatProfileScope,
-      });
-    } catch (e) {
-      const last = turns[turns.length - 1];
-      if (last) {
-        last.answerText = `Error: ${e}`;
-        last.streaming = false;
-      }
-      chatStreaming = false;
-    }
-  }
-
-  async function stopChat() {
-    await invoke("cancel_chat");
-  }
-
-  function selectedSourceSessionIds(): string[] {
-    return chatScope.kind === "briefing-scope" && briefingScope.kind === "selected-session-ids"
-      ? [...briefingScope.sessionIds]
-      : [];
-  }
-
-  function buildRecordedTurns(): RecordedChatTurn[] {
-    return turns.map((turn) => ({
-      role: turn.role,
-      content: turn.answerText,
-      tool_activity: turn.toolActivity ?? null,
-      attachment_name: turn.attachmentName ?? null,
-      had_thinking_output: Boolean(turn.thinkingText.trim()),
-      state: turn.searchMode && turn.backendName && turn.modelName
-        ? {
-          search_mode: turn.searchMode,
-          web_search_enabled: Boolean(turn.webSearchEnabled),
-          thinking_enabled: Boolean(turn.thinkingEnabled),
-          backend_name: turn.backendName,
-          model_name: turn.modelName,
-        }
-        : undefined,
-    }));
-  }
-
-  async function persistRecordedChatSnapshot(
-    reason: "toggle_on" | "user_message" | "tool_call" | "assistant_done" | "clear" | "scope-change" | "search-mode-change",
-  ): Promise<boolean> {
-    if (!saveSessionEnabled || turns.length === 0) return true;
-    if (!settingsSnapshot) {
-      saveSessionNote = "Chat recording skipped because settings are not loaded yet.";
-      saveSessionNoteIsError = true;
-      return false;
-    }
-    try {
-      const result = await invoke<RecordedSessionSaveResult>("save_recorded_chat_session", {
-        request: {
-          existing_relative_path: activeRecordedSessionPath,
-          chat_search_mode: chatSearchMode,
-          source_session_ids: selectedSourceSessionIds(),
-          web_search_enabled: webSearchEnabled && webSearchStatus() === "ready",
-          thinking_enabled: thinkingEnabled,
-          had_thinking_output: turns.some((turn) => turn.thinkingText.trim().length > 0),
-          backend_name: currentBackendName(),
-          model_name: currentModelName(),
-          boundary_reason: reason,
-          turns: buildRecordedTurns(),
-        },
-      });
-      activeRecordedSessionPath = result.relative_path;
-      saveSessionNote = `Recorded chat saved: ${result.absolute_path}`;
-      saveSessionNoteIsError = false;
-      return true;
-    } catch (error) {
-      saveSessionNote = `Failed to save recorded chat: ${String(error)}`;
-      saveSessionNoteIsError = true;
-      return false;
-    }
-  }
-
-  async function clearChat(
-    reason: "clear" | "scope-change" | "search-mode-change" = "clear",
-  ): Promise<boolean> {
-    const canClear = await persistRecordedChatSnapshot(reason);
-    if (!canClear) return false;
-    turns = [];
-    ctxUsedPct = 0;
-    webSearchEnabled = false;
-    thinkingChangePending = false;
-    activeRecordedSessionPath = null;
-    return true;
-  }
-
   async function sendSelectedSessionsToBriefing(sessionIds: string[]) {
-    const cleared = await clearChat("scope-change");
+    const cleared = await chat.clear("scope-change");
     if (!cleared) return;
     const count = sessionIds.length;
-    resetForScopeChange({
+    const nextScope: BriefingScope = {
       kind: "selected-session-ids",
       sessionIds,
       label: `Scoped to ${count} selected session${count === 1 ? "" : "s"}`,
-    });
+    };
+    briefing.resetScope(nextScope);
+    chat.resetForBriefingScope(true);
     activeTab = "briefing";
-    void runBriefing({ dateFrom: "", dateTo: "", fillMin: "", fillMax: "", keyword: "" });
+    void briefing.run({ dateFrom: "", dateTo: "", fillMin: "", fillMax: "", keyword: "" });
   }
 
   async function clearSelectedScope() {
-    const cleared = await clearChat("scope-change");
+    const cleared = await chat.clear("scope-change");
     if (!cleared) return;
-    resetForScopeChange({ kind: "archive-wide" });
-    briefingStreaming = false;
+    briefing.resetScope({ kind: "archive-wide" });
+    chat.resetForBriefingScope(false);
   }
 </script>
 
@@ -507,11 +128,11 @@
       <CaptureStatusLine />
       {#if activeTab === "sessions"}
         <RunNowButton
-          running={sweepRunning}
-          progress={sweepProgress}
-          toast={sweepToast}
-          onRunNow={runNow}
-          onStop={cancelSweep}
+          running={sweep.running}
+          progress={sweep.progress}
+          toast={sweep.toast}
+          onRunNow={() => sweep.runNow()}
+          onStop={() => sweep.cancel()}
         />
       {/if}
       <div class="window-controls">
@@ -527,68 +148,39 @@
   <main class="view">
     {#if activeTab === "briefing"}
       <BriefingPanel
-        {briefingAnswer}
-        {briefingHeader}
-        {briefingStreaming}
-        {briefingError}
-        {briefingWarning}
-        briefingScopeLabel={scopeLabel(briefingScope)}
-        selectedScopeActive={briefingScope.kind === "selected-session-ids"}
-        chatScopeKind={chatScope.kind}
-        {chatSearchMode}
-        {chatProfileScope}
-        {turns}
-        {chatStreaming}
-        {webSearchEnabled}
-        {saveSessionEnabled}
-        {saveSessionNote}
-        {saveSessionNoteIsError}
-        {thinkingEnabled}
-        {thinkingChangePending}
-        webSearchStatus={webSearchStatus()}
-        imageAttachEnabled={imageAttachEnabled()}
+        briefingAnswer={briefing.answer}
+        briefingHeader={briefing.header}
+        briefingStreaming={briefing.streaming}
+        briefingError={briefing.error}
+        briefingWarning={briefing.warning}
+        briefingScopeLabel={briefing.scopeLabel()}
+        selectedScopeActive={briefing.selectedScopeActive()}
+        chatScopeKind={chat.scope.kind}
+        chatSearchMode={chat.searchMode}
+        chatProfileScope={chat.profileScope}
+        turns={chat.turns}
+        chatStreaming={chat.streaming}
+        webSearchEnabled={chat.webSearchEnabled}
+        saveSessionEnabled={chat.saveSessionEnabled}
+        saveSessionNote={chat.saveSessionNote}
+        saveSessionNoteIsError={chat.saveSessionNoteIsError}
+        thinkingEnabled={chat.thinkingEnabled}
+        thinkingChangePending={chat.thinkingChangePending}
+        webSearchStatus={chat.webSearchStatus()}
+        imageAttachEnabled={chat.imageAttachEnabled()}
         {speakController}
-        onRefreshBriefing={(filters) => runBriefing(filters)}
-        onStopBriefing={cancelBriefing}
-        onSendChat={sendChat}
-        onStopChat={stopChat}
-        {ctxUsedPct}
-        onClearChat={() => clearChat("clear")}
-        onToggleWebSearch={() => {
-          if (webSearchStatus() === "ready") {
-            webSearchEnabled = !webSearchEnabled;
-          }
-        }}
-        onToggleSaveSession={() => {
-          const next = !saveSessionEnabled;
-          saveSessionEnabled = next;
-          saveSessionNote = next
-            ? "Chat recording enabled for this session."
-            : "Chat recording disabled.";
-          saveSessionNoteIsError = false;
-          if (next) {
-            void persistRecordedChatSnapshot("toggle_on");
-          }
-        }}
-        onToggleThinking={() => {
-          thinkingEnabled = !thinkingEnabled;
-          thinkingChangePending = chatStreaming;
-        }}
-        onSetChatScope={async (kind) => {
-          if (chatScope.kind === kind) return;
-          const cleared = await clearChat("scope-change");
-          if (!cleared) return;
-          chatScope = kind === "briefing-scope" ? { kind } : { kind: "archive-wide" };
-        }}
-        onSetChatSearchMode={async (mode) => {
-          if (chatSearchMode === mode) return;
-          const cleared = await clearChat("search-mode-change");
-          if (!cleared) return;
-          chatSearchMode = mode;
-        }}
-        onSelectProfileScope={(scope) => {
-          chatProfileScope = scope;
-        }}
+        onRefreshBriefing={(filters) => briefing.run(filters)}
+        onStopBriefing={() => briefing.cancel()}
+        onSendChat={(text, attachment) => chat.send(text, attachment)}
+        onStopChat={() => chat.stop()}
+        ctxUsedPct={chat.ctxUsedPct}
+        onClearChat={() => chat.clear("clear")}
+        onToggleWebSearch={() => chat.toggleWebSearch()}
+        onToggleSaveSession={() => chat.toggleSaveSession()}
+        onToggleThinking={() => chat.toggleThinking()}
+        onSetChatScope={(kind) => chat.setScope(kind)}
+        onSetChatSearchMode={(mode) => chat.setSearchMode(mode)}
+        onSelectProfileScope={(scope) => chat.setProfileScope(scope)}
         onClearScope={clearSelectedScope}
       />
     {:else if activeTab === "sessions"}
