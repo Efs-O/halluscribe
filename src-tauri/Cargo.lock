@@ -1348,7 +1348,7 @@ dependencies = [
 
 [[package]]
 name = "halluscribe"
-version = "0.3.8"
+version = "0.3.9"
 dependencies = [
  "chrono",
  "reqwest 0.12.28",
