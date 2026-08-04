@@ -15,10 +15,17 @@ pub(super) enum ParsedQuery {
 /// agent phrasing ("has the Forge bridge been implemented") reduces to its
 /// distinctive nouns. Deliberately ASCII-only: non-ASCII (e.g. Greek) tokens
 /// are never touched by this list, so they can't accidentally be stripped.
+/// The interrogatives are kept as one complete family on purpose. "what", "how"
+/// and "when" were stripped while "where", "why", "which" and "who" were not,
+/// which silently broke a whole class of question. Measured 2026-08-04: a
+/// session whose body contains the board heading "| task | who wins |" matches
+/// `gemma wins` and `who wins`, but NOT `where gemma wins` — the stray `where`
+/// is ANDed in and no session contains it. Retrieval failed on the user's
+/// phrasing while the evidence sat in the index.
 const STOP: &[&str] = &[
     "the", "a", "an", "is", "are", "was", "were", "be", "been", "has", "have", "had", "do", "does",
-    "did", "it", "in", "on", "of", "to", "for", "and", "or", "not", "what", "how", "when", "this",
-    "that", "with",
+    "did", "it", "in", "on", "of", "to", "for", "and", "or", "not", "what", "how", "when", "where",
+    "why", "which", "who", "this", "that", "with",
 ];
 
 /// Characters (beyond whitespace) that split a query into tokens.
@@ -91,6 +98,40 @@ mod tests {
                 assert_eq!(tokens, vec!["forge", "bridge", "implemented"]);
             }
             ParsedQuery::Phrase(_) => panic!("expected Tokens"),
+        }
+    }
+
+    #[test]
+    fn interrogatives_are_stripped_as_one_family() {
+        // Regression for the 2026-08-04 retrieval failure: "where" was ANDed
+        // into the query while its siblings "what"/"how"/"when" were stripped,
+        // so "where gemma wins" required a literal "where" in the session and
+        // matched nothing. All interrogatives must behave the same way.
+        for query in [
+            "what gemma wins",
+            "how gemma wins",
+            "when gemma wins",
+            "where gemma wins",
+            "why gemma wins",
+            "which gemma wins",
+            "who gemma wins",
+        ] {
+            match parse_query(query) {
+                ParsedQuery::Tokens(tokens) => {
+                    assert_eq!(tokens, vec!["gemma", "wins"], "query: {query}");
+                }
+                ParsedQuery::Phrase(_) => panic!("expected Tokens for {query}"),
+            }
+        }
+    }
+
+    #[test]
+    fn quoted_interrogative_phrase_is_still_exact() {
+        // Stripping applies to unquoted token queries only — a quoted phrase
+        // must stay verbatim, so "who wins" can still be searched exactly.
+        match parse_query("\"who wins\"") {
+            ParsedQuery::Phrase(phrase) => assert_eq!(phrase, "who wins"),
+            ParsedQuery::Tokens(_) => panic!("expected Phrase"),
         }
     }
 

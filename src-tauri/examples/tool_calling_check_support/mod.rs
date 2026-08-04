@@ -277,5 +277,6 @@ fn parse_args(args: &Value) -> Result<GemmaOutput, String> {
         session_type,
         error_tags: tags("error_tags"),
         topic_tags: tags("topic_tags"),
+        verbatim_highlights: tags("verbatim_highlights"),
     })
 }

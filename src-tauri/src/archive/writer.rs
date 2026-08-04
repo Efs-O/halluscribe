@@ -100,6 +100,7 @@ fn build_markdown(
          **Source:** {source}  \n\
          \n---\n\n\
          {summary}\n\n\
+         {highlights}\
          ---\n\
          *Archived by HalluScribe - Gemma 4 26B via {backend}*\n",
         tool = meta.tool,
@@ -120,8 +121,25 @@ fn build_markdown(
         },
         source = meta.source.display(),
         summary = output.summary,
+        highlights = highlights_section(&output.verbatim_highlights),
         backend = meta.backend,
     )
+}
+
+/// Render verbatim highlights as their own section, or nothing at all when the
+/// session had none. Kept out of the summary prose so this content does not
+/// compete for the summariser's word budget, and written into the same `.md`
+/// the search body matcher reads, so it is keyword-searchable like the rest.
+fn highlights_section(highlights: &[String]) -> String {
+    if highlights.is_empty() {
+        return String::new();
+    }
+    let body = highlights
+        .iter()
+        .map(|h| h.trim())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    format!("## Highlights\n\n{body}\n\n")
 }
 
 fn tool_slug(tool: &str) -> &str {

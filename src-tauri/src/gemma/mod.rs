@@ -8,6 +8,10 @@ mod schema;
 mod session;
 mod tool_session;
 
+#[cfg(test)]
+#[path = "word_budget_ab_tests.rs"]
+mod word_budget_ab_tests;
+
 pub use session::{start_sweep_session, SweepSession};
 pub use tool_session::{start_tool_session, ToolSession};
 
@@ -56,6 +60,14 @@ pub struct GemmaOutput {
     pub session_type: SessionType,
     pub error_tags: Vec<String>,
     pub topic_tags: Vec<String>,
+    /// Verdicts, comparison tables, benchmark results and decision matrices
+    /// copied verbatim out of the transcript. Rendered as its own `## Highlights`
+    /// section and deliberately **excluded from the prose word budget**, so this
+    /// content never competes with Goal / Files Changed for the same words.
+    /// A measured A/B (`word_budget_ab_tests.rs`) showed the model ignores the
+    /// word target, so a separate field — not a bigger budget — is what keeps
+    /// this content in the archive and therefore findable by `search_sessions`.
+    pub verbatim_highlights: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -153,6 +165,10 @@ fn coding_system_prompt(target_words: usize) -> String {
          For the summary be specific and complete: cover Goal, What Was Done, Key Decisions, \
          Files Changed, Open Issues, and Suggested Next Step. \
          Aim for approximately {target_words} words, staying concise but complete. \
+         If the transcript contains a comparison table, benchmark result, rating, verdict, or \
+         decision matrix, copy it into verbatim_highlights exactly as written — including its \
+         column headings and its conclusions. Do not paraphrase it and do not count it against \
+         the word budget above; verbatim_highlights is separate from the summary. \
          For error_tags and topic_tags, only use short tags that are explicitly grounded in the \
          transcript text itself, such as literal technologies, filenames, APIs, libraries, or \
          error names that appear in the transcript. Do not infer broad languages, frameworks, or \
@@ -166,17 +182,56 @@ fn general_system_prompt(target_words: usize) -> String {
          call save_session_summary with a clear result. For the summary be specific: cover the \
          main topic, key questions, key answers or decisions, unresolved follow-ups, and any \
          notable next steps. Aim for approximately {target_words} words, staying concise but \
-         complete. Do not assume the conversation is about coding unless it clearly is. \
+         complete. If the transcript contains a comparison table, rating, verdict, or decision \
+         matrix, copy it into verbatim_highlights exactly as written — including its column \
+         headings and its conclusions. Do not paraphrase it and do not count it against the word \
+         budget above; verbatim_highlights is separate from the summary. \
+         Do not assume the conversation is about coding unless it clearly is. \
          For error_tags and topic_tags, only use short tags that are explicitly grounded in the \
          transcript text itself. Do not invent inferred tags that are not literally supported by \
          the transcript."
     )
 }
 
+/// Upper bounds on the highlights list. These exist to stop the model from
+/// dumping large spans of transcript into a field that bypasses the word budget
+/// — the point is a handful of verdicts, not a second copy of the session.
+const MAX_HIGHLIGHTS: usize = 12;
+const MAX_HIGHLIGHT_CHARS: usize = 2_000;
+
 fn ground_tags_in_transcript(mut output: GemmaOutput, transcript: &str) -> GemmaOutput {
     output.error_tags = retain_grounded_tags(&output.error_tags, transcript);
     output.topic_tags = retain_grounded_tags(&output.topic_tags, transcript);
+    output.verbatim_highlights =
+        retain_grounded_highlights(&output.verbatim_highlights, transcript);
     output
+}
+
+/// Keep only highlights that genuinely appear in the transcript. A highlight is
+/// a *verbatim* quote, so the bar is the whole string, not a token: after
+/// normalisation (which collapses table pipes, newlines and padding to single
+/// spaces) it must be a substring of the normalised transcript. Anything the
+/// model paraphrased or invented is dropped rather than archived as a quote.
+fn retain_grounded_highlights(highlights: &[String], transcript: &str) -> Vec<String> {
+    let transcript_norm = normalize_text(transcript);
+    let mut kept: Vec<String> = Vec::new();
+    for highlight in highlights {
+        if kept.len() >= MAX_HIGHLIGHTS {
+            break;
+        }
+        let trimmed = highlight.trim();
+        if trimmed.is_empty() || trimmed.chars().count() > MAX_HIGHLIGHT_CHARS {
+            continue;
+        }
+        let norm = normalize_text(trimmed);
+        if norm.is_empty() || !transcript_norm.contains(&norm) {
+            continue;
+        }
+        if !kept.iter().any(|existing| normalize_text(existing) == norm) {
+            kept.push(trimmed.to_string());
+        }
+    }
+    kept
 }
 
 fn retain_grounded_tags(tags: &[String], transcript: &str) -> Vec<String> {
@@ -225,43 +280,5 @@ fn normalize_text(value: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn retain_grounded_tags_drops_inferred_single_word_tags() {
-        let tags = vec!["Python".to_string(), "JWT".to_string(), "auth".to_string()];
-        let kept = retain_grounded_tags(&tags, "[User]\nFix JWT auth bug in middleware");
-        assert_eq!(kept, vec!["JWT".to_string(), "auth".to_string()]);
-    }
-
-    #[test]
-    fn retain_grounded_tags_keeps_grounded_multiword_tags() {
-        let tags = vec!["invalid request".to_string(), "media type".to_string()];
-        let kept = retain_grounded_tags(
-            &tags,
-            "[Assistant]\nError: invalid request because media type is missing",
-        );
-        assert_eq!(
-            kept,
-            vec!["invalid request".to_string(), "media type".to_string()]
-        );
-    }
-
-    #[test]
-    fn summary_word_target_uses_minimum_for_small_transcripts() {
-        assert_eq!(summary_word_target("a short transcript"), MIN_SUMMARY_WORDS);
-    }
-
-    #[test]
-    fn summary_word_target_scales_for_medium_transcripts() {
-        let transcript = "a".repeat(20_000);
-        assert_eq!(summary_word_target(&transcript), 900);
-    }
-
-    #[test]
-    fn summary_word_target_caps_large_transcripts() {
-        let transcript = "a".repeat(100_000);
-        assert_eq!(summary_word_target(&transcript), MAX_SUMMARY_WORDS);
-    }
-}
+#[path = "mod_tests.rs"]
+mod tests;

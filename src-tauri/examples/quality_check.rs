@@ -25,13 +25,22 @@ use app_lib::{
     preprocessor::{preprocess_session, PreprocessError},
     readers::ChatProvider,
     scanner::{scan_sessions, ToolSource},
-    settings::HalluScribeSettings,
+    settings,
 };
 use std::{env, path::PathBuf};
 
 fn main() {
-    let defaults = HalluScribeSettings::default();
     let archive_dir = archive_dir();
+    // Generation limits MUST come from the real settings file: `HalluScribeSettings::default()`
+    // sets ctx_size and max_tokens to 0 ("must be set before generation can run"), and passing
+    // those zeros to llama.cpp makes every tool call come back as bare `<|tool_call>` content
+    // with no parsed tool_calls. Everything else can stay on defaults.
+    let defaults = settings::load_settings(&archive_dir);
+    assert!(
+        defaults.ctx_size > 0 && defaults.max_tokens > 0,
+        "ctx_size/max_tokens are unset in {}/settings.json — configure them in the app first",
+        archive_dir.display()
+    );
     println!("=== HalluScribe — Gemma Quality Checkpoint ===\n");
 
     let test_backend = env::var("TEST_BACKEND").unwrap_or_else(|_| "both".into());
@@ -54,13 +63,7 @@ fn main() {
         Err(_) => {
             println!("Scanning for most recent session (last 30 days, any fill)...");
             // 30-day lookback, 0% fill gate — we want any session for the test.
-            let sessions = scan_sessions(
-                &archive_dir,
-                &HalluScribeSettings::default(),
-                30 * 24 * 3600,
-                0.0,
-                false,
-            );
+            let sessions = scan_sessions(&archive_dir, &defaults, 30 * 24 * 3600, 0.0, false);
             if sessions.is_empty() {
                 eprintln!("ERROR: No session files found. Set JSONL_PATH to a specific file.");
                 std::process::exit(1);
@@ -216,6 +219,13 @@ fn print_output(backend_name: &str, out: &app_lib::gemma::GemmaOutput) {
     println!("session_type: {:?}", out.session_type);
     println!("error_tags:   {:?}", out.error_tags);
     println!("topic_tags:   {:?}", out.topic_tags);
+    println!(
+        "verbatim_highlights ({} kept after grounding):",
+        out.verbatim_highlights.len()
+    );
+    for (i, highlight) in out.verbatim_highlights.iter().enumerate() {
+        println!("  [{i}] {highlight}");
+    }
     println!("summary ({} chars):", out.summary.len());
     println!("{}", out.summary);
 }

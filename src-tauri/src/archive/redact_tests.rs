@@ -41,6 +41,7 @@ fn output_with_summary(summary: &str) -> GemmaOutput {
         session_type: SessionType::Debugging,
         error_tags: vec![],
         topic_tags: vec![],
+        verbatim_highlights: vec![],
     }
 }
 

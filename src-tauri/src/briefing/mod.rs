@@ -12,6 +12,12 @@ mod streaming;
 pub(crate) mod tools;
 mod web_search;
 
+// Manual live probe (never runs in CI): lives inside `briefing` so it can reach
+// the private llamacpp/chat/tools internals the real chat loop uses.
+#[cfg(test)]
+#[path = "retrieval_probe_tests.rs"]
+mod retrieval_probe_tests;
+
 use crate::gemma::InferenceBackend;
 use serde::Serialize;
 use std::path::{Path, PathBuf};

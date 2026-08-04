@@ -34,6 +34,7 @@ fn sample_output() -> GemmaOutput {
         session_type: SessionType::Debugging,
         error_tags: vec!["JWT".into()],
         topic_tags: vec!["auth".into(), "Rust".into()],
+        verbatim_highlights: vec![],
     }
 }
 
@@ -247,5 +248,108 @@ fn output_with_summary(summary: &str) -> GemmaOutput {
         session_type: SessionType::Debugging,
         error_tags: vec![],
         topic_tags: vec![],
+        verbatim_highlights: vec![],
     }
+}
+
+#[test]
+fn highlights_section_is_omitted_when_there_are_none() {
+    assert_eq!(highlights_section(&[]), "");
+}
+
+#[test]
+fn highlights_section_renders_each_highlight() {
+    let rendered = highlights_section(&[
+        "| task | who wins |".to_string(),
+        "gemma beats me".to_string(),
+    ]);
+    assert!(rendered.starts_with("## Highlights\n\n"));
+    assert!(rendered.contains("| task | who wins |"));
+    assert!(rendered.contains("gemma beats me"));
+}
+
+#[test]
+fn written_markdown_carries_highlights_for_body_search() {
+    // The whole point of the section: `search/content.rs::body_find` reads this
+    // `.md`, so a verdict that lands here becomes findable by `search_sessions`.
+    let mut output = sample_output();
+    output.verbatim_highlights = vec!["| task | who wins | confidence |".to_string()];
+    let meta = sample_meta(Path::new("/tmp/abc-123.jsonl"));
+    let markdown = build_markdown("T", &meta, &output, chrono::Utc::now());
+    assert!(markdown.contains("## Highlights"));
+    assert!(markdown.contains("who wins"));
+}
+
+#[test]
+fn highlights_written_by_the_writer_are_found_by_search_sessions() {
+    // End-to-end proof of the retrieval fix. The 2026-08-04 failure was a
+    // comparison board that existed in the archive but was invisible to
+    // `search_sessions`, because the summariser dropped it and the body matcher
+    // only ever reads the distilled `.md`. Verdicts now land in that `.md` via
+    // verbatim_highlights, so the same query must find the session.
+    let dir = tmp_dir("highlights_searchable");
+    let src = Path::new("/fake/project/board-session.jsonl");
+    let meta = sample_meta(src);
+    let mut out = sample_output();
+    // Deliberately a phrase that appears in NEITHER the title nor the tags, so a
+    // pass can only come from the body matcher reading the Highlights section.
+    out.verbatim_highlights = vec!["| task | who wins | confidence |".to_string()];
+
+    write_session(&dir, &meta, &out, fixed_now()).unwrap();
+
+    let params = crate::search::SearchParams {
+        query: Some("who wins".to_string()),
+        ..Default::default()
+    };
+    let hits = crate::search::search_sessions(&dir, &params);
+    assert_eq!(
+        hits.len(),
+        1,
+        "board phrase should match exactly one session"
+    );
+    assert_eq!(hits[0].id, meta.id);
+}
+
+#[test]
+fn highlights_make_the_board_findable_by_the_users_paraphrase() {
+    // The 2026-08-04 question was "where gemma wins and where not". The board's
+    // heading reads "| task | who wins |" — the words "gemma" and "wins" are
+    // never adjacent in it, so `search_raw_transcripts` (literal substring)
+    // cannot find it from that phrasing, which is exactly how the live failure
+    // happened. `search_sessions` is tokenized and AND-of-keywords, so once the
+    // board is in the .md body the paraphrase matches. This is the test that
+    // shows WHY putting highlights in the summary is the fix.
+    let dir = tmp_dir("paraphrase_finds_board");
+    let src = Path::new("/fake/project/board-paraphrase.jsonl");
+    let meta = sample_meta(src);
+    let mut out = sample_output();
+    out.verbatim_highlights = vec!["| task | who wins | confidence |\n\
+         | Reading one frame accurately | **Gemma at 1120** | measured, but thin |\n\
+         | Cost and repeatability | **Gemma, by orders of magnitude** | obvious |"
+        .to_string()];
+    write_session(&dir, &meta, &out, fixed_now()).unwrap();
+
+    let find = |query: &str| {
+        crate::search::search_sessions(
+            &dir,
+            &crate::search::SearchParams {
+                query: Some(query.to_string()),
+                ..Default::default()
+            },
+        )
+    };
+
+    // The user's actual 2026-08-04 phrasing, plus the wordings around it.
+    assert_eq!(
+        find("where gemma wins").len(),
+        1,
+        "user's paraphrase must match"
+    );
+    assert_eq!(find("gemma wins").len(), 1, "short paraphrase must match");
+    assert_eq!(find("who wins").len(), 1, "literal heading must match");
+    assert_eq!(
+        find("gemma orders of magnitude").len(),
+        1,
+        "verdict text must match"
+    );
 }
