@@ -38,6 +38,10 @@ tokio      = { version = "1", features = ["rt-multi-thread", "macros", "io-std"]
 zstd       = "0.13"
 zip        = { version = "2", default-features = false, features = ["deflate"] }
 tauri-plugin-dialog = "2"
+# Second launch focuses the running window instead of starting a rival
+# instance. Beyond tidiness: two instances on one workspace can interleave
+# writes to index.json / profile_meta.json / the raw capture.
+tauri-plugin-single-instance = "2"
 
 [dev-dependencies]
 tempfile = "3"

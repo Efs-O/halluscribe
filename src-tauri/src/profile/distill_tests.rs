@@ -1,7 +1,10 @@
 // HalluScribe - unit tests for the profile distiller map step (distill.rs).
+// Evidence-block and session-label tests live in evidence_tests.rs.
 
 use super::*;
 use std::fs;
+
+const UUID_A: &str = "68c16c37-0cfc-832c-a816-610fd8015cb4";
 
 fn entry(id: &str, archive_path: &str) -> IndexEntry {
     IndexEntry {
@@ -35,12 +38,16 @@ fn tmp_dir(name: &str) -> std::path::PathBuf {
 }
 
 fn ok_facts_response(section: &str) -> Value {
+    facts_response(section, &["S1"])
+}
+
+fn facts_response(section: &str, evidence: &[&str]) -> Value {
     serde_json::json!({
         "facts": [
             {
                 "section": section,
                 "fact": "Uses Rust and Tauri.",
-                "evidence": ["s1"],
+                "evidence": evidence,
                 "date": "2026-06-01"
             }
         ]
@@ -51,21 +58,51 @@ fn ok_facts_response(section: &str) -> Value {
 fn distill_batch_parses_facts_from_fake_tool_call() {
     let dir = tmp_dir("basic");
     fs::write(dir.join("s1.md"), "session body").unwrap();
-    let e = entry("s1", "s1.md");
+    let e = entry(UUID_A, "s1.md");
     let batch = vec![&e];
     let tool_call: &ToolCallFn = &|_sys, _user, _tool, _max| Ok(ok_facts_response("conventions"));
     let (facts, warnings) = distill_batch(&dir, &batch, ProfileScope::Work, tool_call).unwrap();
     assert_eq!(facts.len(), 1);
     assert!(warnings.is_empty());
     assert_eq!(facts[0].section, ProfileSection::Conventions);
-    assert_eq!(facts[0].evidence, vec!["s1".to_string()]);
+    // The model cited the label; downstream sees the real session id.
+    assert_eq!(facts[0].evidence, vec![UUID_A.to_string()]);
+}
+
+#[test]
+fn distill_batch_still_accepts_a_real_session_id_as_evidence() {
+    // Recall guard for the label contract: a model that emits the real id
+    // instead of the label must not lose its fact.
+    let dir = tmp_dir("real_id_evidence");
+    fs::write(dir.join("s1.md"), "session body").unwrap();
+    let e = entry(UUID_A, "s1.md");
+    let batch = vec![&e];
+    let tool_call: &ToolCallFn =
+        &|_sys, _user, _tool, _max| Ok(facts_response("conventions", &[UUID_A]));
+    let (facts, warnings) = distill_batch(&dir, &batch, ProfileScope::Work, tool_call).unwrap();
+    assert_eq!(facts.len(), 1);
+    assert!(warnings.is_empty());
+    assert_eq!(facts[0].evidence, vec![UUID_A.to_string()]);
+}
+
+#[test]
+fn distill_batch_drops_fact_citing_a_label_outside_the_batch() {
+    let dir = tmp_dir("out_of_range_label");
+    fs::write(dir.join("s1.md"), "session body").unwrap();
+    let e = entry(UUID_A, "s1.md");
+    let batch = vec![&e];
+    let tool_call: &ToolCallFn =
+        &|_sys, _user, _tool, _max| Ok(facts_response("conventions", &["S9"]));
+    let (facts, warnings) = distill_batch(&dir, &batch, ProfileScope::Work, tool_call).unwrap();
+    assert!(facts.is_empty());
+    assert!(warnings.iter().any(|w| w.contains("no valid evidence")));
 }
 
 #[test]
 fn distill_batch_surfaces_malformed_tool_call_as_error() {
     let dir = tmp_dir("bad_json");
     fs::write(dir.join("s1.md"), "body one").unwrap();
-    let e = entry("s1", "s1.md");
+    let e = entry(UUID_A, "s1.md");
     let batch = vec![&e];
     let tool_call: &ToolCallFn =
         &|_sys, _user, _tool, _max| Ok(serde_json::json!({"not_facts": true}));
@@ -120,13 +157,13 @@ fn parse_facts_skips_unknown_section_with_warning() {
             {
                 "section": "not_a_real_section",
                 "fact": "Something.",
-                "evidence": ["s1"],
+                "evidence": ["S1"],
                 "date": "2026-06-01"
             },
             {
                 "section": "conventions",
                 "fact": "Prefers Rust.",
-                "evidence": ["s1"],
+                "evidence": ["S1"],
                 "date": "2026-06-01"
             }
         ]
@@ -164,7 +201,7 @@ fn parse_facts_skips_personal_context_fact_under_work_scope() {
 fn parse_facts_missing_fact_string_still_fails_batch() {
     let value = serde_json::json!({
         "facts": [
-            { "section": "conventions", "evidence": ["s1"], "date": "2026-06-01" }
+            { "section": "conventions", "evidence": ["S1"], "date": "2026-06-01" }
         ]
     });
     let error = parse_facts(ProfileScope::Work, &value).unwrap_err();
@@ -172,131 +209,59 @@ fn parse_facts_missing_fact_string_still_fails_batch() {
 }
 
 #[test]
-fn truncate_chars_is_multibyte_safe() {
-    let text = "café".repeat(1000); // multi-byte 'é' repeated well past the limit
-    let truncated = truncate_chars(&text, 10);
-    assert_eq!(truncated.chars().count(), 10);
-    // Must still be valid UTF-8 (guaranteed by String) and start correctly.
-    assert!(truncated.starts_with("café"));
+fn both_map_prompts_state_the_session_label_contract() {
+    // Regression guard for the 2026-08-04 fix: the model must be told to cite
+    // the short `S<n>` labels, never a raw session id it would have to copy.
+    for scope in [ProfileScope::Work, ProfileScope::Personal] {
+        let prompt = map_system_prompt(scope);
+        assert!(prompt.contains("Session id:"), "scope {scope:?}");
+        assert!(prompt.contains("\"S1\""), "scope {scope:?}");
+    }
 }
 
 #[test]
-fn build_evidence_entry_truncates_long_bodies() {
-    let dir = tmp_dir("truncate");
-    let long_body = "x".repeat(5000);
-    fs::write(dir.join("s1.md"), &long_body).unwrap();
-    let e = entry("s1", "s1.md");
-    let block = build_evidence_entry(&dir, &e);
-    // Body section should be head + snip marker + tail, not the full 5000.
-    let body_start = block.find("Body:\n").unwrap() + "Body:\n".len();
-    let body = &block[body_start..];
-    assert_eq!(
-        body.chars().count(),
-        HEAD_CHARS + SNIP_MARKER.chars().count() + TAIL_CHARS
-    );
+fn work_map_prompt_covers_domain_agnostic_recurring_problems() {
+    // Phase 3a regression guard: the domain-agnostic recurring_problems
+    // clause must not silently vanish from the Work map prompt.
+    let prompt = map_system_prompt(ProfileScope::Work);
+    assert!(prompt.contains("regardless of domain"));
+    assert!(prompt.contains("recurring_problems"));
 }
 
 #[test]
-fn head_tail_window_short_body_passes_through_verbatim() {
-    let short = "hello world, short body";
-    assert_eq!(head_tail_window(short), short);
-}
-
-#[test]
-fn head_tail_window_boundary_body_passes_through_verbatim() {
-    // Exactly HEAD_CHARS + TAIL_CHARS chars: still verbatim (<=, not <).
-    let body = "y".repeat(HEAD_CHARS + TAIL_CHARS);
-    let windowed = head_tail_window(&body);
-    assert_eq!(windowed, body);
-}
-
-#[test]
-fn head_tail_window_long_body_keeps_head_marker_and_exact_tail_count() {
-    let head_part = "A".repeat(HEAD_CHARS);
-    let middle = "M".repeat(2000);
-    let tail_part = "Z".repeat(TAIL_CHARS);
-    let body = format!("{head_part}{middle}{tail_part}");
-    let windowed = head_tail_window(&body);
-
-    assert!(windowed.starts_with(&head_part));
-    assert!(windowed.contains(SNIP_MARKER));
-    assert!(windowed.ends_with(&tail_part));
-    assert_eq!(
-        windowed.chars().count(),
-        HEAD_CHARS + SNIP_MARKER.chars().count() + TAIL_CHARS
-    );
-}
-
-#[test]
-fn head_tail_window_sentinel_at_end_of_oversized_body_survives() {
-    let filler = "x".repeat(10_000);
-    let sentinel = "SENTINEL_KEY_DECISION_MARKER";
-    let body = format!("{filler}{sentinel}");
-    let windowed = head_tail_window(&body);
-    assert!(
-        windowed.ends_with(sentinel),
-        "sentinel dropped from tail: {windowed}"
-    );
-}
-
-#[test]
-fn head_tail_window_greek_multibyte_never_splits_a_codepoint() {
-    // Greek content around both the head and tail cut points; must not
-    // panic (byte-slice mid-codepoint) and must preserve valid chars only.
-    let greek_head = "Καλημέρα κόσμε, ας δούμε πώς πάει η δουλειά σήμερα. ".repeat(50);
-    let greek_middle = "Ενδιάμεσο κείμενο που θα κοπεί εντελώς. ".repeat(200);
-    let greek_tail = "Οι αποφάσεις που πάρθηκαν και τα επόμενα βήματα είναι εδώ. ".repeat(60);
-    let body = format!("{greek_head}{greek_middle}{greek_tail}");
-    let windowed = head_tail_window(&body);
-    // No panic reaching here is itself the primary assertion; also assert
-    // the exact char budget and that the tail's final content survives.
-    assert_eq!(
-        windowed.chars().count(),
-        HEAD_CHARS + SNIP_MARKER.chars().count() + TAIL_CHARS
-    );
-    assert!(windowed.ends_with("εδώ. "));
-}
-
-#[test]
-fn build_evidence_entry_includes_metadata() {
-    let dir = tmp_dir("metadata");
-    fs::write(dir.join("s1.md"), "hello").unwrap();
-    let e = entry("s1", "s1.md");
-    let block = build_evidence_entry(&dir, &e);
-    assert!(block.contains("Session id: s1"));
-    assert!(block.contains("Project: proj"));
-    assert!(block.contains("ECONNRESET"));
-    assert!(block.contains("rust"));
-}
-
-#[test]
-fn work_map_prompt_is_byte_identical_to_original() {
-    assert_eq!(map_system_prompt(ProfileScope::Work), MAP_SYSTEM_PROMPT);
-}
-
-#[test]
-fn personal_map_prompt_adds_personal_context_instruction() {
+fn personal_map_prompt_never_names_a_work_only_section() {
+    // The 2026-08-04 fix: the shared prompt used to instruct the model to file
+    // facts under recurring_problems even for Personal, whose skeleton rejects
+    // that key — every such fact was then discarded by parse_facts.
     let prompt = map_system_prompt(ProfileScope::Personal);
-    assert!(prompt.starts_with(MAP_SYSTEM_PROMPT));
+    for key in ["recurring_problems", "conventions", "projects"] {
+        assert!(
+            !prompt.contains(key),
+            "Personal map prompt names Work-only section {key}: {prompt}"
+        );
+    }
+}
+
+#[test]
+fn personal_map_prompt_targets_personal_context() {
+    let prompt = map_system_prompt(ProfileScope::Personal);
     assert!(prompt.contains("personal_context"));
 }
 
 #[test]
-fn map_system_prompt_covers_domain_agnostic_recurring_problems() {
-    // Phase 3a regression guard: the domain-agnostic recurring_problems
-    // clause must not silently vanish from the map prompt.
-    assert!(MAP_SYSTEM_PROMPT.contains("regardless of domain"));
-    assert!(MAP_SYSTEM_PROMPT.contains("recurring_problems"));
-}
-
-#[test]
-fn map_system_prompt_demands_tool_call_even_with_no_facts() {
+fn both_map_prompts_demand_tool_call_even_with_no_facts() {
     // Regression guard: a batch with nothing to extract (e.g. pure coding
     // sessions under the life-only Personal scope) must still produce a
     // save_profile_facts call; without this clause the model answers in
     // prose and the whole batch hard-fails (seen live 2026-07-08).
-    assert!(MAP_SYSTEM_PROMPT.contains("empty facts array"));
-    assert!(MAP_SYSTEM_PROMPT.contains("never reply in plain text"));
+    for scope in [ProfileScope::Work, ProfileScope::Personal] {
+        let prompt = map_system_prompt(scope);
+        assert!(prompt.contains("empty facts array"), "scope {scope:?}");
+        assert!(
+            prompt.contains("never reply in plain text"),
+            "scope {scope:?}"
+        );
+    }
 }
 
 #[test]

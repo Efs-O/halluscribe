@@ -48,10 +48,10 @@ fn session_json(id: &str, provider: &str, ts: &str) -> serde_json::Value {
     })
 }
 
-/// Evidence must cite a real id from the mapped batch (Phase 1a validation
-/// now drops evidence that doesn't belong to it), so this pulls whichever
-/// session id actually appears in the map call's user content instead of a
-/// fixed placeholder.
+/// Evidence must cite a session the mapped batch actually contains (Phase 1a
+/// validation drops evidence that doesn't belong to it), so this pulls
+/// whichever label the map call's user content advertises instead of a fixed
+/// placeholder — exercising the same `S<n>` round-trip the real model does.
 fn first_session_id(user: &str) -> String {
     user.lines()
         .find_map(|line| line.strip_prefix("Session id: "))
@@ -129,11 +129,13 @@ fn pending_file_resume_excludes_already_mapped_ids_and_seeds_facts() {
     )
     .unwrap();
 
-    // s1 was recovered from the pending file, so only s2 was mapped.
+    // s1 was recovered from the pending file, so only s2 was mapped. The
+    // evidence block shows batch-local labels rather than real ids, so assert
+    // on the session title instead.
     let map_inputs = map_inputs.lock().unwrap();
     assert_eq!(map_inputs.len(), 1);
-    assert!(map_inputs[0].contains("Session id: s2"));
-    assert!(!map_inputs[0].contains("Session id: s1"));
+    assert!(map_inputs[0].contains("Title: Session s2"));
+    assert!(!map_inputs[0].contains("Title: Session s1"));
 
     // Both sessions and both facts (recovered + new) are in the outcome.
     assert_eq!(outcome.session_count, 2);

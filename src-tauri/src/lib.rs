@@ -116,6 +116,18 @@ pub fn run() {
         .manage(CaptureStatusState(Arc::new(std::sync::Mutex::new(
             archive::CaptureStatus::default(),
         ))))
+        // MUST stay first in the plugin chain (Tauri requirement): a second
+        // launch is intercepted here and hands its argv to the running
+        // instance instead of booting a rival one. The window may be hidden
+        // in the tray rather than merely unfocused, so show() before
+        // set_focus(), exactly as the tray's "show" item does.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())

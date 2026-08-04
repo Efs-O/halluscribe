@@ -253,7 +253,14 @@ export interface ProfileDonePayload {
   busy: boolean;
   session_count: number;
   facts_count: number;
+  /**
+   * Hard failures AND non-fatal warnings (skipped facts, dropped citations,
+   * merge fallbacks), mixed. A non-empty list does NOT mean the run failed —
+   * check `failed_batches` for that.
+   */
   errors: string[];
+  /** Map batches that failed outright. 0 = the profile was written. */
+  failed_batches: number;
   scope: ProfileScope;
 }
 

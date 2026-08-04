@@ -54,7 +54,12 @@ struct ProfileDonePayload {
     busy: bool,
     session_count: usize,
     facts_count: usize,
+    /// Hard failures AND non-fatal warnings, mixed — see
+    /// `profile::RefreshOutcome::errors`. The UI must not treat a non-empty
+    /// list as a failed run; that is what `failed_batches` is for.
     errors: Vec<String>,
+    /// Map batches that failed outright. 0 = the profile was written.
+    failed_batches: usize,
     scope: String,
 }
 
@@ -87,8 +92,11 @@ pub(crate) fn run_profile_refresh(
 
     std::thread::spawn(move || {
         // Top-level inference lock, exactly like the sweep: the profile code
-        // below never re-acquires it (the guard is non-reentrant).
-        let Some(_inference_guard) = crate::infer_lock::try_acquire() else {
+        // below never re-acquires it (the guard is non-reentrant). The batch
+        // variant also reclaims a warm interactive server first, so a long
+        // refresh never runs beside an idle chat model the watchdog cannot
+        // unload while this lock is held.
+        let Some(_inference_guard) = crate::infer_lock::acquire_for_batch() else {
             let _ = app.emit(
                 "profile-done",
                 ProfileDonePayload {
@@ -128,8 +136,11 @@ pub(crate) fn run_profile_refresh(
             Err(error) => {
                 let _ = app.emit(
                     "profile-done",
+                    // The run never reached a single batch — the exact case
+                    // that used to look like "nothing happened" in the panel.
                     ProfileDonePayload {
                         errors: vec![format!("failed to start model: {error}")],
+                        failed_batches: 1,
                         scope: scope.clone(),
                         ..Default::default()
                     },
@@ -181,10 +192,14 @@ pub(crate) fn run_profile_refresh(
                 session_count: outcome.session_count,
                 facts_count: outcome.facts_count,
                 errors: outcome.errors,
+                failed_batches: outcome.failed_batches,
                 scope: scope.clone(),
             },
+            // The refresh aborted before producing an outcome: nothing was
+            // written, so this is unambiguously a failed run.
             Err(error) => ProfileDonePayload {
                 errors: vec![error.to_string()],
+                failed_batches: 1,
                 scope: scope.clone(),
                 ..Default::default()
             },

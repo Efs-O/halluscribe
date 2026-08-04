@@ -4,6 +4,7 @@
 
 mod citations;
 mod distill;
+mod evidence;
 mod merge;
 mod parse_md;
 mod pending;
@@ -89,7 +90,15 @@ impl Stage {
 pub struct RefreshOutcome {
     pub session_count: usize,
     pub facts_count: usize,
+    /// Everything worth telling the user: hard failures AND non-fatal
+    /// warnings (skipped facts, dropped citations, merge fallbacks). Use
+    /// `failed_batches` to tell the two apart — `errors` being non-empty does
+    /// NOT mean the run failed.
     pub errors: Vec<String>,
+    /// Map batches that failed outright, leaving their sessions undistilled.
+    /// Zero means every session was covered: the profile was written and the
+    /// watermark advanced, whatever warnings `errors` carries.
+    pub failed_batches: usize,
 }
 
 /// Run one profile refresh for `scope`: select consented (and, if
@@ -220,6 +229,9 @@ pub fn run_refresh(
                 session_count: covered_count,
                 facts_count: all_facts.len(),
                 errors,
+                // Nothing was written: report this as a failed run even when
+                // every map batch succeeded.
+                failed_batches: failed_batches.max(1),
             });
         }
     };
@@ -282,6 +294,7 @@ pub fn run_refresh(
         session_count: covered_count,
         facts_count: all_facts.len(),
         errors,
+        failed_batches,
     })
 }
 

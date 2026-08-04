@@ -6,6 +6,7 @@
   import { onDestroy, onMount } from "svelte";
   import { firstLine, restOfFile, stageLabel } from "../../lib/profile";
   import type { ProfileDonePayload, ProfileProgressPayload, ProfileScope } from "../../lib/types";
+  import ProfileRunNote from "./ProfileRunNote.svelte";
   import ProfileScopeTabs from "./ProfileScopeTabs.svelte";
 
   let scope = $state<ProfileScope>("work");
@@ -25,6 +26,10 @@
   // arrives (fresh start vs. remounting into an already-running refresh).
   let progressPlaceholder = $state("Starting…");
   let resultNote = $state<string | null>(null);
+  // Per-item warnings from the last run, shown collapsed under the headline.
+  let resultDetail = $state<string[]>([]);
+  // True only when the run actually failed (`failed_batches > 0`) — warnings
+  // alone must never render as a failure.
   let resultIsError = $state(false);
   let confirmingFullRebuild = $state(false);
   let digestOpen = $state(false);
@@ -72,6 +77,7 @@
     scope = next;
     progress = null;
     resultNote = null;
+    resultDetail = [];
     resultIsError = false;
     confirmingFullRebuild = false;
     digestOpen = false;
@@ -113,12 +119,14 @@
     progress = null;
     progressPlaceholder = "Starting…";
     resultNote = null;
+    resultDetail = [];
     resultIsError = false;
     try {
       await invoke("run_profile_refresh", { full, scope });
     } catch (e) {
       busyScope = null;
       resultNote = String(e);
+      resultDetail = [];
       resultIsError = true;
     }
   }
@@ -147,17 +155,27 @@
         busyScope = null;
         if (payload.scope !== scope) return;
         progress = null;
+        resultDetail = payload.errors;
         if (payload.busy) {
           resultNote = "Another model job is running — try again later.";
+          resultDetail = [];
           resultIsError = true;
           return;
         }
-        if (payload.errors.length > 0) {
-          resultNote = `Distilled ${payload.session_count} sessions → ${payload.facts_count} facts, with errors: ${payload.errors.join("; ")}`;
-          resultIsError = true;
+        resultIsError = payload.failed_batches > 0;
+        if (resultIsError) {
+          const batches = payload.failed_batches === 1 ? "batch" : "batches";
+          resultNote = `Build did not complete — ${payload.failed_batches} ${batches} failed, so the profile was not updated.`;
+        } else if (payload.session_count === 0) {
+          // Not a failure and not a success: nothing in the archive matched
+          // this scope's consented sources, so there was nothing to distill.
+          resultNote =
+            "No sessions matched this profile's sources, so nothing was distilled.";
         } else {
-          resultNote = `Distilled ${payload.session_count} sessions → ${payload.facts_count} facts.`;
-          resultIsError = false;
+          const skipped = payload.errors.length;
+          resultNote =
+            `Distilled ${payload.session_count} sessions → ${payload.facts_count} facts.` +
+            (skipped > 0 ? ` ${skipped} ${skipped === 1 ? "item" : "items"} skipped.` : "");
         }
         // A finished build must not auto-expose the refreshed profile.
         profileRevealed = false;
@@ -252,7 +270,7 @@
   {/if}
 
   {#if resultNote}
-    <p class="note" class:err={resultIsError}>{resultNote}</p>
+    <ProfileRunNote note={resultNote} detail={resultDetail} isError={resultIsError} />
   {/if}
 
   {#if exportNote}
@@ -266,7 +284,11 @@
       <p class="err">{loadError}</p>
     {:else if !profile}
       <div class="empty-state">
-        <p>No profile has been built yet — run a full build to distill facts from your archived sessions into a persistent profile.</p>
+        {#if resultIsError}
+          <p>The last build did not complete, so nothing was written — see the message above.</p>
+        {:else}
+          <p>No profile has been built yet — run a full build to distill facts from your archived sessions into a persistent profile.</p>
+        {/if}
         {#if scope === "personal"}
           <p class="hint">Personal includes chat exports (ChatGPT/Claude.ai/Gemini), in addition to your coding tools.</p>
         {/if}

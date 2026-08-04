@@ -41,8 +41,11 @@ pub fn run_sweep(
     // inference lock for the whole sweep so a manual "Run Now", a second
     // scheduled tick, or an active briefing/chat cannot load a second model.
     // The guard also covers retrieval::index_sessions below (same thread), so
-    // embedding code must never re-acquire it.
-    let Some(_inference_guard) = crate::infer_lock::try_acquire() else {
+    // embedding code must never re-acquire it. `acquire_for_batch` additionally
+    // reclaims any warm interactive server, so the sweep's model is the only
+    // one resident instead of loading beside a chat model the idle watchdog
+    // cannot reach while this lock is held.
+    let Some(_inference_guard) = crate::infer_lock::acquire_for_batch() else {
         return SweepResult {
             busy: true,
             ..Default::default()
