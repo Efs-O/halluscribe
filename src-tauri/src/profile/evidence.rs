@@ -95,6 +95,30 @@ pub(super) fn expand_labels(
         .collect()
 }
 
+/// Split evidence entries that packed several citations into one string.
+///
+/// Observed live on 2026-08-04: the model emits `["S1, S3, S4, S6, S7, S18"]`
+/// instead of `["S1","S3","S4","S6","S7","S18"]`. Nothing downstream can match
+/// that joined string — it is not a canonical label and not a real id — so
+/// every citation is dropped and then the fact itself is dropped for having no
+/// evidence. The facts were correct; only their punctuation was wrong.
+///
+/// Separators are commas, semicolons and whitespace. None can occur inside a
+/// session id (a UUID: hex and dashes only) or an `S<n>` label, so splitting is
+/// safe for well-formed input and simply returns it unchanged.
+pub(super) fn split_evidence_ids(evidence: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for entry in evidence {
+        for piece in entry.split([',', ';', ' ', '\t', '\n', '\r']) {
+            let trimmed = piece.trim();
+            if !trimmed.is_empty() && !out.iter().any(|kept| kept == trimmed) {
+                out.push(trimmed.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// Normalise a model-emitted evidence token to its canonical `S<n>` label, or
 /// `None` when it is not label-shaped. Tolerates the wrappers small models add
 /// in practice: surrounding brackets/quotes, a `Session`/`Session id:` prefix,

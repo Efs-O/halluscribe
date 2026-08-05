@@ -246,3 +246,35 @@ fn head_tail_window_greek_multibyte_never_splits_a_codepoint() {
     );
     assert!(windowed.ends_with("εδώ. "));
 }
+
+#[test]
+fn split_evidence_ids_unpacks_comma_joined_citations() {
+    // The exact live 2026-08-04 shape: every citation packed into one string,
+    // which matched neither a label nor a real id, so the fact lost all of its
+    // evidence and was then dropped entirely.
+    let packed = vec!["S1, S3, S4, S6, S7, S18".to_string()];
+    assert_eq!(
+        split_evidence_ids(packed),
+        vec!["S1", "S3", "S4", "S6", "S7", "S18"]
+    );
+}
+
+#[test]
+fn split_evidence_ids_leaves_well_formed_input_unchanged() {
+    let clean = vec!["S1".to_string(), "S2".to_string()];
+    assert_eq!(split_evidence_ids(clean.clone()), clean);
+}
+
+#[test]
+fn split_evidence_ids_preserves_real_session_ids() {
+    // Real ids are UUIDs — dashes and hex only, no separator characters — so
+    // splitting must never break one apart.
+    let id = "3d13a20e-e043-4946-b015-2396b073a37e".to_string();
+    assert_eq!(split_evidence_ids(vec![id.clone()]), vec![id]);
+}
+
+#[test]
+fn split_evidence_ids_dedupes_and_drops_empties() {
+    let messy = vec!["S1,,S2 ; S1".to_string(), "  ".to_string()];
+    assert_eq!(split_evidence_ids(messy), vec!["S1", "S2"]);
+}

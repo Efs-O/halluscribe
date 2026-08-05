@@ -198,14 +198,38 @@ fn parse_facts_skips_personal_context_fact_under_work_scope() {
 }
 
 #[test]
-fn parse_facts_missing_fact_string_still_fails_batch() {
+fn parse_facts_skips_malformed_fact_without_losing_the_batch() {
+    // Live 2026-08-04: five batches were discarded whole because a single item
+    // arrived without a string `fact`. Truncated JSON never reaches parse_facts
+    // (it fails serde parsing in the tool-call extractor), so one wrongly shaped
+    // item must not cost the good facts beside it.
     let value = serde_json::json!({
         "facts": [
-            { "section": "conventions", "evidence": ["S1"], "date": "2026-06-01" }
+            { "section": "conventions", "evidence": ["S1"], "date": "2026-06-01" },
+            { "section": "conventions", "fact": "Runs all four gates before pushing.",
+              "evidence": ["S2"], "date": "2026-06-02" },
+            { "fact": "No section on this one.", "evidence": ["S3"], "date": "2026-06-03" }
         ]
     });
-    let error = parse_facts(ProfileScope::Work, &value).unwrap_err();
-    assert!(error.to_string().contains("missing string fact"));
+    let (facts, warnings) = parse_facts(ProfileScope::Work, &value).unwrap();
+    assert_eq!(facts.len(), 1, "the well-formed fact must survive");
+    assert_eq!(facts[0].fact, "Runs all four gates before pushing.");
+    assert_eq!(warnings.len(), 2, "each skipped item must be reported");
+    assert!(warnings.iter().any(|w| w.contains("non-string fact text")));
+    assert!(warnings.iter().any(|w| w.contains("non-string section")));
+}
+
+#[test]
+fn parse_facts_splits_comma_packed_evidence_ids() {
+    // The exact shape seen live: every citation packed into one string.
+    let value = serde_json::json!({
+        "facts": [
+            { "section": "conventions", "fact": "Prefers explicit evidence ids.",
+              "evidence": ["S1, S3, S4, S6, S7, S18"], "date": "2026-06-01" }
+        ]
+    });
+    let (facts, _) = parse_facts(ProfileScope::Work, &value).unwrap();
+    assert_eq!(facts[0].evidence, vec!["S1", "S3", "S4", "S6", "S7", "S18"]);
 }
 
 #[test]

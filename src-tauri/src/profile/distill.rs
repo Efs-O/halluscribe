@@ -4,7 +4,7 @@
 // cites live in `evidence.rs`.
 
 use super::citations::resolve_id;
-use super::evidence::{build_evidence_block, expand_labels, label_map};
+use super::evidence::{build_evidence_block, expand_labels, label_map, split_evidence_ids};
 use super::scope::ProfileScope;
 use super::types::{ProfileFact, ProfileSection};
 use super::ProfileError;
@@ -215,13 +215,23 @@ fn parse_facts(
     let mut facts = Vec::new();
     let mut warnings = Vec::new();
     for item in items.iter().take(MAX_FACTS_PER_BATCH) {
-        let section_str = item["section"]
-            .as_str()
-            .ok_or_else(|| ProfileError::BadToolCall("fact missing string section".to_string()))?;
-        let fact = item["fact"]
-            .as_str()
-            .ok_or_else(|| ProfileError::BadToolCall("fact missing string fact".to_string()))?
-            .to_string();
+        // One malformed item must not discard the whole batch. Truncated JSON
+        // cannot reach here — it fails serde parsing back in the tool-call
+        // extractor, with an explicit max_tokens hint — so an item arriving
+        // without a string `section`/`fact` means the model shaped that ONE
+        // entry wrongly while the rest of the batch is fine. Failing the batch
+        // threw away every good fact alongside it; skip and warn instead, the
+        // same way an out-of-scope section is already handled.
+        let Some(section_str) = item["section"].as_str() else {
+            warnings.push("skipped fact with missing or non-string section".to_string());
+            continue;
+        };
+        let Some(fact) = item["fact"].as_str().map(str::to_string) else {
+            warnings.push(format!(
+                "skipped fact in section '{section_str}' with missing or non-string fact text"
+            ));
+            continue;
+        };
         let section = match resolve_section(section_str) {
             Some(section) if scope.sections().contains(&section) => section,
             _ => {
@@ -229,15 +239,17 @@ fn parse_facts(
                 continue;
             }
         };
-        let evidence = item["evidence"]
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let evidence = split_evidence_ids(
+            item["evidence"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        );
         let date = item["date"].as_str().unwrap_or("").to_string();
         facts.push(ProfileFact {
             section,
