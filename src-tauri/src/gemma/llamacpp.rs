@@ -5,7 +5,7 @@ use super::{GemmaError, GemmaOutput, INFER_TIMEOUT, STARTUP_TIMEOUT_SECS, TEMPER
 use crate::llama_runtime::{self, ServerWaitError};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 
 /// A llama-server held alive for the duration of a sweep so the model loads
 /// once and serves every session, instead of a cold load per session (audit
@@ -131,6 +131,7 @@ fn spawn_server(
         n => n.to_string(),
     };
     let mut cmd = Command::new(bin);
+    llama_runtime::apply_serve_subcommand(&mut cmd, bin);
     cmd.args([
         "-m",
         &model.to_string_lossy(),
@@ -156,9 +157,8 @@ fn spawn_server(
         "6",
         "--threads-batch",
         "6",
-    ])
-    .stdout(Stdio::null())
-    .stderr(Stdio::null());
+    ]);
+    llama_runtime::apply_output_capture(&mut cmd);
     llama_runtime::apply_no_window(&mut cmd);
     cmd.spawn()
         .map_err(|e| GemmaError::BinaryNotFound(e.to_string()))

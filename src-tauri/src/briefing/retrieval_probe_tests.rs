@@ -202,7 +202,7 @@ fn retrieval_prompt_probe() {
             runs.len()
         );
     }
-    llamacpp::kill_server();
+    super::server::kill_server();
     println!("\n(probe server unloaded)");
 }
 

@@ -1,5 +1,6 @@
 // HalluScribe - llama.cpp streaming and tool-call transport helpers.
 
+use super::server;
 use super::streaming;
 use super::tools::ToolCallResult;
 use super::{INFER_TIMEOUT, STARTUP_TIMEOUT_SECS, TEMPERATURE};
@@ -7,26 +8,8 @@ use crate::llama_runtime::{self, ServerWaitError};
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
-
-fn persistent_server() -> &'static Mutex<Option<Child>> {
-    static SERVER: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
-    SERVER.get_or_init(|| Mutex::new(None))
-}
-
-pub(crate) fn kill_server() {
-    if let Ok(mut guard) = persistent_server().lock() {
-        if let Some(child) = guard.as_mut() {
-            let pid = child.id();
-            let _ = child.kill();
-            crate::llama_pids::unregister(pid);
-        }
-        *guard = None;
-    }
-}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn stream(
@@ -47,34 +30,35 @@ pub(crate) fn stream(
     }
     let multimodal = has_images(messages);
     let prepared_messages = prepare_messages(messages)?;
-    let port = if server_ready(port) {
-        port
-    } else {
-        let free = llama_runtime::find_free_port(port);
-        // Reap a llama-server this app orphaned on a prior hard-kill so it frees
-        // VRAM before we load the chat model (OPS-1).
-        crate::llama_pids::reap_orphans();
-        let mut child = spawn_server(
-            bin,
-            model,
-            free,
-            gpu_layers,
-            ctx_size,
-            reasoning_enabled,
-            multimodal,
-        )?;
-        if let Err(e) = wait_ready(free, &mut child) {
-            let _ = child.kill();
-            return Err(e);
+    // Reuse the warm server only when it was spawned with these exact settings.
+    // A changed model path (or ctx/gpu/reasoning/multimodal flag) retires it, so
+    // picking a different GGUF takes effect on this turn instead of whenever the
+    // idle watchdog next fires.
+    let spec = server::ServerSpec::new(model, gpu_layers, ctx_size, reasoning_enabled, multimodal);
+    let port = match server::reusable_port(&spec) {
+        Some(port) => port,
+        None => {
+            let free = llama_runtime::find_free_port(port);
+            // Reap a llama-server this app orphaned on a prior hard-kill so it frees
+            // VRAM before we load the chat model (OPS-1).
+            crate::llama_pids::reap_orphans();
+            let mut child = spawn_server(
+                bin,
+                model,
+                free,
+                gpu_layers,
+                ctx_size,
+                reasoning_enabled,
+                multimodal,
+            )?;
+            if let Err(e) = wait_ready(free, &mut child) {
+                let _ = child.kill();
+                return Err(e);
+            }
+            crate::llama_pids::register(child.id());
+            server::store(child, spec, free);
+            free
         }
-        crate::llama_pids::register(child.id());
-        // Recover from a poisoned lock (a previous holder panicked) rather than
-        // crashing this stream thread - matches kill_server's graceful handling.
-        match persistent_server().lock() {
-            Ok(mut guard) => *guard = Some(child),
-            Err(poison) => *poison.into_inner() = Some(child),
-        }
-        free
     };
     let model_name = model
         .file_stem()
@@ -137,6 +121,7 @@ fn spawn_server(
         n => n.to_string(),
     };
     let mut command = Command::new(bin);
+    llama_runtime::apply_serve_subcommand(&mut command, bin);
     command
         .args([
             "-m",
@@ -171,7 +156,7 @@ fn spawn_server(
         let mmproj = find_mmproj(model)?;
         command.args(["--mmproj", &mmproj.to_string_lossy()]);
     }
-    command.stdout(Stdio::null()).stderr(Stdio::null());
+    llama_runtime::apply_output_capture(&mut command);
     llama_runtime::apply_no_window(&mut command);
     command
         .spawn()
@@ -342,15 +327,6 @@ mod tests {
         let _ = fs::remove_file(other);
         let _ = fs::remove_dir(dir);
     }
-}
-
-fn server_ready(port: u16) -> bool {
-    reqwest::blocking::Client::new()
-        .get(format!("http://127.0.0.1:{port}/v1/models"))
-        .timeout(Duration::from_secs(2))
-        .send()
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
 }
 
 fn wait_ready(port: u16, child: &mut Child) -> Result<(), String> {

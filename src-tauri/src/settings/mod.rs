@@ -3,11 +3,13 @@
 // Missing or partial files are always valid - every field has a serde default.
 // Phase 7 resolves the archive_dir path via Tauri's path API and passes it here.
 
+mod paths;
 mod persistence;
 mod runtime;
 mod tests;
 mod types;
 
+pub use paths::validate_paths;
 pub use persistence::{load_settings, save_settings};
 pub(crate) use types::parse_schedule_time;
 pub use types::{BackendKind, HalluScribeSettings, SettingsError};

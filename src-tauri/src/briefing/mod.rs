@@ -8,6 +8,7 @@ mod idle;
 mod llamacpp;
 mod ollama;
 mod prompt;
+mod server;
 mod streaming;
 pub(crate) mod tools;
 mod web_search;
@@ -29,7 +30,7 @@ use tauri::Emitter;
 pub(crate) use chat::{run_chat_turn, ChatRuntimeOptions};
 pub use chat::{ChatUsagePayload, ToolCallPayload};
 pub use filters::{BriefingFilters, BriefingScope};
-pub(crate) use llamacpp::kill_server;
+pub(crate) use server::kill_server;
 use tools::ToolCallResult;
 
 pub(crate) const TEMPERATURE: f64 = 0.15;

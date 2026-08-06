@@ -24,6 +24,10 @@ pub(crate) fn save_settings(
     mut new_settings: settings::HalluScribeSettings,
 ) -> Result<(), String> {
     let dir = archive_dir(&app)?;
+    // Catch a model path pasted into the binary field (or vice versa) here,
+    // while we can still name the offending field. Past this point the mistake
+    // only shows up as a raw OS spawn error at the next inference.
+    settings::validate_paths(&new_settings)?;
     // `last_sweep_date` is managed by the scheduler, not the UI. Preserve the
     // on-disk value so saving settings never resets the catch-up state (audit
     // A-2) - otherwise a save would let the nightly sweep re-run the same day.

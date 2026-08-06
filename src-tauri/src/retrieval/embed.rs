@@ -4,7 +4,7 @@ use crate::llama_runtime::{self, ServerWaitError};
 use crate::settings::HalluScribeSettings;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -242,6 +242,7 @@ fn spawn_server(runtime: &EmbeddingRuntime) -> Result<Child, String> {
         n => n.to_string(),
     };
     let mut cmd = Command::new(&runtime.bin);
+    llama_runtime::apply_serve_subcommand(&mut cmd, &runtime.bin);
     cmd.args([
         "-m",
         &runtime.model.to_string_lossy(),
@@ -266,9 +267,8 @@ fn spawn_server(runtime: &EmbeddingRuntime) -> Result<Child, String> {
         "--embedding",
         "--pooling",
         "mean",
-    ])
-    .stdout(Stdio::null())
-    .stderr(Stdio::null());
+    ]);
+    llama_runtime::apply_output_capture(&mut cmd);
     llama_runtime::apply_no_window(&mut cmd);
     cmd.spawn()
         .map_err(|error| format!("failed to start embedding runtime: {error}"))
