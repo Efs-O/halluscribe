@@ -35,6 +35,8 @@ export interface HalluScribeSettings {
   backend: "llamacpp" | "ollama";
   llama_server_bin: string;
   gemma_model_path: string;
+  window_width: number | null;
+  window_height: number | null;
   embedding_model_path: string;
   gpu_layers: number;
   llama_server_port: number;

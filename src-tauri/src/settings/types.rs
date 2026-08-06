@@ -46,6 +46,11 @@ impl From<serde_json::Error> for SettingsError {
 #[serde(default)]
 pub struct HalluScribeSettings {
     pub always_on_top: bool,
+    /// Last window size the user resized to, in physical pixels. `None` means
+    /// "never resized" and leaves tauri.conf.json's dimensions in charge, so a
+    /// fresh install still opens at the designed size.
+    pub window_width: Option<u32>,
+    pub window_height: Option<u32>,
     pub backend: BackendKind,
     pub llama_server_bin: String,
     pub gemma_model_path: String,
@@ -109,6 +114,8 @@ impl Default for HalluScribeSettings {
     fn default() -> Self {
         Self {
             always_on_top: false,
+            window_width: None,
+            window_height: None,
             backend: BackendKind::LlamaCpp,
             llama_server_bin: String::new(),
             gemma_model_path: String::new(),

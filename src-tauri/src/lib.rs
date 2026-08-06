@@ -14,6 +14,7 @@ mod llama_pids;
 mod llama_runtime;
 mod recorded_sessions;
 mod tts;
+mod window_size;
 
 pub mod archive;
 pub mod briefing;
@@ -39,9 +40,10 @@ use chrono::{Datelike, Local, Timelike};
 use commands::{
     apply_redaction, cancel_briefing, cancel_chat, cancel_sweep, delete_sessions,
     get_raw_session_total, get_recent_sessions, get_settings, get_stats, preview_redaction,
-    read_session, rebuild_session_embeddings, run_briefing, save_recorded_chat_session,
-    save_settings, search_raw_transcripts, search_sessions, search_sessions_fulltext,
-    search_sessions_semantic, send_chat_message, trigger_sweep, validate_ollama_api_key,
+    read_image_attachment, read_session, rebuild_session_embeddings, run_briefing,
+    save_recorded_chat_session, save_settings, search_raw_transcripts, search_sessions,
+    search_sessions_fulltext, search_sessions_semantic, send_chat_message, trigger_sweep,
+    validate_ollama_api_key,
 };
 use commands_capture::{cancel_capture, get_capture_status};
 use commands_profile::{
@@ -145,6 +147,8 @@ pub fn run() {
             if let Err(error) = apply_always_on_top(app.handle(), saved_settings.always_on_top) {
                 eprintln!("[window] failed to apply always-on-top at startup: {error}");
             }
+            window_size::restore(app.handle(), &saved_settings);
+            window_size::watch(app.handle());
 
             let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
             let hide_item = MenuItem::with_id(app, "hide", "Hide", true, None::<&str>)?;
@@ -330,6 +334,7 @@ pub fn run() {
             tts_speak,
             get_capture_status,
             cancel_capture,
+            read_image_attachment,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

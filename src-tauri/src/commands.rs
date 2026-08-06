@@ -3,6 +3,7 @@
 mod archive;
 mod briefing;
 mod chat;
+mod image;
 mod search;
 mod settings;
 mod sweep;
@@ -16,6 +17,7 @@ pub(crate) use archive::{
 };
 pub(crate) use briefing::{cancel_briefing, run_briefing};
 pub(crate) use chat::{cancel_chat, save_recorded_chat_session, send_chat_message};
+pub(crate) use image::read_image_attachment;
 pub(crate) use search::{
     rebuild_session_embeddings, search_raw_transcripts, search_sessions, search_sessions_fulltext,
     search_sessions_semantic,

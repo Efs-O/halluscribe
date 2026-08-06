@@ -1,15 +1,10 @@
 <!-- HalluScribe - chat input bar (textarea + tool toggles + optional image attach). -->
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
+  import { open } from "@tauri-apps/plugin-dialog";
   import type { ChatAttachment, WebSearchStatus } from "../../lib/types";
 
-  const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-  const SUPPORTED_IMAGE_TYPES = new Set([
-    "image/png",
-    "image/jpeg",
-    "image/jpg",
-    "image/webp",
-    "image/gif",
-  ]);
+  const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "jfif", "webp", "gif"];
 
   interface Props {
     disabled: boolean;
@@ -53,7 +48,6 @@
   let draft = $state("");
   let webNote = $state("");
   let attachment = $state<ChatAttachment | null>(null);
-  let fileInput: HTMLInputElement | undefined;
 
   function submit() {
     const text = draft.trim();
@@ -87,58 +81,35 @@
     ontogglewebsearch();
   }
 
-  function openImagePicker() {
+  // Uses the Tauri dialog plugin rather than <input type="file">. A browser
+  // file dialog is owned by the webview, so with "always on top" set it loses
+  // the z-order fight against our own window and hides behind it, leaving the
+  // app looking frozen while an invisible modal holds input focus.
+  async function openImagePicker() {
     if (disabled) return;
     if (!imageAttachEnabled) {
       webNote = "Image analysis is unavailable until a chat backend is configured.";
       return;
     }
     webNote = "";
-    fileInput?.click();
-  }
-
-  async function onImageSelected(event: Event) {
-    const input = event.currentTarget as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = "";
-    if (!file) return;
-    if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
-      webNote = "Unsupported image type. Use PNG, JPG, WEBP, or GIF.";
-      return;
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      webNote = "Image too large. Keep attachments under 5 MB for now.";
-      return;
-    }
     try {
-      const dataUrl = await readFileAsDataUrl(file);
-      const base64 = dataUrl.split(",", 2)[1] ?? "";
-      if (!base64) {
-        webNote = "Failed to read the selected image.";
-        return;
-      }
-      attachment = {
-        name: file.name,
-        mimeType: file.type,
-        base64,
-      };
+      const selected = await open({
+        directory: false,
+        multiple: false,
+        filters: [{ name: "Images", extensions: IMAGE_EXTENSIONS }],
+      });
+      if (selected === null) return;
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      if (!path) return;
+      attachment = await invoke<ChatAttachment>("read_image_attachment", { path });
       webNote = "";
-    } catch {
-      webNote = "Failed to read the selected image.";
+    } catch (e) {
+      webNote = typeof e === "string" ? e : "Failed to read the selected image.";
     }
   }
 
   function clearAttachment() {
     attachment = null;
-  }
-
-  function readFileAsDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result ?? ""));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
   }
 
   function toggleThinking() {
@@ -148,13 +119,6 @@
 
 <div class="chat-input-wrap">
   <div class="bar">
-    <input
-      bind:this={fileInput}
-      type="file"
-      accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
-      class="hidden-file"
-      onchange={onImageSelected}
-    />
     <div class="tool-stack">
       <button
         class:web-active={webSearchEnabled && webSearchStatus === "ready"}
@@ -254,7 +218,13 @@
   {#if attachment}
     <div class="attachment-row">
       <button class="attachment-chip" onclick={clearAttachment} title="Remove attached image">
-        image: {attachment.name} x
+        <img
+          class="attachment-thumb"
+          src="data:{attachment.mimeType};base64,{attachment.base64}"
+          alt="Attached: {attachment.name}"
+        />
+        <span class="attachment-name">{attachment.name}</span>
+        <span class="attachment-remove" aria-hidden="true">x</span>
       </button>
     </div>
   {/if}
@@ -270,7 +240,6 @@
 </div>
 
 <style>
-  .hidden-file { display: none; }
 
   .chat-input-wrap {
     border-top: 1px solid var(--border);
@@ -441,13 +410,37 @@
   }
 
   .attachment-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     border: 1px solid #4c9dff55;
     background: rgba(76, 157, 255, 0.12);
     color: #9ad1ff;
-    border-radius: 999px;
-    padding: 6px 10px;
+    border-radius: 8px;
+    padding: 5px 10px 5px 5px;
     font-size: 12px;
     cursor: pointer;
+  }
+
+  .attachment-thumb {
+    width: 34px;
+    height: 34px;
+    /* Crop to a square rather than distorting whatever aspect ratio the user
+       picked; the chip is a reminder of what is attached, not a viewer. */
+    object-fit: cover;
+    border-radius: 5px;
+    display: block;
+  }
+
+  .attachment-name {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .attachment-remove {
+    opacity: 0.7;
   }
 
   .save-note,
