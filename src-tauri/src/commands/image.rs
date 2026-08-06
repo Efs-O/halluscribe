@@ -59,11 +59,20 @@ fn mime_for(path: &Path) -> Result<String, String> {
     match extension.as_str() {
         "png" => Ok("image/png".to_string()),
         "jpg" | "jpeg" | "jfif" => Ok("image/jpeg".to_string()),
-        "webp" => Ok("image/webp".to_string()),
         "gif" => Ok("image/gif".to_string()),
+        // Rejected on purpose, and worth its own message. llama.cpp decodes
+        // images with stb_image, which has no WebP support - but it fails
+        // silently rather than erroring: the image is dropped and the model
+        // answers as though nothing was attached, usually by inventing a
+        // "video" it cannot see. Verified against gemma-4-26B + mmproj-F16,
+        // where the same picture answered correctly as PNG, JPEG and GIF.
+        "webp" => Err(
+            "WebP images are not supported by llama.cpp's decoder. Convert it to PNG or JPG first."
+                .to_string(),
+        ),
         "" => Err("That file has no extension, so its image type is unknown.".to_string()),
         other => Err(format!(
-            "Unsupported image type .{other}. Use PNG, JPG, WEBP, or GIF."
+            "Unsupported image type .{other}. Use PNG, JPG, or GIF."
         )),
     }
 }
@@ -122,8 +131,17 @@ mod tests {
     fn mime_is_derived_from_the_extension_case_insensitively() {
         assert_eq!(mime_for(Path::new("a.PNG")).unwrap(), "image/png");
         assert_eq!(mime_for(Path::new("a.jpeg")).unwrap(), "image/jpeg");
-        assert_eq!(mime_for(Path::new("a.webp")).unwrap(), "image/webp");
         assert_eq!(mime_for(Path::new("a.gif")).unwrap(), "image/gif");
+    }
+
+    #[test]
+    fn webp_is_rejected_with_its_own_explanation() {
+        // Accepting it would be worse than refusing: llama.cpp drops the image
+        // without erroring, so the user gets a confident answer about a picture
+        // the model never received.
+        let error = mime_for(Path::new("shot.webp")).unwrap_err();
+        assert!(error.contains("WebP"), "{error}");
+        assert!(error.contains("PNG or JPG"), "{error}");
     }
 
     #[test]

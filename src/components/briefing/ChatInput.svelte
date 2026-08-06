@@ -4,7 +4,10 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import type { ChatAttachment, WebSearchStatus } from "../../lib/types";
 
-  const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "jfif", "webp", "gif"];
+  // No webp: llama.cpp's decoder cannot read it and drops the image without
+  // erroring, so the model answers as if nothing were attached. Rust rejects it
+  // with an explanation too, for paths typed rather than picked.
+  const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "jfif", "gif"];
 
   interface Props {
     disabled: boolean;

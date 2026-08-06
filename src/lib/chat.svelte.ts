@@ -108,6 +108,9 @@ export class ChatController {
       toolActivity: null,
       streaming: false,
       attachmentName: attachment?.name,
+      attachmentDataUrl: attachment
+        ? `data:${attachment.mimeType};base64,${attachment.base64}`
+        : undefined,
       ...turnState,
     });
     this.turns.push({

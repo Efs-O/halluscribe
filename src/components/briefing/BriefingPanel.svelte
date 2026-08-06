@@ -305,6 +305,7 @@
             toolActivity={turn.toolActivity}
             streaming={turn.streaming}
             attachmentName={turn.attachmentName}
+            attachmentDataUrl={turn.attachmentDataUrl}
             {ttsAvailable}
             controller={speakController}
           />

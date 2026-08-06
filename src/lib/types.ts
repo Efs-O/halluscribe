@@ -104,6 +104,11 @@ export interface Turn {
   toolActivity: string | null;
   streaming: boolean;
   attachmentName?: string;
+  /** Data URI of the attached image, for the in-bubble thumbnail. Held in
+   *  memory only - deliberately not part of the saved session payload, which
+   *  keeps `attachment_name` alone so the archive does not carry megabytes of
+   *  base64 per turn. */
+  attachmentDataUrl?: string;
   searchMode?: ChatSearchMode;
   webSearchEnabled?: boolean;
   thinkingEnabled?: boolean;

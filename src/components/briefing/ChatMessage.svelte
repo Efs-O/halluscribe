@@ -12,6 +12,7 @@
     toolActivity: string | null;
     streaming: boolean;
     attachmentName?: string;
+    attachmentDataUrl?: string;
     ttsAvailable: boolean;
     controller: SpeakController;
   }
@@ -23,6 +24,7 @@
     toolActivity,
     streaming,
     attachmentName,
+    attachmentDataUrl,
     ttsAvailable,
     controller,
   }: Props = $props();
@@ -50,7 +52,10 @@
       {#if answerText.trim()}
         <div class="user-content selectable">{answerText}</div>
       {/if}
-      {#if attachmentName}
+      {#if attachmentDataUrl}
+        <img class="attachment-image" src={attachmentDataUrl} alt={attachmentName ?? "Attached image"} />
+      {:else if attachmentName}
+        <!-- Reloaded sessions keep the name only: the base64 is never saved. -->
         <div class="attachment-note">image: {attachmentName}</div>
       {/if}
     </div>
@@ -117,6 +122,19 @@
   .attachment-note {
     color: #9ad1ff;
     font-size: 12px;
+  }
+
+  .attachment-image {
+    display: block;
+    margin-top: 6px;
+    /* Bounded rather than cropped: in the transcript the point is to see what
+       was actually sent, so the whole frame stays visible at its own ratio. */
+    max-width: 260px;
+    max-height: 200px;
+    width: auto;
+    height: auto;
+    border-radius: 6px;
+    border: 1px solid #4c9dff33;
   }
 
   .message.user { display: flex; justify-content: flex-end; }
