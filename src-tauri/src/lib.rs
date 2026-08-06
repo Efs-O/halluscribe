@@ -132,6 +132,12 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Release builds send llama-server's stderr here, so an overnight
+            // sweep failure leaves an explanation behind. Resolved via the
+            // Tauri path API rather than assumed.
+            if let Ok(dir) = archive_dir(app.handle()) {
+                llama_runtime::set_log_dir(dir.join("logs"));
+            }
             let saved_settings = archive_dir(app.handle())
                 .ok()
                 .map(|dir| settings::load_settings(&dir))

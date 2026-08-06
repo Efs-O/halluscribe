@@ -4,8 +4,10 @@
 // no-window guard, and readiness polling. Extracted so a fix lands once
 // instead of drifting across three near-identical copies (audit Q-1).
 
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
@@ -86,20 +88,68 @@ pub fn apply_serve_subcommand(command: &mut Command, bin: &Path) {
     }
 }
 
+/// Largest the log may grow before the next spawn rotates it. One failed load
+/// writes a few hundred lines, so this holds many sessions of history while
+/// staying small enough to attach to a bug report.
+const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Where release builds write llama-server's stderr. Set once at startup from
+/// the Tauri path API — never derived here, so no OS path is hardcoded. Unset
+/// means "nowhere known yet", and output is discarded rather than guessed at.
+fn log_dir() -> &'static OnceLock<PathBuf> {
+    static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
+    &LOG_DIR
+}
+
+/// Point release-build llama-server logging at `<archive_dir>/logs`. Called
+/// once during setup; later calls are ignored.
+pub fn set_log_dir(dir: PathBuf) {
+    let _ = log_dir().set(dir);
+}
+
 /// Decide what happens to a spawned llama-server's stdout/stderr.
 ///
-/// Release builds discard both: the app is a windowless GUI process, so the
-/// streams have nowhere to go and an unread pipe would eventually block the
-/// child. Debug builds inherit stderr instead, so `tauri dev` surfaces the
-/// loader's own diagnosis — CUDA OOM, unsupported flag, corrupt GGUF — rather
-/// than only HalluScribe's `ExitedEarly` / `Timeout` verdict, which says that
-/// startup failed but never why.
+/// stdout is always discarded — it carries no diagnosis. stderr is where the
+/// loader explains itself (CUDA OOM, unsupported flag, corrupt GGUF), and
+/// HalluScribe's own `ExitedEarly` / `Timeout` verdict says that startup failed
+/// but never why, so that stream is worth keeping:
+///
+/// - Debug builds inherit it, putting the detail straight in the `tauri dev`
+///   terminal.
+/// - Release builds append it to `<archive_dir>/logs/llama-server.log`. The app
+///   is a windowless GUI process with no terminal to inherit, and the nightly
+///   sweep fails while nobody is watching — a file is the only way that
+///   explanation survives to be read in the morning.
+///
+/// Falls back to discarding when the log cannot be opened. An unread *pipe*
+/// would eventually block the child, so the one thing never done here is leave
+/// the stream buffered with no reader.
 pub fn apply_output_capture(command: &mut Command) {
-    command.stdout(std::process::Stdio::null());
+    command.stdout(Stdio::null());
     #[cfg(debug_assertions)]
-    command.stderr(std::process::Stdio::inherit());
+    command.stderr(Stdio::inherit());
     #[cfg(not(debug_assertions))]
-    command.stderr(std::process::Stdio::null());
+    command.stderr(open_log().unwrap_or_else(Stdio::null));
+}
+
+/// Open the log for appending, rotating first if it has grown past the cap.
+/// Only the release path calls this.
+#[cfg_attr(debug_assertions, allow(dead_code))]
+fn open_log() -> Option<Stdio> {
+    let dir = log_dir().get()?;
+    fs::create_dir_all(dir).ok()?;
+    let path = dir.join("llama-server.log");
+    // Keep exactly one previous generation: enough to survive a rotation
+    // mid-investigation, bounded at 2x LOG_MAX_BYTES on disk.
+    if fs::metadata(&path).is_ok_and(|meta| meta.len() > LOG_MAX_BYTES) {
+        let _ = fs::rename(&path, dir.join("llama-server.log.1"));
+    }
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()
+        .map(Stdio::from)
 }
 
 /// Poll `GET /v1/models` once per second until the server answers 200, the
