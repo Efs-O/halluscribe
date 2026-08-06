@@ -39,6 +39,24 @@ impl ServerSpec {
             multimodal,
         }
     }
+
+    /// Whether a server spawned with `self` can answer a request wanting
+    /// `wanted`.
+    ///
+    /// Every field must match except multimodality, which is a *superset*
+    /// rather than a mode: a server holding the mmproj answers text-only turns
+    /// perfectly well, so only the reverse - needing vision without it - forces
+    /// a reload. Treating it as a plain equality made every switch between an
+    /// image turn and a text turn reload the whole model, 18-49 s each time.
+    /// The cost of this asymmetry is that the mmproj stays resident (~1.1 GB)
+    /// once any image has been sent, until the idle watchdog unloads the server.
+    fn can_serve(&self, wanted: &ServerSpec) -> bool {
+        self.model == wanted.model
+            && self.gpu_layers == wanted.gpu_layers
+            && self.ctx_size == wanted.ctx_size
+            && self.reasoning_enabled == wanted.reasoning_enabled
+            && (self.multimodal || !wanted.multimodal)
+    }
 }
 
 struct WarmServer {
@@ -67,9 +85,12 @@ fn lock_warm() -> std::sync::MutexGuard<'static, Option<WarmServer>> {
 pub(crate) fn reusable_port(spec: &ServerSpec) -> Option<u16> {
     let mut guard = lock_warm();
     let server = guard.as_ref()?;
-    if &server.spec == spec {
+    if server.spec.can_serve(spec) {
         let port = server.port;
         if server_ready(port) {
+            // The stored spec is deliberately left alone: a multimodal server
+            // reused for a text-only turn is still multimodal, and recording it
+            // as text-only would force a reload on the next image.
             return Some(port);
         }
     }
@@ -134,6 +155,49 @@ mod tests {
     #[test]
     fn spec_differs_when_multimodal_changes() {
         assert_ne!(spec("/models/a.gguf", false), spec("/models/a.gguf", true));
+    }
+
+    #[test]
+    fn a_multimodal_server_serves_text_only_turns() {
+        // The whole point of the asymmetry: switching from an image turn back
+        // to a text turn must not reload 13 GB of weights.
+        let warm = spec("/models/a.gguf", true);
+        assert!(warm.can_serve(&spec("/models/a.gguf", false)));
+        assert!(warm.can_serve(&spec("/models/a.gguf", true)));
+    }
+
+    #[test]
+    fn a_text_only_server_cannot_serve_an_image_turn() {
+        let warm = spec("/models/a.gguf", false);
+        assert!(!warm.can_serve(&spec("/models/a.gguf", true)));
+        assert!(warm.can_serve(&spec("/models/a.gguf", false)));
+    }
+
+    #[test]
+    fn multimodality_never_excuses_a_different_model_or_flag() {
+        let warm = spec("/models/a.gguf", true);
+        assert!(!warm.can_serve(&spec("/models/b.gguf", false)));
+        assert!(!warm.can_serve(&ServerSpec::new(
+            Path::new("/models/a.gguf"),
+            -1,
+            8192, // different ctx
+            false,
+            false
+        )));
+        assert!(!warm.can_serve(&ServerSpec::new(
+            Path::new("/models/a.gguf"),
+            27, // different gpu layers
+            4096,
+            false,
+            false
+        )));
+        assert!(!warm.can_serve(&ServerSpec::new(
+            Path::new("/models/a.gguf"),
+            -1,
+            4096,
+            true, // different reasoning
+            false
+        )));
     }
 
     #[test]
