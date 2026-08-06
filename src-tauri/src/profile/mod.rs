@@ -170,8 +170,13 @@ pub fn run_refresh(
         .collect::<std::collections::HashSet<&str>>()
         .len();
     let batches = select::chunk_batches(&to_map, select::BATCH_SIZE);
-    // Progress totals count only the batches actually being mapped this run.
-    let total_batches = batches.len().max(1);
+    // Sessions a previous failed run already mapped, expressed in batches.
+    // Counting them into the denominator keeps the reported total equal to the
+    // scope's real size: a resumed full rebuild of 1,581 sessions then reports
+    // "batch 84 of 88" rather than a bare "1 of 5", which reads as though the
+    // archive only held 5 batches' worth of sessions.
+    let resumed_batches = (selected.len() - to_map.len()).div_ceil(select::BATCH_SIZE);
+    let total_batches = (resumed_batches + batches.len()).max(1);
 
     let mut snapshot = pending::PendingFacts {
         created_at: Utc::now().to_rfc3339(),
@@ -182,7 +187,7 @@ pub fn run_refresh(
     // with it, or a benign warning would hold the watermark back forever.
     let mut failed_batches = 0usize;
     for (idx, batch) in batches.iter().enumerate() {
-        on_progress(idx + 1, total_batches, Stage::Mapping);
+        on_progress(resumed_batches + idx + 1, total_batches, Stage::Mapping);
         match distill::distill_batch(archive_dir, batch, scope, tool_call) {
             Ok((mut facts, warnings)) => {
                 for warning in warnings {
@@ -210,7 +215,10 @@ pub fn run_refresh(
     }
     let all_facts = snapshot.facts;
 
-    on_progress(1, 1, Stage::Merging);
+    // Entering the stage: `run_reduce` re-reports with the real call total as
+    // soon as it has planned its calls, but a reduce that makes no calls at all
+    // (no section had new facts) would otherwise never announce the stage.
+    on_progress(0, 1, Stage::Merging);
     let previous_md = writer::read_profile_md(archive_dir, scope);
     // A failed merge must not discard the outcome (and with it the collected
     // map-batch errors): record it, skip the write, and keep the watermark so
@@ -221,6 +229,7 @@ pub fn run_refresh(
         &all_facts,
         tool_call,
         &mut errors,
+        &mut |current, total| on_progress(current, total, Stage::Merging),
     ) {
         Ok(sections) => sections,
         Err(error) => {

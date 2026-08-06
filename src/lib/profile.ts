@@ -5,8 +5,13 @@ import type { ProfileProgressPayload } from "./types";
 
 /** Human-readable label for the current refresh stage/progress. */
 export function stageLabel(p: ProfileProgressPayload): string {
-  if (p.stage === "merging") return "Merging…";
   if (p.stage === "writing") return "Writing…";
+  // The merge is one model call per consolidate chunk and per section — dozens
+  // of them on a full archive — so report the step. Small archives merge in a
+  // single call and keep the bare label rather than saying "step 1 of 1".
+  if (p.stage === "merging") {
+    return p.total > 1 ? `Merging step ${p.current} of ${p.total}…` : "Merging…";
+  }
   return `Mapping batch ${p.current} of ${p.total}…`;
 }
 
@@ -30,6 +35,12 @@ if (import.meta.vitest) {
     it("labels the merging stage", () => {
       expect(stageLabel({ current: 1, total: 1, stage: "merging", scope: "work" })).toBe(
         "Merging…",
+      );
+    });
+
+    it("labels merging with the step when the reduce takes several calls", () => {
+      expect(stageLabel({ current: 7, total: 45, stage: "merging", scope: "work" })).toBe(
+        "Merging step 7 of 45…",
       );
     });
 

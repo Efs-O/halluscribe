@@ -58,12 +58,18 @@ with the condensed text.";
 /// no model call. A failed section call falls back to previous text + raw
 /// bullets (recorded in `warnings`), so the reduce as a whole is effectively
 /// infallible; the `Result` return type is kept for signature compatibility.
+///
+/// `on_progress(current, total)` is called once before each model call. On a
+/// full archive the reduce is ~45 sequential calls taking the better part of an
+/// hour, so reporting it as a single tick made the UI look frozen for the whole
+/// stage; the call plan is therefore computed up front to give a real total.
 pub fn run_reduce(
     scope: ProfileScope,
     previous_profile_md: Option<&str>,
     facts: &[ProfileFact],
     tool_call: &ToolCallFn,
     warnings: &mut Vec<String>,
+    on_progress: &mut dyn FnMut(usize, usize),
 ) -> Result<ProfileSections, ProfileError> {
     let previous = parse_profile_sections(previous_profile_md.unwrap_or(""));
 
@@ -77,19 +83,41 @@ pub fn run_reduce(
     let needs_consolidation = total_len > CONSOLIDATION_THRESHOLD_CHARS;
 
     let mut merged = ProfileSections::default();
+    // Plan every model call before making any: one merge call per section that
+    // has facts, plus one consolidate call per chunk when the archive is large
+    // enough to need the consolidation pass. An empty `chunks` means the
+    // section skips consolidation and merges its raw bullets directly.
+    let mut plan: Vec<(ProfileSection, String, Vec<String>)> = Vec::new();
     for (section, serialized) in serialized_by_section {
-        let prev = previous.get(section);
         if serialized.is_empty() {
             // No new candidate facts: keep the previous section text verbatim
             // (empty string if none) without calling the model.
-            merged.set(section, prev.to_string());
+            merged.set(section, previous.get(section).to_string());
             continue;
         }
-        let bullets = if needs_consolidation {
-            consolidate_section(section, &serialized, tool_call, warnings)
+        let chunks = if needs_consolidation {
+            chunk_lines(&serialized, CONSOLIDATE_CHUNK_CHARS)
         } else {
-            serialized
+            Vec::new()
         };
+        plan.push((section, serialized, chunks));
+    }
+    let total_steps: usize = plan.iter().map(|(_, _, chunks)| chunks.len() + 1).sum();
+
+    let mut step = 0usize;
+    for (section, serialized, chunks) in plan {
+        let prev = previous.get(section);
+        let chunk_count = chunks.len();
+        let bullets = if chunks.is_empty() {
+            serialized
+        } else {
+            let base = step;
+            consolidate_section(section, &chunks, tool_call, warnings, &mut |done| {
+                on_progress(base + done, total_steps);
+            })
+        };
+        step += chunk_count + 1;
+        on_progress(step, total_steps);
         let text = match merge_section(section, prev, &bullets, tool_call) {
             Ok(text) => text,
             Err(error) => {
@@ -138,19 +166,22 @@ fn merge_section(
         .ok_or_else(|| ProfileError::BadToolCall("missing content string".to_string()))
 }
 
-/// Consolidate one section's bullet list chunk by chunk so each call's output
+/// Consolidate one section's pre-chunked bullet list so each call's output
 /// stays within `CONSOLIDATE_MAX_TOKENS`. A failed chunk keeps its raw
 /// bullets (recorded in `warnings`) rather than aborting the whole reduce.
+/// `on_chunk` receives the 1-based index of the chunk about to be consolidated.
 fn consolidate_section(
     section: ProfileSection,
-    serialized: &str,
+    chunks: &[String],
     tool_call: &ToolCallFn,
     warnings: &mut Vec<String>,
+    on_chunk: &mut dyn FnMut(usize),
 ) -> String {
-    chunk_lines(serialized, CONSOLIDATE_CHUNK_CHARS)
+    chunks
         .iter()
         .enumerate()
         .map(|(idx, chunk)| {
+            on_chunk(idx + 1);
             consolidate_chunk(section, chunk, tool_call).unwrap_or_else(|error| {
                 warnings.push(format!(
                     "consolidate {} chunk {}: {error} (kept raw facts)",
@@ -262,3 +293,7 @@ fn save_section_consolidated_tool() -> Value {
 #[cfg(test)]
 #[path = "merge_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "merge_progress_tests.rs"]
+mod progress_tests;

@@ -119,15 +119,26 @@ fn pending_file_resume_excludes_already_mapped_ids_and_seeds_facts() {
         }
         Ok(canned_response(user, tool))
     };
+    let mapping = Mutex::new(Vec::<(usize, usize)>::new());
     let outcome = run_refresh(
         &dir,
         ProfileScope::Work,
         &sources,
         true,
         tool_call,
-        |_, _, _| {},
+        |current, total, stage| {
+            if stage == Stage::Mapping {
+                mapping.lock().unwrap().push((current, total));
+            }
+        },
     )
     .unwrap();
+
+    // The recovered session counts as a mapped batch in the progress total:
+    // the one batch this run maps is the second of two, not the first of one.
+    // Without that a resumed full rebuild of a large archive reports a handful
+    // of batches and reads as though the archive were tiny.
+    assert_eq!(*mapping.lock().unwrap(), vec![(2, 2)]);
 
     // s1 was recovered from the pending file, so only s2 was mapped. The
     // evidence block shows batch-local labels rather than real ids, so assert
@@ -217,7 +228,9 @@ fn failed_reduce_path_leaves_pending_file_for_next_run() {
     )
     .unwrap();
     // The pending snapshot existed between mapping and the successful write.
-    assert_eq!(snapshot_seen.load(Ordering::SeqCst), 1);
+    // The merge stage reports one event per model call, so this counts at
+    // least one rather than exactly one.
+    assert!(snapshot_seen.load(Ordering::SeqCst) >= 1);
     // And was cleared by the successful run.
     assert!(load_pending(&dir, ProfileScope::Work).unwrap().is_none());
 }
