@@ -6,6 +6,18 @@ use super::{chatgpt, claudeai, gemini, ollama_chat};
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Whether one source file of `provider_key` yields many sessions. A raw
+/// already stored for such a session cannot be trusted: builds before
+/// per-session slicing existed preserved the whole export for every
+/// conversation in it, so the repair path must recompute and compare rather
+/// than assume any existing raw is correct.
+pub fn is_multi_session_provider(provider_key: &str) -> bool {
+    matches!(
+        provider_key,
+        "chatgpt" | "claude_ai" | "gemini" | "ollama_chat"
+    )
+}
+
 /// Per-session raw slices for a source file that holds many sessions, keyed by
 /// session id. Returns `None` for providers whose source file already maps 1:1
 /// to a session, where preserving the whole file is the correct behaviour.
@@ -13,12 +25,15 @@ use std::path::Path;
 /// The source is parsed once, so every session sharing it is filled from a
 /// single read rather than one read per session.
 pub fn raw_slices_for_source(source: &Path, provider_key: &str) -> Option<HashMap<String, String>> {
+    if !is_multi_session_provider(provider_key) {
+        // One file per session: preserving the whole file is the correct raw.
+        return None;
+    }
     let parsed = match provider_key {
         "chatgpt" => chatgpt::read(source),
         "claude_ai" => claudeai::read(source),
         "gemini" => gemini::read(source),
         "ollama_chat" => ollama_chat::read(source),
-        // One file per session: preserving the whole file is the correct raw.
         _ => return None,
     };
 

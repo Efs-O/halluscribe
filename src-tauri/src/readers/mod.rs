@@ -9,7 +9,7 @@ mod ollama_chat;
 mod raw_slice_tests;
 mod raw_slices;
 
-pub use raw_slices::raw_slices_for_source;
+pub use raw_slices::{is_multi_session_provider, raw_slices_for_source};
 
 use crate::archive;
 use crate::preprocessor::{self, PreprocessError};

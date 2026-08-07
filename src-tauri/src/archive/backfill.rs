@@ -22,6 +22,10 @@ pub struct BackfillResult {
     pub recovered: usize,
     pub already_had: usize,
     pub source_missing: usize,
+    /// Sessions that HAD a raw, but the wrong one: archives written before
+    /// per-session slicing stored the whole export for every conversation in
+    /// it. Replaced in place with the correct slice.
+    pub repaired: usize,
     pub total: usize,
 }
 
@@ -40,14 +44,27 @@ pub fn backfill_raw(archive_dir: &Path) -> Result<BackfillResult, ArchiveError> 
     let mut slice_cache: HashMap<(String, String), SourceSlices> = HashMap::new();
 
     for entry in entries {
-        if !entry.raw_path.is_empty() && archive_dir.join(&entry.raw_path).is_file() {
+        let has_raw = !entry.raw_path.is_empty() && archive_dir.join(&entry.raw_path).is_file();
+        let multi_session = crate::readers::is_multi_session_provider(&entry.provider);
+
+        // A raw stored for a 1:1 source is correct by construction. Only
+        // multi-session sources need their existing raw re-checked, because
+        // pre-slicing builds stored the whole export under every session id.
+        if has_raw && !multi_session {
             result.already_had += 1;
             continue;
         }
 
         let source = Path::new(&entry.source_jsonl);
         if entry.source_jsonl.is_empty() || !source.is_file() {
-            result.source_missing += 1;
+            // Without the source there is nothing to compare against or
+            // rebuild from; a wrong-but-present raw is left untouched rather
+            // than discarded.
+            if has_raw {
+                result.already_had += 1;
+            } else {
+                result.source_missing += 1;
+            }
             continue;
         }
 
@@ -61,9 +78,20 @@ pub fn backfill_raw(archive_dir: &Path) -> Result<BackfillResult, ArchiveError> 
             // deleted upstream, or the export failed to parse) has nothing to
             // recover — never fall back to copying the whole file here.
             Some(by_id) => match by_id.get(&entry.id) {
-                Some(slice) => super::preserve_raw_bytes(archive_dir, &entry.id, slice.as_bytes()),
+                Some(slice) => {
+                    // Already correct: leave the stored bytes alone.
+                    if has_raw && stored_raw_matches(archive_dir, &entry, slice) {
+                        result.already_had += 1;
+                        continue;
+                    }
+                    super::preserve_raw_bytes(archive_dir, &entry.id, slice.as_bytes())
+                }
                 None => {
-                    result.source_missing += 1;
+                    if has_raw {
+                        result.already_had += 1;
+                    } else {
+                        result.source_missing += 1;
+                    }
                     continue;
                 }
             },
@@ -73,13 +101,25 @@ pub fn backfill_raw(archive_dir: &Path) -> Result<BackfillResult, ArchiveError> 
         match preserved {
             Ok(rel) => {
                 super::set_raw_path(archive_dir, &entry.id, rel)?;
-                result.recovered += 1;
+                if has_raw {
+                    result.repaired += 1;
+                } else {
+                    result.recovered += 1;
+                }
             }
             Err(_) => result.source_missing += 1,
         }
     }
 
     Ok(result)
+}
+
+/// Whether the raw already on disk for `entry` is byte-identical to `slice`.
+/// An unreadable stored raw counts as a mismatch, so the repair rewrites it.
+fn stored_raw_matches(archive_dir: &Path, entry: &super::IndexEntry, slice: &str) -> bool {
+    super::read_raw_at(archive_dir, &entry.raw_path)
+        .map(|stored| stored == slice)
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -173,6 +213,69 @@ mod tests {
         let export_len = fs::read(&export).unwrap().len();
         assert!(raw_a.len() < export_len && raw_b.len() < export_len);
         assert!(entries.iter().all(|e| !e.raw_path.is_empty()));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Chara's exact situation: sessions already carry a raw, but it is the
+    /// whole export stored under every conversation id. The repair must replace
+    /// each with its own slice instead of skipping them as "already had".
+    #[test]
+    fn repairs_existing_whole_export_raws_in_place() {
+        let dir = tmp_dir("repair_whole_export");
+        let export = dir.join("conversations.json");
+        fs::write(&export, chatgpt_export("ALPHA-MARKER", "BETA-MARKER")).unwrap();
+        let source = export.to_string_lossy().to_string();
+
+        // Reproduce the defect: both sessions get the whole export as raw.
+        let rel_a = super::super::preserve_raw(&dir, "conv-a", &export).unwrap();
+        let rel_b = super::super::preserve_raw(&dir, "conv-b", &export).unwrap();
+        assert_eq!(
+            super::super::read_raw(&dir, "conv-a").unwrap(),
+            super::super::read_raw(&dir, "conv-b").unwrap(),
+            "precondition: both raws are the same whole-export copy"
+        );
+
+        let mut entry_a = import_entry_json("conv-a", &source, "chatgpt");
+        entry_a["raw_path"] = serde_json::json!(rel_a);
+        let mut entry_b = import_entry_json("conv-b", &source, "chatgpt");
+        entry_b["raw_path"] = serde_json::json!(rel_b);
+        write_index(&dir, vec![entry_a, entry_b]);
+
+        let result = backfill_raw(&dir).unwrap();
+        assert_eq!(result.repaired, 2, "both wrong raws must be replaced");
+        assert_eq!(result.already_had, 0);
+        assert_eq!(result.recovered, 0);
+
+        let raw_a = super::super::read_raw(&dir, "conv-a").unwrap();
+        let raw_b = super::super::read_raw(&dir, "conv-b").unwrap();
+        assert!(raw_a.contains("ALPHA-MARKER") && !raw_a.contains("BETA-MARKER"));
+        assert!(raw_b.contains("BETA-MARKER") && !raw_b.contains("ALPHA-MARKER"));
+
+        // Idempotent: a second pass finds them correct and changes nothing.
+        let again = backfill_raw(&dir).unwrap();
+        assert_eq!(again.repaired, 0);
+        assert_eq!(again.already_had, 2);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A correct raw for a 1:1 coding source must never be touched, even
+    /// though its source file is still present.
+    #[test]
+    fn one_file_per_session_raws_are_left_alone() {
+        let dir = tmp_dir("leave_1to1_alone");
+        let source = dir.join("session.jsonl");
+        fs::write(&source, "{\"role\":\"user\"}\n").unwrap();
+        let rel = super::super::preserve_raw(&dir, "a", &source).unwrap();
+
+        let mut entry = index_entry_json("a", &source.to_string_lossy(), &rel);
+        entry["provider"] = serde_json::json!("claude_code");
+        write_index(&dir, vec![entry]);
+
+        let result = backfill_raw(&dir).unwrap();
+        assert_eq!(result.already_had, 1);
+        assert_eq!(result.repaired, 0);
 
         let _ = fs::remove_dir_all(&dir);
     }
