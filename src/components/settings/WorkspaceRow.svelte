@@ -1,6 +1,8 @@
 <!-- HalluScribe - one expandable guest workspace row and its confirmations. -->
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import type { WorkspaceInfo } from "../../lib/types";
+  import PathPickerField from "./PathPickerField.svelte";
 
   interface Props {
     workspace: WorkspaceInfo;
@@ -20,6 +22,7 @@
     onRequestDelete: () => void;
     onCancelDelete: () => void;
     onDelete: () => void;
+    onMove: (newPath: string) => void;
   }
 
   let {
@@ -40,7 +43,24 @@
     onRequestDelete,
     onCancelDelete,
     onDelete,
+    onMove,
   }: Props = $props();
+
+  let movePath = $state("");
+  let confirmingMove = $state(false);
+
+  // Pre-fill the move target with where this workspace would live under the
+  // archive's users folder; the user can still browse anywhere.
+  $effect(() => {
+    if (!expanded || movePath) return;
+    void (async () => {
+      try {
+        movePath = await invoke<string>("suggest_workspace_path", { name: workspace.name });
+      } catch {
+        // Suggestion only - the field still works without it.
+      }
+    })();
+  });
 </script>
 
 <div class="ws-row">
@@ -123,6 +143,49 @@
               Keep import-only
             </button>
           </div>
+        </div>
+      {/if}
+
+      <PathPickerField label="Move archive to" bind:value={movePath} mode="folder" />
+      <p class="field-note">
+        Copies this workspace's whole archive — settings, sessions and raws — to the new folder and
+        verifies it before switching over. <strong>The old folder is kept</strong>; send it to the
+        Recycle Bin yourself once you've seen the app read the new one.
+      </p>
+      {#if confirmingMove}
+        <div class="ws-warn">
+          <p class="ws-warn-text">
+            Copy "{workspace.name}" to <strong>{movePath}</strong>? Nothing is deleted.
+          </p>
+          <div class="ws-warn-actions">
+            <button
+              class="action-btn"
+              type="button"
+              onclick={() => { confirmingMove = false; onMove(movePath); }}
+              disabled={busy}
+            >
+              Copy and switch over
+            </button>
+            <button
+              class="action-btn"
+              type="button"
+              onclick={() => { confirmingMove = false; }}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      {:else}
+        <div class="ws-actions">
+          <button
+            class="action-btn"
+            type="button"
+            onclick={() => { confirmingMove = true; }}
+            disabled={busy || !movePath.trim()}
+          >
+            Move workspace
+          </button>
         </div>
       {/if}
 

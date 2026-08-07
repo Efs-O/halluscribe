@@ -2,7 +2,8 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
-  import type { WorkspaceInfo, WorkspaceListDto } from "../../lib/types";
+  import { formatBytes } from "../../lib/format";
+  import type { MoveWorkspaceResult, WorkspaceInfo, WorkspaceListDto } from "../../lib/types";
   import "./WorkspaceSwitcher.css";
   import WorkspaceCreateForm from "./WorkspaceCreateForm.svelte";
   import WorkspaceRow from "./WorkspaceRow.svelte";
@@ -97,6 +98,33 @@
     try {
       await invoke("rename_default_workspace", { name });
       setInfo("Default workspace renamed.");
+      await loadList();
+    } catch (error) {
+      setError(String(error));
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function moveWorkspace(workspace: WorkspaceInfo, newPath: string) {
+    if (busy) return;
+    busy = true;
+    setInfo("Copying archive...");
+    const wasActive = isActive(workspace.path);
+    try {
+      const result = await invoke<MoveWorkspaceResult>("move_workspace", {
+        path: workspace.path,
+        newPath,
+      });
+      setInfo(
+        `Copied and verified ${result.files} files (${formatBytes(result.bytes)}) to ` +
+          `${result.new_path}. The old folder is still at ${result.old_path} — send it to the ` +
+          `Recycle Bin once you're happy.`,
+      );
+      if (wasActive) {
+        window.location.reload();
+        return;
+      }
       await loadList();
     } catch (error) {
       setError(String(error));
@@ -244,6 +272,7 @@
           onRequestDelete={() => { confirmingDelete = workspace.path; }}
           onCancelDelete={() => { confirmingDelete = null; }}
           onDelete={() => { void deleteWorkspace(workspace); }}
+          onMove={(newPath) => { void moveWorkspace(workspace, newPath); }}
         />
       {/each}
     </div>

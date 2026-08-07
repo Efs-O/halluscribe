@@ -97,6 +97,58 @@ pub(crate) fn create_workspace(
     Ok(ws)
 }
 
+/// What a completed move copied, plus where the old archive still is.
+#[derive(serde::Serialize)]
+pub struct MoveWorkspaceResult {
+    pub files: usize,
+    pub bytes: u64,
+    /// The previous folder, left fully intact for the user to check and then
+    /// send to the Recycle Bin themselves.
+    pub old_path: String,
+    pub new_path: String,
+}
+
+/// Move a registered workspace's archive to `new_path`.
+///
+/// The archive is COPIED and verified file-for-file before the registry is
+/// repointed; the old folder is never deleted, so a failed or half-trusted move
+/// always leaves an intact archive behind. Settings, index and raws travel with
+/// the folder untouched - unlike un-register + re-register, which would seed a
+/// fresh settings.json over them.
+#[tauri::command]
+pub(crate) fn move_workspace(
+    app: tauri::AppHandle,
+    path: String,
+    new_path: String,
+) -> Result<MoveWorkspaceResult, String> {
+    let from = PathBuf::from(path.trim());
+    let to = PathBuf::from(new_path.trim());
+    if !to.is_absolute() {
+        return Err("the new folder must be an absolute path".to_string());
+    }
+
+    let default_root = default_archive_dir(&app)?;
+    if to == default_root {
+        return Err("cannot move a workspace onto the default archive root".to_string());
+    }
+
+    let mut reg = workspace::load_registry(&default_root);
+    if !reg.workspaces.iter().any(|ws| ws.path == from) {
+        return Err("no workspace registered at that path".to_string());
+    }
+
+    let stats = workspace::copy_archive(&from, &to)?;
+    workspace::set_workspace_path(&mut reg, &from, to.clone())?;
+    workspace::save_registry(&default_root, &reg)?;
+
+    Ok(MoveWorkspaceResult {
+        files: stats.files,
+        bytes: stats.bytes,
+        old_path: from.to_string_lossy().into_owned(),
+        new_path: to.to_string_lossy().into_owned(),
+    })
+}
+
 /// Switch the active workspace. `None` selects the default root. A `Some(path)`
 /// must be registered and still present on disk.
 #[tauri::command]

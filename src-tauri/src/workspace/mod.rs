@@ -5,8 +5,10 @@
 // stays anchored at the default root. See docs/internal/PERSONAL_PARITY_PLAN.md §E1.
 
 mod layout;
+mod relocate;
 
 pub use layout::suggested_workspace_path;
+pub use relocate::{copy_archive, set_workspace_path, CopyStats};
 
 use serde::{Deserialize, Serialize};
 use std::fs;

@@ -1,6 +1,18 @@
 // HalluScribe — display formatting helpers.
 /// <reference types="vitest/importMeta" />
 
+/** Byte count as a short human-readable size, e.g. `182.3 MB`. */
+export function formatBytes(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = Math.max(0, bytes);
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
 /**
  * Returns the CSS class name for the fill % colour band.
  * green < 40 %, amber 40–70 %, red > 70 % (mirrors HalluMeter ring states).
@@ -54,6 +66,14 @@ export function shortDate(iso: string): string {
 
 if (import.meta.vitest) {
   const { describe, it, expect } = import.meta.vitest;
+
+  describe("formatBytes", () => {
+    it("keeps whole bytes",        () => expect(formatBytes(512)).toBe("512 B"));
+    it("steps up at 1024",         () => expect(formatBytes(1024)).toBe("1.0 KB"));
+    it("formats megabytes",        () => expect(formatBytes(191_150_161)).toBe("182.3 MB"));
+    it("formats gigabytes",        () => expect(formatBytes(2_545_341_726)).toBe("2.4 GB"));
+    it("clamps negatives to zero", () => expect(formatBytes(-5)).toBe("0 B"));
+  });
 
   describe("fillClass", () => {
     it("green below 40", () => expect(fillClass(39)).toBe("fill-green"));

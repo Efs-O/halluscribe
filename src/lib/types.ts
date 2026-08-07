@@ -278,6 +278,14 @@ export interface WorkspaceInfo {
   import_only: boolean;
 }
 
+/** What move_workspace copied. The old folder is kept and reported back. */
+export interface MoveWorkspaceResult {
+  files: number;
+  bytes: number;
+  old_path: string;
+  new_path: string;
+}
+
 /** Snapshot returned by list_workspaces. `active` is null when the default root is active. */
 export interface WorkspaceListDto {
   default_root: string;
