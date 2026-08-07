@@ -4,6 +4,10 @@
 // workspace root while host-global state (registry, llama-server PID marker)
 // stays anchored at the default root. See docs/internal/PERSONAL_PARITY_PLAN.md §E1.
 
+mod layout;
+
+pub use layout::suggested_workspace_path;
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};

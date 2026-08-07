@@ -61,6 +61,16 @@ pub fn scan_sessions(
     sessions
 }
 
+/// Expected file names inside a configured import folder, per provider. One
+/// list, used by both the sweep and the raw backfill, so the two can never
+/// disagree about which files an import folder holds.
+const CHATGPT_CANDIDATES: &[&str] = &["conversations.json"];
+const CLAUDEAI_CANDIDATES: &[&str] = &["conversations.json"];
+const GEMINI_CANDIDATES: &[&str] = &[
+    "Takeout/My Activity/Gemini Apps/My Activity.json",
+    "My Activity.json",
+];
+
 pub fn scan_chat_imports(settings: &HalluScribeSettings, lookback_secs: u64) -> Vec<ScanTarget> {
     let mut targets = Vec::new();
     maybe_add_import(
@@ -68,26 +78,50 @@ pub fn scan_chat_imports(settings: &HalluScribeSettings, lookback_secs: u64) -> 
         &settings.chatgpt_import_path,
         lookback_secs,
         ChatProvider::ChatGPT,
-        &["conversations.json"],
+        CHATGPT_CANDIDATES,
     );
     maybe_add_import(
         &mut targets,
         &settings.claudeai_import_path,
         lookback_secs,
         ChatProvider::ClaudeAI,
-        &["conversations.json"],
+        CLAUDEAI_CANDIDATES,
     );
     maybe_add_import(
         &mut targets,
         &settings.gemini_import_path,
         lookback_secs,
         ChatProvider::Gemini,
-        &[
-            "Takeout/My Activity/Gemini Apps/My Activity.json",
-            "My Activity.json",
-        ],
+        GEMINI_CANDIDATES,
     );
     targets
+}
+
+/// Every source file currently reachable for a user-owned chat-import provider,
+/// resolved from settings alone.
+///
+/// This is the SINGLE authority for locating chat imports. The sweep reaches it
+/// through `scan_chat_imports`/`scan_ollama_chat`; the raw backfill calls it
+/// directly instead of trusting the absolute path recorded when the session was
+/// first archived, which goes stale the moment the user moves the folder or
+/// changes the setting. Providers whose files belong to a coding tool are not
+/// handled here - those are located by their recorded path and nothing else.
+/// See docs/internal/IMPORT_PATHS_PLAN.md § 2.
+pub fn chat_import_sources(settings: &HalluScribeSettings, provider_key: &str) -> Vec<PathBuf> {
+    let (configured, candidates) = match provider_key {
+        "chatgpt" => (&settings.chatgpt_import_path, CHATGPT_CANDIDATES),
+        "claude_ai" => (&settings.claudeai_import_path, CLAUDEAI_CANDIDATES),
+        "gemini" => (&settings.gemini_import_path, GEMINI_CANDIDATES),
+        // The Ollama chat DB is a single machine-local file with its own
+        // resolver (optional override, else the OS default location).
+        "ollama_chat" => return resolve_ollama_db_path(settings).into_iter().collect(),
+        _ => return Vec::new(),
+    };
+    let trimmed = configured.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    resolve_import_paths(&PathBuf::from(trimmed), candidates)
 }
 
 fn maybe_add_import(

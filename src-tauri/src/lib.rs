@@ -53,7 +53,7 @@ use commands_profile::{
 use commands_tts::{tts_list_voices, tts_speak, tts_status};
 use commands_workspace::{
     create_workspace, delete_workspace, list_workspaces, rename_default_workspace,
-    rename_workspace, set_workspace_import_only, switch_workspace,
+    rename_workspace, set_workspace_import_only, suggest_workspace_path, switch_workspace,
 };
 use std::sync::{atomic::AtomicBool, Arc};
 use tauri::image::Image;
@@ -323,6 +323,7 @@ pub fn run() {
             count_available_raw,
             backfill_raw,
             list_workspaces,
+            suggest_workspace_path,
             create_workspace,
             switch_workspace,
             rename_workspace,

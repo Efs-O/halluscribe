@@ -1,6 +1,8 @@
 // HalluScribe - archive writer and index access for processed sessions.
 
 mod backfill;
+#[cfg(test)]
+mod backfill_tests;
 mod capture;
 mod captured_manifest;
 mod index;

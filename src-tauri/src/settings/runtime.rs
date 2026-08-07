@@ -10,6 +10,10 @@ impl HalluScribeSettings {
     /// doesn't re-enter model config. Archive-level fields (import paths,
     /// profile_sources, schedule, first_run, last_sweep_date, …) start fresh at their
     /// defaults. See docs/internal/PERSONAL_PARITY_PLAN.md §E cautions.
+    ///
+    /// Import paths deliberately come back BLANK: this function cannot know the
+    /// new archive root. `settings::ensure_import_paths` derives them from that
+    /// root in `create_workspace`, so the guest gets its own `imports/…`.
     pub fn seed_workspace_settings(&self) -> HalluScribeSettings {
         HalluScribeSettings {
             backend: self.backend.clone(),
@@ -130,7 +134,10 @@ mod tests {
         assert_eq!(seeded.tts_piper_bin, "/tools/piper/piper");
         assert_eq!(seeded.tts_voice, "el_GR-joy-medium");
 
-        // Archive-level fields are reset to defaults.
+        // Archive-level fields are reset to defaults. The import paths are
+        // blank here ON PURPOSE: a guest must never inherit the host's folders.
+        // `settings::ensure_import_paths` fills them from the guest's OWN
+        // archive root in `create_workspace`, where that root is finally known.
         assert!(seeded.first_run);
         assert_eq!(seeded.chatgpt_import_path, "");
         assert_eq!(

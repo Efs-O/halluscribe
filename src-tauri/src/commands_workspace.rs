@@ -33,6 +33,21 @@ pub(crate) fn list_workspaces(app: tauri::AppHandle) -> Result<WorkspaceListDto,
     })
 }
 
+/// Suggested archive folder for a workspace named `name`:
+/// `<default_root>/users/<slug>`. The UI pre-fills the folder picker with this
+/// so every person lands in the same hierarchy; the user may still pick another
+/// absolute path, which `create_workspace` accepts unchanged.
+#[tauri::command]
+pub(crate) fn suggest_workspace_path(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<String, String> {
+    let default_root = default_archive_dir(&app)?;
+    Ok(workspace::suggested_workspace_path(&default_root, &name)
+        .to_string_lossy()
+        .into_owned())
+}
+
 /// Register (but do NOT switch to) a new workspace. Creates its folder, seeds a
 /// fresh settings.json from the host's, and appends it to the registry.
 #[tauri::command]
@@ -64,7 +79,11 @@ pub(crate) fn create_workspace(
     std::fs::create_dir_all(&ws_path).map_err(|e| e.to_string())?;
 
     let host = settings::load_settings(&default_root);
-    let seeded = host.seed_workspace_settings();
+    let mut seeded = host.seed_workspace_settings();
+    // `seed_workspace_settings` blanks the import paths so a guest can never
+    // inherit the host's folders; deriving them here - where the new archive
+    // root is finally known - gives the guest its own `imports/…` instead.
+    settings::ensure_import_paths(&ws_path, &mut seeded);
     settings::save_settings(&ws_path, &seeded).map_err(|e| e.to_string())?;
 
     let mut reg = workspace::load_registry(&default_root);

@@ -10,11 +10,13 @@ pub(crate) struct ApiKeyValidationResult {
     pub message: String,
 }
 
-/// Load current settings from disk.
+/// Load current settings from disk. Blank import paths are derived from the
+/// active archive root (and their folders created) before the UI ever sees
+/// them, so no workspace can drift back to an invented layout.
 #[tauri::command]
 pub(crate) fn get_settings(app: tauri::AppHandle) -> Result<settings::HalluScribeSettings, String> {
     let dir = archive_dir(&app)?;
-    Ok(settings::load_settings(&dir))
+    Ok(settings::load_with_import_paths(&dir))
 }
 
 /// Persist updated settings to disk.

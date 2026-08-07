@@ -1,5 +1,6 @@
 <!-- HalluScribe - new guest workspace form with safe import-only default. -->
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import PathPickerField from "./PathPickerField.svelte";
 
   interface Props {
@@ -11,12 +12,31 @@
   let name = $state("");
   let path = $state("");
   let importOnly = $state(true);
+  // Once the user types or browses their own folder, the name stops steering it.
+  let pathEdited = $state(false);
+
+  async function onNameInput(event: Event) {
+    name = (event.currentTarget as HTMLInputElement).value;
+    if (pathEdited) return;
+    try {
+      path = await invoke<string>("suggest_workspace_path", { name });
+    } catch {
+      // Suggestion only - leave the field for the user to fill in.
+    }
+  }
+
+  // Fired on blur and after Browse. An empty field is not an edit, so the name
+  // keeps steering the suggestion until the user actually puts something there.
+  function onPathChange() {
+    pathEdited = path.trim().length > 0;
+  }
 
   async function create() {
     if (await onCreate(name, path, importOnly)) {
       name = "";
       path = "";
       importOnly = true;
+      pathEdited = false;
     }
   }
 </script>
@@ -24,13 +44,20 @@
 <div class="ws-create">
   <h3 class="section-title">ADD WORKSPACE</h3>
   <p class="field-note">
-    Type or paste the absolute folder path for this person's archive, or use Browse. Host-level
-    model settings are copied from your default workspace; import paths and history start fresh.
+    The folder is suggested from the name, inside your archive's <code>users</code> folder — type or
+    paste another absolute path, or use Browse, to put it elsewhere. Host-level model settings are
+    copied from your default workspace; this workspace gets its own import folders and history.
   </p>
 
   <label class="row-label">
     <span>Name</span>
-    <input type="text" bind:value={name} placeholder="Alex" aria-label="New workspace name" />
+    <input
+      type="text"
+      value={name}
+      oninput={onNameInput}
+      placeholder="Alex"
+      aria-label="New workspace name"
+    />
   </label>
 
   <PathPickerField
@@ -38,6 +65,7 @@
     bind:value={path}
     mode="folder"
     placeholder="D:\personas\alex"
+    onchange={onPathChange}
   />
 
   <label class="row-label">
