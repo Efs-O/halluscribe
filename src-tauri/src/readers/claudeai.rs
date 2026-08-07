@@ -1,3 +1,4 @@
+// HalluScribe - Claude.ai export reader for conversations.json imports.
 use super::{
     build_session, parse_rfc3339, read_json, ChatProvider, MessageRole, ParsedMessage,
     ParsedSession, ReaderError,
@@ -62,10 +63,17 @@ struct ClaudeFile {
 
 pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
     let content = read_json(path)?;
-    let conversations: Vec<ClaudeConversation> = serde_json::from_str(&content)?;
+    // Parsed as untyped values first so each conversation's own JSON object can
+    // be captured as its raw slice before the typed view consumes it; a
+    // malformed entry still fails the whole read, exactly as before.
+    let raw_conversations: Vec<serde_json::Value> = serde_json::from_str(&content)?;
     let mut sessions = Vec::new();
 
-    for conversation in conversations {
+    for raw_conversation in raw_conversations {
+        let raw_slice = serde_json::to_string_pretty(&raw_conversation)
+            .unwrap_or_else(|_| raw_conversation.to_string());
+        let conversation: ClaudeConversation = serde_json::from_value(raw_conversation)?;
+
         let Some(id) = conversation.uuid.filter(|id| !id.is_empty()) else {
             continue;
         };
@@ -114,7 +122,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
             true,
             messages,
         ) {
-            sessions.push(session);
+            sessions.push(session.with_raw_slice(raw_slice));
         }
     }
 

@@ -1,3 +1,4 @@
+// HalluScribe - Gemini reader for Google Takeout "My Activity" exports.
 use super::{
     build_session, parse_rfc3339, read_json, stable_hash, ChatProvider, MessageRole, ParsedMessage,
     ParsedSession, ReaderError,
@@ -21,10 +22,17 @@ struct GeminiHtmlItem {
 
 pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
     let content = read_json(path)?;
-    let records: Vec<GeminiRecord> = serde_json::from_str(&content)?;
+    // Untyped first so each activity's own JSON object can be captured as its
+    // raw slice before the typed view consumes it; a malformed entry still
+    // fails the whole read, exactly as before.
+    let raw_records: Vec<serde_json::Value> = serde_json::from_str(&content)?;
     let mut sessions = Vec::new();
 
-    for record in records {
+    for raw_record in raw_records {
+        let raw_slice =
+            serde_json::to_string_pretty(&raw_record).unwrap_or_else(|_| raw_record.to_string());
+        let record: GeminiRecord = serde_json::from_value(raw_record)?;
+
         let Some(time_raw) = record.time.as_deref() else {
             continue;
         };
@@ -95,7 +103,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
             true,
             messages,
         ) {
-            sessions.push(session);
+            sessions.push(session.with_raw_slice(raw_slice));
         }
     }
 

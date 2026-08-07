@@ -145,16 +145,27 @@ pub fn run_sweep(
         // survives the source tool pruning its own logs (Phase 1). Always on
         // (L3): a copy failure is non-fatal, the summary still archives, just
         // without a raw pointer.
-        let raw_path =
-            match archive::preserve_raw(&config.archive_dir, &session.id, &session.source_path) {
-                Ok(rel) => Some(rel),
-                Err(error) => {
-                    result
-                        .errors
-                        .push(format!("{}: raw preserve: {error}", session.id));
-                    None
-                }
-            };
+        //
+        // Readers whose source file holds many sessions (chat exports, the
+        // Ollama DB) carry their own per-session slice; preserving
+        // `source_path` for those would store the whole export once per
+        // conversation. Everything else is one file per session, where the
+        // file copy is the correct raw.
+        let preserved = match &session.raw_slice {
+            Some(slice) => {
+                archive::preserve_raw_bytes(&config.archive_dir, &session.id, slice.as_bytes())
+            }
+            None => archive::preserve_raw(&config.archive_dir, &session.id, &session.source_path),
+        };
+        let raw_path = match preserved {
+            Ok(rel) => Some(rel),
+            Err(error) => {
+                result
+                    .errors
+                    .push(format!("{}: raw preserve: {error}", session.id));
+                None
+            }
+        };
 
         let meta = SessionMeta {
             id: session.id.clone(),

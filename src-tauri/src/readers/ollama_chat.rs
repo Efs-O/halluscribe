@@ -37,7 +37,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
     let mut sessions = Vec::new();
 
     for (chat_id, raw_title, created_raw) in chats {
-        let messages = load_messages(&conn, &chat_id)?;
+        let (messages, raw_rows) = load_messages(&conn, &chat_id)?;
         if messages.is_empty() {
             continue;
         }
@@ -60,6 +60,18 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
         let total_chars: usize = messages.iter().map(|m| m.text.len()).sum();
         let fill_pct = ((total_chars as f64 / 600_000.0) * 100.0).clamp(0.0, 100.0);
 
+        // This chat's own rows, not the whole database — the raw preserved for
+        // a session must be that session alone.
+        let raw_slice = serde_json::to_string_pretty(&serde_json::json!({
+            "chat": {
+                "id": &chat_id,
+                "title": &raw_title,
+                "created_at": &created_raw,
+            },
+            "messages": raw_rows,
+        }))
+        .unwrap_or_default();
+
         if let Some(session) = build_session(
             chat_id,
             title,
@@ -71,14 +83,19 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
             true,
             messages,
         ) {
-            sessions.push(session);
+            sessions.push(session.with_raw_slice(raw_slice));
         }
     }
 
     Ok(sessions)
 }
 
-fn load_messages(conn: &Connection, chat_id: &str) -> Result<Vec<ParsedMessage>, ReaderError> {
+/// Messages for one chat, plus the verbatim DB rows they were built from —
+/// the latter becomes that session's raw slice, so a raw is this chat's rows
+/// rather than a copy of the whole database.
+type ChatRows = (Vec<ParsedMessage>, Vec<serde_json::Value>);
+
+fn load_messages(conn: &Connection, chat_id: &str) -> Result<ChatRows, ReaderError> {
     let mut stmt = conn
         .prepare(
             "SELECT role, content, thinking, created_at \
@@ -97,6 +114,18 @@ fn load_messages(conn: &Connection, chat_id: &str) -> Result<Vec<ParsedMessage>,
         })
         .map_err(|e| ReaderError::Database(e.to_string()))?
         .filter_map(|r| r.ok())
+        .collect();
+
+    let raw_rows = rows
+        .iter()
+        .map(|(role, content, thinking, created_at)| {
+            serde_json::json!({
+                "role": role,
+                "content": content,
+                "thinking": thinking,
+                "created_at": created_at,
+            })
+        })
         .collect();
 
     let mut messages = Vec::new();
@@ -127,7 +156,7 @@ fn load_messages(conn: &Connection, chat_id: &str) -> Result<Vec<ParsedMessage>,
         });
     }
 
-    Ok(messages)
+    Ok((messages, raw_rows))
 }
 
 /// Ollama timestamps use a space separator: "2026-01-10 10:58:41.514797+02:00".

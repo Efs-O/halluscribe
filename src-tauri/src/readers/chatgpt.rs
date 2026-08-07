@@ -83,6 +83,11 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
         let total_chars: usize = messages.iter().map(|message| message.text.len()).sum();
         let fill_pct = ((total_chars as f64 / 1_200_000.0) * 100.0).clamp(0.0, 100.0);
 
+        // This conversation's own JSON object, not the whole export — the raw
+        // preserved for a session must be that session alone.
+        let raw_slice = serde_json::to_string_pretty(&conversation)
+            .unwrap_or_else(|_| conversation.to_string());
+
         if let Some(session) = build_session(
             id.to_string(),
             title,
@@ -94,7 +99,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
             true,
             messages,
         ) {
-            sessions.push(session);
+            sessions.push(session.with_raw_slice(raw_slice));
         }
     }
 

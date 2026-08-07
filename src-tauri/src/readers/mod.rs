@@ -5,6 +5,11 @@ mod claudeai;
 mod gemini;
 mod halluscribe_gemma_chat;
 mod ollama_chat;
+#[cfg(test)]
+mod raw_slice_tests;
+mod raw_slices;
+
+pub use raw_slices::raw_slices_for_source;
 
 use crate::archive;
 use crate::preprocessor::{self, PreprocessError};
@@ -56,6 +61,14 @@ pub struct ParsedSession {
     pub fill_pct: f64,
     pub fill_estimated: bool,
     pub transcript_hash: String,
+    /// Verbatim source for THIS session alone, set only by readers whose
+    /// `source_path` holds many sessions (chat exports, the Ollama DB). The
+    /// sweep preserves this instead of the whole file, so a 500-conversation
+    /// export yields 500 distinct raws rather than 500 copies of the export.
+    /// `None` means `source_path` already maps 1:1 to this session (every
+    /// coding tool writes one file per session), where copying the file is
+    /// correct.
+    pub raw_slice: Option<String>,
 }
 
 #[derive(Debug)]
@@ -155,6 +168,13 @@ impl MessageRole {
 }
 
 impl ParsedSession {
+    /// Attach the verbatim slice of the multi-session source that belongs to
+    /// this session alone. See [`ParsedSession::raw_slice`].
+    pub(super) fn with_raw_slice(mut self, slice: String) -> Self {
+        self.raw_slice = Some(slice);
+        self
+    }
+
     pub fn transcript(&self) -> String {
         self.messages
             .iter()
@@ -225,6 +245,9 @@ fn read_coding_target(
         fill_pct,
         fill_estimated,
         transcript_hash: stable_hash(&transcript),
+        // One JSONL file == one coding session, so the whole-file copy the
+        // sweep falls back to is already the correct raw for this session.
+        raw_slice: None,
     }])
 }
 
@@ -276,6 +299,7 @@ pub(super) fn build_session(
         fill_estimated,
         transcript_hash: stable_hash(&transcript),
         messages,
+        raw_slice: None,
     })
 }
 

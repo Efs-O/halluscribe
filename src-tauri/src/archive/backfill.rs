@@ -9,7 +9,12 @@
 // counted, never treated as an error - the backfill always completes.
 
 use super::ArchiveError;
+use std::collections::HashMap;
 use std::path::Path;
+
+/// Per-session raw slices for one source file, or `None` when that source maps
+/// 1:1 to a session and the whole file is the correct raw.
+type SourceSlices = Option<HashMap<String, String>>;
 
 /// Outcome of one backfill pass, returned to the UI.
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -30,6 +35,10 @@ pub fn backfill_raw(archive_dir: &Path) -> Result<BackfillResult, ArchiveError> 
         ..Default::default()
     };
 
+    // One parse per multi-session source file, shared by every session that
+    // came out of it: an 81-conversation export is read once, not 81 times.
+    let mut slice_cache: HashMap<(String, String), SourceSlices> = HashMap::new();
+
     for entry in entries {
         if !entry.raw_path.is_empty() && archive_dir.join(&entry.raw_path).is_file() {
             result.already_had += 1;
@@ -42,7 +51,26 @@ pub fn backfill_raw(archive_dir: &Path) -> Result<BackfillResult, ArchiveError> 
             continue;
         }
 
-        match super::preserve_raw(archive_dir, &entry.id, source) {
+        let slices = slice_cache
+            .entry((entry.source_jsonl.clone(), entry.provider.clone()))
+            .or_insert_with(|| crate::readers::raw_slices_for_source(source, &entry.provider));
+
+        let preserved = match slices {
+            // Multi-session source: only this session's own slice may be
+            // preserved. An id absent from the current export (conversation
+            // deleted upstream, or the export failed to parse) has nothing to
+            // recover — never fall back to copying the whole file here.
+            Some(by_id) => match by_id.get(&entry.id) {
+                Some(slice) => super::preserve_raw_bytes(archive_dir, &entry.id, slice.as_bytes()),
+                None => {
+                    result.source_missing += 1;
+                    continue;
+                }
+            },
+            None => super::preserve_raw(archive_dir, &entry.id, source),
+        };
+
+        match preserved {
             Ok(rel) => {
                 super::set_raw_path(archive_dir, &entry.id, rel)?;
                 result.recovered += 1;
@@ -81,6 +109,94 @@ mod tests {
             "source_jsonl": source_jsonl,
             "raw_path": raw_path,
         })
+    }
+
+    fn import_entry_json(id: &str, source: &str, provider: &str) -> serde_json::Value {
+        let mut entry = index_entry_json(id, source, "");
+        entry["provider"] = serde_json::json!(provider);
+        entry
+    }
+
+    fn chatgpt_export(marker_a: &str, marker_b: &str) -> String {
+        format!(
+            r#"[
+              {{
+                "id": "conv-a", "title": "A", "create_time": 1710000000, "current_node": "n1",
+                "mapping": {{ "n1": {{ "id": "n1", "parent": null, "children": [],
+                  "message": {{ "author": {{ "role": "user" }},
+                    "content": {{ "content_type": "text", "parts": ["{marker_a}"] }} }} }} }}
+              }},
+              {{
+                "id": "conv-b", "title": "B", "create_time": 1710009999, "current_node": "n2",
+                "mapping": {{ "n2": {{ "id": "n2", "parent": null, "children": [],
+                  "message": {{ "author": {{ "role": "user" }},
+                    "content": {{ "content_type": "text", "parts": ["{marker_b}"] }} }} }} }}
+              }}
+            ]"#
+        )
+    }
+
+    /// The headline regression: several sessions sharing one export file must
+    /// each recover their OWN conversation, not a copy of the whole export.
+    #[test]
+    fn multi_session_source_recovers_a_distinct_slice_per_session() {
+        let dir = tmp_dir("multi_session");
+        let export = dir.join("conversations.json");
+        fs::write(&export, chatgpt_export("ALPHA-MARKER", "BETA-MARKER")).unwrap();
+        let source = export.to_string_lossy().to_string();
+
+        write_index(
+            &dir,
+            vec![
+                import_entry_json("conv-a", &source, "chatgpt"),
+                import_entry_json("conv-b", &source, "chatgpt"),
+            ],
+        );
+
+        let result = backfill_raw(&dir).unwrap();
+        assert_eq!(result.recovered, 2);
+        assert_eq!(result.source_missing, 0);
+
+        let entries = super::super::read_sessions(&dir);
+        let raw_a = super::super::read_raw(&dir, "conv-a").expect("conv-a raw");
+        let raw_b = super::super::read_raw(&dir, "conv-b").expect("conv-b raw");
+
+        assert!(raw_a.contains("ALPHA-MARKER"));
+        assert!(
+            !raw_a.contains("BETA-MARKER"),
+            "conv-a recovered the whole export instead of its own conversation"
+        );
+        assert!(raw_b.contains("BETA-MARKER"));
+        assert!(!raw_b.contains("ALPHA-MARKER"));
+
+        // Both raws are strictly smaller than the export they came from.
+        let export_len = fs::read(&export).unwrap().len();
+        assert!(raw_a.len() < export_len && raw_b.len() < export_len);
+        assert!(entries.iter().all(|e| !e.raw_path.is_empty()));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A session whose conversation is no longer in the export must be counted
+    /// as unrecoverable rather than silently handed the whole export.
+    #[test]
+    fn multi_session_source_skips_ids_absent_from_the_export() {
+        let dir = tmp_dir("absent_id");
+        let export = dir.join("conversations.json");
+        fs::write(&export, chatgpt_export("ALPHA-MARKER", "BETA-MARKER")).unwrap();
+        let source = export.to_string_lossy().to_string();
+
+        write_index(
+            &dir,
+            vec![import_entry_json("conv-deleted", &source, "chatgpt")],
+        );
+
+        let result = backfill_raw(&dir).unwrap();
+        assert_eq!(result.recovered, 0);
+        assert_eq!(result.source_missing, 1);
+        assert!(super::super::read_raw(&dir, "conv-deleted").is_err());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn write_index(dir: &Path, entries: Vec<serde_json::Value>) {

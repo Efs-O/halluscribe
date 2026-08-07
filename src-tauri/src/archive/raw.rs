@@ -40,13 +40,26 @@ pub fn preserve_raw(
     session_id: &str,
     source: &Path,
 ) -> Result<String, ArchiveError> {
+    let bytes = std::fs::read(source)?;
+    preserve_raw_bytes(archive_dir, session_id, &bytes)
+}
+
+/// Same as [`preserve_raw`] but for content already in memory, used when the
+/// source file holds many sessions and only this session's slice may be
+/// preserved (chat exports, the Ollama DB). Copying the file there would store
+/// one copy of the entire export per conversation and make
+/// `read_raw_session` return every other conversation alongside the wanted one.
+pub fn preserve_raw_bytes(
+    archive_dir: &Path,
+    session_id: &str,
+    bytes: &[u8],
+) -> Result<String, ArchiveError> {
     let rel = raw_rel_path(session_id);
     let dest = archive_dir.join(&rel);
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let bytes = std::fs::read(source)?;
-    let compressed = zstd::encode_all(bytes.as_slice(), ZSTD_LEVEL)?;
+    let compressed = zstd::encode_all(bytes, ZSTD_LEVEL)?;
     let tmp_dest = dest.with_file_name(format!(
         "{}.tmp",
         dest.file_name().and_then(|n| n.to_str()).unwrap_or("raw")
