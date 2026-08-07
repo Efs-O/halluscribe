@@ -1,6 +1,7 @@
 <!-- HalluScribe - new guest workspace form with safe import-only default. -->
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { onMount } from "svelte";
   import PathPickerField from "./PathPickerField.svelte";
 
   interface Props {
@@ -14,6 +15,19 @@
   let importOnly = $state(true);
   // Once the user types or browses their own folder, the name stops steering it.
   let pathEdited = $state(false);
+  // Placeholder showing where an unnamed workspace would land, so the empty
+  // field agrees with the note above it instead of naming an unrelated drive.
+  let examplePath = $state("");
+
+  onMount(() => {
+    void (async () => {
+      try {
+        examplePath = await invoke<string>("suggest_workspace_path", { name: "Alex" });
+      } catch {
+        // Placeholder only - the field still works without it.
+      }
+    })();
+  });
 
   async function onNameInput(event: Event) {
     name = (event.currentTarget as HTMLInputElement).value;
@@ -64,7 +78,7 @@
     label="Folder path"
     bind:value={path}
     mode="folder"
-    placeholder="D:\personas\alex"
+    placeholder={examplePath}
     onchange={onPathChange}
   />
 
