@@ -19,7 +19,9 @@ const SPEC_DRAFT_N_MAX: &str = "4";
 /// before the HTTP port ever opens. There is therefore no config toggle for it:
 /// the drafter is derived from what sits next to the model, exactly as `--mmproj`
 /// is. Drafters ship as `mtp-<family>.gguf`, so one claims a model when the
-/// model's file name starts with that family.
+/// model's *pre-quantisation* file name exactly matches that family. A QAT
+/// variant is a distinct model identity, not merely a quantisation of the
+/// base model: its MTP drafter must therefore identify the QAT variant too.
 ///
 /// `Ok(None)` is the ordinary answer for a non-MTP model and means the flags are
 /// simply not requested. `Err` means two drafters both claim this model, where
@@ -49,7 +51,7 @@ pub fn find_mtp_drafter(model: &Path) -> Result<Option<PathBuf>, String> {
         else {
             continue;
         };
-        if model_stem.starts_with(family) {
+        if mtp_target_family(&model_stem) == family {
             matches.push(path);
         }
     }
@@ -65,6 +67,24 @@ pub fn find_mtp_drafter(model: &Path) -> Result<Option<PathBuf>, String> {
         ));
     }
     Ok(matches.pop())
+}
+
+/// Remove only the terminal `-Q…` quantisation suffix from a target name.
+///
+/// `gemma-…-qat-UD-Q4_K_XL` keeps its `-qat-UD` identity, so it cannot be
+/// paired with the base `mtp-gemma-….gguf` drafter. The previous prefix check
+/// made precisely that invalid pairing and llama-server exited during load.
+fn mtp_target_family(model_stem: &str) -> &str {
+    model_stem
+        .rfind("-q")
+        .filter(|&index| {
+            model_stem
+                .as_bytes()
+                .get(index + 2)
+                .is_some_and(u8::is_ascii_digit)
+        })
+        .map(|index| &model_stem[..index])
+        .unwrap_or(model_stem)
 }
 
 /// Add the MTP speculative-decoding flags when a drafter sits beside `model`.
@@ -111,12 +131,31 @@ mod tests {
     fn find_mtp_drafter_matches_the_quantised_target_model() {
         let (dir, model) = model_dir_with(
             "hit",
-            "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+            "gemma-4-26B-A4B-it-Q4_K_XL.gguf",
             &["mtp-gemma-4-26B-A4B-it.gguf", "mmproj-BF16.gguf"],
         );
         let found = find_mtp_drafter(&model).unwrap();
         assert_eq!(found, Some(dir.join("mtp-gemma-4-26B-A4B-it.gguf")));
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn find_mtp_drafter_rejects_base_drafter_for_qat_variant() {
+        let (dir, model) = model_dir_with(
+            "qat-miss",
+            "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+            &["mtp-gemma-4-26B-A4B-it.gguf"],
+        );
+        assert_eq!(find_mtp_drafter(&model).unwrap(), None);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn target_family_keeps_qat_identity_but_drops_quantisation() {
+        assert_eq!(
+            mtp_target_family("gemma-4-26b-a4b-it-qat-ud-q4_k_xl"),
+            "gemma-4-26b-a4b-it-qat-ud"
+        );
     }
 
     #[test]
@@ -133,13 +172,16 @@ mod tests {
     }
 
     #[test]
-    fn find_mtp_drafter_errors_when_two_drafters_claim_one_model() {
+    fn find_mtp_drafter_ignores_a_less_specific_base_drafter() {
         let (dir, model) = model_dir_with(
             "ambiguous",
-            "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+            "gemma-4-26B-A4B-it-Q4_K_XL.gguf",
             &["mtp-gemma-4-26B-A4B-it.gguf", "mtp-gemma-4-26B.gguf"],
         );
-        assert!(find_mtp_drafter(&model).is_err());
+        assert_eq!(
+            find_mtp_drafter(&model).unwrap(),
+            Some(dir.join("mtp-gemma-4-26B-A4B-it.gguf"))
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -147,7 +189,7 @@ mod tests {
     fn apply_mtp_flags_appends_the_speculative_decoding_trio() {
         let (dir, model) = model_dir_with(
             "flags",
-            "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+            "gemma-4-26B-A4B-it-Q4_K_XL.gguf",
             &["mtp-gemma-4-26B-A4B-it.gguf"],
         );
         let mut command = Command::new("llama-server");
