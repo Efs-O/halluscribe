@@ -192,17 +192,17 @@ mod tests {
 
     #[test]
     fn is_dispatcher_detects_the_unified_cli() {
-        assert!(is_dispatcher(Path::new(r"C:\llamacpp\llama.exe")));
+        assert!(is_dispatcher(Path::new("llama.exe")));
         assert!(is_dispatcher(Path::new("/usr/local/bin/llama")));
-        // Case-insensitive: Windows paths are not case-sensitive.
-        assert!(is_dispatcher(Path::new(r"C:\llamacpp\LLAMA.EXE")));
+        // Detection stays case-insensitive regardless of the host platform.
+        assert!(is_dispatcher(Path::new("LLAMA.EXE")));
     }
 
     #[test]
     fn is_dispatcher_rejects_single_purpose_binaries() {
-        assert!(!is_dispatcher(Path::new(r"C:\llamacpp\llama-server.exe")));
+        assert!(!is_dispatcher(Path::new("llama-server.exe")));
         assert!(!is_dispatcher(Path::new("/usr/local/bin/llama-server")));
-        assert!(!is_dispatcher(Path::new(r"C:\llamacpp\llama-cli.exe")));
+        assert!(!is_dispatcher(Path::new("llama-cli.exe")));
     }
 
     #[test]
