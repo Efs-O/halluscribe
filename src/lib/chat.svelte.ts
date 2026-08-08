@@ -2,7 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { appendAssistantToken, formatToolActivity } from "./chatTurns";
+import { appendAssistantToken, ctxUsedPercent, formatToolActivity } from "./chatTurns";
 import type {
   BriefingScope,
   ChatAttachment,
@@ -61,8 +61,7 @@ export class ChatController {
       }),
       listen<ChatUsagePayload>("chat-usage", (event) => {
         const { prompt_tokens, completion_tokens, ctx_size } = event.payload;
-        const used = prompt_tokens + completion_tokens;
-        this.ctxUsedPct = Math.min(100, Math.round((used / ctx_size) * 10) * 10);
+        this.ctxUsedPct = ctxUsedPercent(prompt_tokens + completion_tokens, ctx_size);
       }),
       listen<ToolCallPayload>("chat-tool-call", (event) => {
         const last = this.turns[this.turns.length - 1];
@@ -172,6 +171,7 @@ export class ChatController {
   resetForBriefingScope(selectedScope: boolean): void {
     this.scope = selectedScope ? { kind: "briefing-scope" } : { kind: "archive-wide" };
     this.turns = [];
+    this.ctxUsedPct = 0;
   }
 
   toggleWebSearch(): void {

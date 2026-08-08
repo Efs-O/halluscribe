@@ -58,6 +58,11 @@ pub(crate) fn run_chat_turn(
     let mut replied = false;
     let mut used_web_tools = false;
     let mut compliance_retry_used = false;
+    // The first pass of a turn is prompted with exactly the context that survives
+    // into the next turn. Later passes are inflated by tool results the frontend
+    // never keeps, so reporting those would make the context meter fall back down
+    // on the following turn.
+    let mut turn_base_prompt_tokens: Option<u32> = None;
 
     for _ in 0..20 {
         if cancel.load(Ordering::Relaxed) {
@@ -88,7 +93,13 @@ pub(crate) fn run_chat_turn(
         }
 
         match pass_result {
-            ToolCallResult::ToolCall { id, name, args } => {
+            ToolCallResult::ToolCall {
+                id,
+                name,
+                args,
+                prompt_tokens,
+            } => {
+                turn_base_prompt_tokens.get_or_insert(prompt_tokens);
                 if name == "web_search" || name == "web_fetch" {
                     used_web_tools = true;
                 }
@@ -124,6 +135,7 @@ pub(crate) fn run_chat_turn(
                 prompt_tokens,
                 completion_tokens,
             } => {
+                turn_base_prompt_tokens.get_or_insert(prompt_tokens);
                 let normalized = if text.trim().is_empty() {
                     None
                 } else {
@@ -164,7 +176,7 @@ pub(crate) fn run_chat_turn(
                     let _ = app.emit(
                         "chat-usage",
                         ChatUsagePayload {
-                            prompt_tokens,
+                            prompt_tokens: turn_base_prompt_tokens.unwrap_or(prompt_tokens),
                             completion_tokens,
                             ctx_size,
                         },

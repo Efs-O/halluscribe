@@ -169,6 +169,9 @@ export interface EmbeddingRebuildProgress {
 export interface BackfillResult {
   recovered: number;
   already_had: number;
+  /** Stored raws that were whole-export copies and got replaced with the
+   *  per-session slice. Zero on archives that never had the old raws. */
+  repaired: number;
   source_missing: number;
   total: number;
 }

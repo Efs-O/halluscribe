@@ -22,6 +22,7 @@ pub(crate) enum ToolCallResult {
         id: String,
         name: String,
         args: Value,
+        prompt_tokens: u32,
     },
     Text {
         text: String,
@@ -166,7 +167,7 @@ fn read_raw_session_tool() -> Value {
         "type": "function",
         "function": {
             "name": "read_raw_session",
-            "description": "Read one session's PRESERVED RAW TRANSCRIPT verbatim - the untouched source file, not a summary. Use it to open the full raw of a search_sessions or search_raw_transcripts hit. Also works for unsummarised captured sessions (search_raw_transcripts groups with summarised:false) that have no read_session body. Paged by BYTE offsets clamped to UTF-8 character boundaries: pass offset/max_chars (default 20000, capped at 50000). Returns JSON {session_id, text, offset, next_offset, total_bytes, truncated}; if truncated is true, call again with offset set to next_offset. For multi-chat providers the file may also contain sibling chats. Errors instead of fabricating content when no raw exists or it isn't valid UTF-8.",
+            "description": "Read one session's PRESERVED RAW TRANSCRIPT verbatim - the untouched source file, not a summary. Use it to open the full raw of a search_sessions or search_raw_transcripts hit. Also works for unsummarised captured sessions (search_raw_transcripts groups with summarised:false) that have no read_session body. Paged by BYTE offsets clamped to UTF-8 character boundaries: pass offset/max_chars (default 20000, capped at 50000). Returns JSON {session_id, text, offset, next_offset, total_bytes, truncated}; if truncated is true, call again with offset set to next_offset. For multi-chat providers the file holds only this session's own conversation, sliced out of the export - never sibling chats. Errors instead of fabricating content when no raw exists or it isn't valid UTF-8.",
             "parameters": {
                 "type": "object",
                 "properties": {

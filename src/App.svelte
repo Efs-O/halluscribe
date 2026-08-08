@@ -196,7 +196,7 @@
     {:else}
       <SettingsForm
         initialSettings={settingsSnapshot}
-        onSaved={(settings) => { settingsSnapshot = settings; }}
+        onSaved={() => { void refreshSettingsSnapshot(); }}
       />
     {/if}
   </main>

@@ -1,7 +1,7 @@
 // HalluScribe - tests for assistant chat token routing helpers.
 
 import { describe, expect, it } from "vitest";
-import { appendAssistantToken, formatToolActivity } from "./chatTurns";
+import { appendAssistantToken, ctxUsedPercent, formatToolActivity } from "./chatTurns";
 import type { Turn } from "./types";
 
 function assistantTurn(): Turn {
@@ -64,5 +64,19 @@ describe("formatToolActivity", () => {
   it("uses stable fallback text for missing and unknown arguments", () => {
     expect(formatToolActivity("web_search", {})).toBe("searching the web...");
     expect(formatToolActivity("custom_tool", {})).toBe("running tool: custom_tool");
+  });
+});
+
+describe("ctxUsedPercent", () => {
+  it("reports whole-percent resolution instead of ten-point buckets", () => {
+    expect(ctxUsedPercent(3400, 10_000)).toBe(34);
+    expect(ctxUsedPercent(3500, 10_000)).toBe(35);
+    expect(ctxUsedPercent(3549, 10_000)).toBe(35);
+  });
+
+  it("clamps to the window and treats an unknown window as empty", () => {
+    expect(ctxUsedPercent(12_000, 10_000)).toBe(100);
+    expect(ctxUsedPercent(-5, 10_000)).toBe(0);
+    expect(ctxUsedPercent(4_000, 0)).toBe(0);
   });
 });

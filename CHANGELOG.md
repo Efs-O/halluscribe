@@ -5,6 +5,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.18] - 2026-08-08
+
+### Added
+- Multi-workspace archive support, including verified workspace relocation and per-workspace import ownership
+- Per-session raw transcript slicing for multi-chat exports and repair of older whole-export raw copies
+- Multi-token-prediction drafter discovery for compatible llama.cpp models
+- Context-window usage reporting in interactive chat
+
+### Changed
+- Reuse a compatible multimodal llama-server for later text-only turns
+- Strengthen archive-tool grounding rules after retrieval failures or user challenges
+- Keep app settings synchronized after save and report repaired raw transcripts during backfill
+- Ship the standalone `halluscribe-mcp` binary beside every platform release
+
+### Fixed
+- Profile refresh progress and dropped profile evidence
+- Model and llama.cpp binary changes not taking effect until restart
+- Image attachment validation, preview, and window-size persistence
+- Raw transcript reads for imported multi-session chat exports
+
+### Security
+- Raw transcripts are stored unredacted. The local `halluscribe-mcp` server can expose their
+  verbatim contents through `search_raw_transcripts` and `read_raw_session`, including secrets
+  or tool output removed from summaries. Persona Pack exports still require an explicit raw-data
+  opt-in and never include raw transcripts implicitly.
+
 ## [0.1.0] - 2026-04-23
 
 ### Added

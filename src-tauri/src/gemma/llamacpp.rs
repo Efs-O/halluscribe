@@ -158,6 +158,7 @@ fn spawn_server(
         "--threads-batch",
         "6",
     ]);
+    crate::llama_mtp::apply_mtp_flags(&mut cmd, model).map_err(GemmaError::DrafterAmbiguous)?;
     llama_runtime::apply_output_capture(&mut cmd);
     llama_runtime::apply_no_window(&mut cmd);
     cmd.spawn()

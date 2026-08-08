@@ -18,6 +18,14 @@ export function appendAssistantToken(turn: Turn | undefined, payload: TokenPaylo
   };
 }
 
+/// Context-meter percentage for a reported usage sample. Reported at full 1%
+/// resolution so the bar drifts with the conversation instead of snapping
+/// between coarse buckets.
+export function ctxUsedPercent(usedTokens: number, ctxSize: number): number {
+  if (ctxSize <= 0) return 0;
+  return Math.min(100, Math.max(0, Math.round((usedTokens / ctxSize) * 100)));
+}
+
 export function formatToolActivity(tool: string, args: Record<string, unknown>): string {
   if (tool === "web_search") {
     const query = typeof args.query === "string" ? args.query : "";

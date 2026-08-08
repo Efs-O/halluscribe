@@ -78,6 +78,10 @@ pub enum GemmaError {
     ServerExitedEarly,
     Http(String),
     Conflict(String),
+    /// Two MTP drafters next to the model both claim it. Distinct from
+    /// `Conflict`, which the sweep treats as "defer and retry" — this one is a
+    /// model-directory problem that retrying will never clear.
+    DrafterAmbiguous(String),
     EmptyResponse,
     BadToolCall(String),
 }
@@ -91,6 +95,7 @@ impl fmt::Display for GemmaError {
             Self::ServerExitedEarly => write!(f, "llama-server exited before becoming ready"),
             Self::Http(s) => write!(f, "HTTP error: {s}"),
             Self::Conflict(s) => write!(f, "inference conflict: {s}"),
+            Self::DrafterAmbiguous(s) => write!(f, "MTP drafter ambiguous: {s}"),
             Self::EmptyResponse => write!(f, "Gemma returned an empty response"),
             Self::BadToolCall(s) => write!(f, "tool-call response invalid: {s}"),
         }

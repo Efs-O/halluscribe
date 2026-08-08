@@ -156,6 +156,7 @@ fn spawn_server(
         let mmproj = find_mmproj(model)?;
         command.args(["--mmproj", &mmproj.to_string_lossy()]);
     }
+    crate::llama_mtp::apply_mtp_flags(&mut command, model)?;
     llama_runtime::apply_output_capture(&mut command);
     llama_runtime::apply_no_window(&mut command);
     command

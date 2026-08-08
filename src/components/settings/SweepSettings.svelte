@@ -49,8 +49,9 @@
     backfillMessage = "";
     try {
       const result = await invoke<BackfillResult>("backfill_raw");
+      const repaired = result.repaired > 0 ? `, repaired ${result.repaired}` : "";
       backfillMessage =
-        `Recovered ${result.recovered} raw transcripts (already had ${result.already_had}, source gone ${result.source_missing}, of ${result.total}).`;
+        `Recovered ${result.recovered} raw transcripts (already had ${result.already_had}${repaired}, source gone ${result.source_missing}, of ${result.total}).`;
       onNotify("raw transcript recovery complete");
     } catch (error) {
       backfillMessage = `Raw transcript recovery failed: ${String(error)}`;

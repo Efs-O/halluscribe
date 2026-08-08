@@ -148,7 +148,7 @@ fn finish_stream(
     prompt_tokens: u32,
     completion_tokens: u32,
 ) -> Result<ToolCallResult, String> {
-    match tool_calls.finish()? {
+    match tool_calls.finish(prompt_tokens)? {
         Some(call) => Ok(call),
         None => Ok(ToolCallResult::Text {
             text: answer,
@@ -263,7 +263,7 @@ impl ToolCallAssembler {
         }
     }
 
-    fn finish(self) -> Result<Option<ToolCallResult>, String> {
+    fn finish(self, prompt_tokens: u32) -> Result<Option<ToolCallResult>, String> {
         let Some((index, call)) = self.calls.into_iter().next() else {
             return Ok(None);
         };
@@ -283,6 +283,7 @@ impl ToolCallAssembler {
             id: call.id.unwrap_or_else(|| format!("call_{}", index + 1)),
             name,
             args,
+            prompt_tokens,
         }))
     }
 }
@@ -395,9 +396,9 @@ mod tests {
             }]
         }));
 
-        let result = assembler.finish().unwrap();
+        let result = assembler.finish(0).unwrap();
         match result {
-            Some(ToolCallResult::ToolCall { id, name, args }) => {
+            Some(ToolCallResult::ToolCall { id, name, args, .. }) => {
                 assert_eq!(id, "call_123");
                 assert_eq!(name, "search_sessions");
                 assert_eq!(args["query"], "gemma");
@@ -418,13 +419,32 @@ mod tests {
             }]
         }));
 
-        let result = assembler.finish().unwrap();
+        let result = assembler.finish(0).unwrap();
         match result {
             Some(ToolCallResult::ToolCall { name, args, .. }) => {
                 assert_eq!(name, "web_fetch");
                 assert_eq!(args["url"], "https://example.com");
             }
             _ => panic!("expected ollama tool call"),
+        }
+    }
+
+    #[test]
+    fn tool_call_result_carries_the_prompt_size_of_its_own_pass() {
+        let mut assembler = ToolCallAssembler::default();
+        assembler.push_openai_delta(&json!({
+            "tool_calls": [{
+                "index": 0,
+                "id": "call_1",
+                "function": { "name": "search_sessions", "arguments": "{}" }
+            }]
+        }));
+
+        match assembler.finish(4096).unwrap() {
+            Some(ToolCallResult::ToolCall { prompt_tokens, .. }) => {
+                assert_eq!(prompt_tokens, 4096);
+            }
+            _ => panic!("expected a tool call carrying its pass prompt size"),
         }
     }
 

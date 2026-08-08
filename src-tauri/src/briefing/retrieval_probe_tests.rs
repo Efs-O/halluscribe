@@ -286,7 +286,7 @@ fn drive_turn(
             cancel,
         );
         match result {
-            Ok(ToolCallResult::ToolCall { id, name, args }) => {
+            Ok(ToolCallResult::ToolCall { id, name, args, .. }) => {
                 tool_calls.push(describe_call(&name, &args));
                 // The real metric: the model OPENED the target session, rather
                 // than merely receiving its id inside a list of search results.
