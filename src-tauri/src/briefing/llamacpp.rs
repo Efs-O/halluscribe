@@ -4,6 +4,7 @@ use super::server;
 use super::streaming;
 use super::tools::ToolCallResult;
 use super::{INFER_TIMEOUT, STARTUP_TIMEOUT_SECS, TEMPERATURE};
+use crate::llama_gpu::GpuConfig;
 use crate::llama_runtime::{self, ServerWaitError};
 use serde_json::Value;
 use std::fs;
@@ -16,7 +17,7 @@ pub(crate) fn stream(
     bin: &Path,
     model: &Path,
     port: u16,
-    gpu_layers: i32,
+    gpu: &GpuConfig,
     ctx_size: u32,
     max_tokens: u32,
     reasoning_enabled: bool,
@@ -34,7 +35,7 @@ pub(crate) fn stream(
     // A changed model path (or ctx/gpu/reasoning/multimodal flag) retires it, so
     // picking a different GGUF takes effect on this turn instead of whenever the
     // idle watchdog next fires.
-    let spec = server::ServerSpec::new(model, gpu_layers, ctx_size, reasoning_enabled, multimodal);
+    let spec = server::ServerSpec::new(model, gpu, ctx_size, reasoning_enabled, multimodal);
     let port = match server::reusable_port(&spec) {
         Some(port) => port,
         None => {
@@ -46,7 +47,7 @@ pub(crate) fn stream(
                 bin,
                 model,
                 free,
-                gpu_layers,
+                gpu,
                 ctx_size,
                 reasoning_enabled,
                 multimodal,
@@ -106,20 +107,16 @@ fn do_stream(
     streaming::consume_openai_stream(response, emit, cancel)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_server(
     bin: &Path,
     model: &Path,
     port: u16,
-    gpu_layers: i32,
+    gpu: &GpuConfig,
     ctx_size: u32,
     reasoning_enabled: bool,
     multimodal: bool,
 ) -> Result<Child, String> {
-    let gpu_str = match gpu_layers {
-        -1 => "all".into(),
-        0 => "auto".into(),
-        n => n.to_string(),
-    };
     let mut command = Command::new(bin);
     llama_runtime::apply_serve_subcommand(&mut command, bin);
     command
@@ -128,8 +125,6 @@ fn spawn_server(
             &model.to_string_lossy(),
             "--port",
             &port.to_string(),
-            "--n-gpu-layers",
-            &gpu_str,
             "--ctx-size",
             &ctx_size.to_string(),
             "--batch-size",
@@ -152,6 +147,7 @@ fn spawn_server(
         } else {
             vec!["--reasoning", "off"]
         });
+    gpu.apply(&mut command)?;
     if multimodal {
         let mmproj = find_mmproj(model)?;
         command.args(["--mmproj", &mmproj.to_string_lossy()]);

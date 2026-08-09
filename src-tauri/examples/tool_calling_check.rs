@@ -6,6 +6,7 @@ mod tool_calling_check_support;
 
 use app_lib::{
     gemma::{run_inference, InferenceBackend},
+    llama_gpu::GpuConfig,
     preprocessor::{preprocess_session, PreprocessError},
     readers::ChatProvider,
     scanner::{scan_sessions, ToolSource},
@@ -168,7 +169,7 @@ fn run_llamacpp_checks(transcript: &str, ctx_size: u32, max_tokens: u32) {
         bin: PathBuf::from(&bin),
         model: model_path.clone(),
         port,
-        gpu_layers,
+        gpu: GpuConfig::layers_only(gpu_layers),
     };
     match run_inference(
         &backend,

@@ -22,6 +22,7 @@
 
 use app_lib::{
     gemma::{run_inference, InferenceBackend},
+    llama_gpu::GpuConfig,
     preprocessor::{preprocess_session, PreprocessError},
     readers::ChatProvider,
     scanner::{scan_sessions, ToolSource},
@@ -148,7 +149,7 @@ fn main() {
             bin: PathBuf::from(bin_name),
             model: model_path,
             port,
-            gpu_layers,
+            gpu: GpuConfig::layers_only(gpu_layers),
         };
         match run_inference(
             &backend,

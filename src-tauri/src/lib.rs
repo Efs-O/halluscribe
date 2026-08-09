@@ -10,6 +10,7 @@ mod commands_profile;
 mod commands_tts;
 mod commands_workspace;
 mod infer_lock;
+pub mod llama_gpu;
 mod llama_mtp;
 mod llama_pids;
 mod llama_runtime;

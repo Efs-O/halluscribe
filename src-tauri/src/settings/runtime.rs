@@ -1,6 +1,7 @@
 // HalluScribe - settings runtime conversions (backend, sweep config, seeding).
 use super::{BackendKind, HalluScribeSettings};
 use crate::gemma::InferenceBackend;
+use crate::llama_gpu::GpuConfig;
 use crate::scheduler::SweepConfig;
 use std::path::PathBuf;
 
@@ -21,6 +22,12 @@ impl HalluScribeSettings {
             gemma_model_path: self.gemma_model_path.clone(),
             embedding_model_path: self.embedding_model_path.clone(),
             gpu_layers: self.gpu_layers,
+            // GPU placement describes the machine's cards, not the archive, so
+            // a guest workspace inherits it with the rest of the model config.
+            gpu_devices: self.gpu_devices.clone(),
+            gpu_split_mode: self.gpu_split_mode.clone(),
+            gpu_tensor_split: self.gpu_tensor_split.clone(),
+            gpu_main_index: self.gpu_main_index,
             llama_server_port: self.llama_server_port,
             ollama_host: self.ollama_host.clone(),
             ollama_port: self.ollama_port,
@@ -36,6 +43,18 @@ impl HalluScribeSettings {
             tts_piper_bin: self.tts_piper_bin.clone(),
             tts_voice: self.tts_voice.clone(),
             ..HalluScribeSettings::default()
+        }
+    }
+
+    /// GPU placement for every llama-server this app spawns — sweep, briefing
+    /// chat and embedding runtime alike, so one setting change moves all three.
+    pub fn gpu_config(&self) -> GpuConfig {
+        GpuConfig {
+            layers: self.gpu_layers,
+            devices: self.gpu_devices.clone(),
+            split_mode: self.gpu_split_mode.clone(),
+            tensor_split: self.gpu_tensor_split.clone(),
+            main_gpu: self.gpu_main_index,
         }
     }
 
@@ -61,7 +80,7 @@ impl HalluScribeSettings {
                     bin: PathBuf::from(&self.llama_server_bin),
                     model: PathBuf::from(&self.gemma_model_path),
                     port: self.llama_server_port,
-                    gpu_layers: self.gpu_layers,
+                    gpu: self.gpu_config(),
                 })
             }
             BackendKind::Ollama => Some(InferenceBackend::Ollama {

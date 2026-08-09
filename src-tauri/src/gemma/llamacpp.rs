@@ -2,6 +2,7 @@
 
 use super::schema::{extract_openai_tool_args, parse_openai_tool_args, save_session_summary_tool};
 use super::{GemmaError, GemmaOutput, INFER_TIMEOUT, STARTUP_TIMEOUT_SECS, TEMPERATURE};
+use crate::llama_gpu::GpuConfig;
 use crate::llama_runtime::{self, ServerWaitError};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -22,7 +23,7 @@ impl LlamaServer {
         bin: &Path,
         model: &Path,
         port: u16,
-        gpu_layers: i32,
+        gpu: &GpuConfig,
         ctx_size: u32,
     ) -> Result<Self, GemmaError> {
         let bin = resolve_bin(bin)?;
@@ -38,7 +39,7 @@ impl LlamaServer {
         // Reap any llama-server this app orphaned on a prior hard-kill so it
         // releases VRAM before we load a fresh model (OPS-1).
         crate::llama_pids::reap_orphans();
-        let mut child = spawn_server(&bin, model, port, gpu_layers, ctx_size)?;
+        let mut child = spawn_server(&bin, model, port, gpu, ctx_size)?;
         if let Err(error) = wait_for_server(port, &mut child) {
             let _ = child.kill();
             return Err(error);
@@ -103,13 +104,13 @@ pub(crate) fn run(
     bin: &Path,
     model: &Path,
     port: u16,
-    gpu_layers: i32,
+    gpu: &GpuConfig,
     ctx_size: u32,
     max_tokens: u32,
     system_prompt: &str,
     transcript: &str,
 ) -> Result<GemmaOutput, GemmaError> {
-    let server = LlamaServer::start(bin, model, port, gpu_layers, ctx_size)?;
+    let server = LlamaServer::start(bin, model, port, gpu, ctx_size)?;
     server.infer(max_tokens, system_prompt, transcript)
 }
 
@@ -122,14 +123,9 @@ fn spawn_server(
     bin: &Path,
     model: &Path,
     port: u16,
-    gpu_layers: i32,
+    gpu: &GpuConfig,
     ctx_size: u32,
 ) -> Result<Child, GemmaError> {
-    let gpu_layers_str = match gpu_layers {
-        -1 => "all".into(),
-        0 => "auto".into(),
-        n => n.to_string(),
-    };
     let mut cmd = Command::new(bin);
     llama_runtime::apply_serve_subcommand(&mut cmd, bin);
     cmd.args([
@@ -139,8 +135,6 @@ fn spawn_server(
         &port.to_string(),
         "--reasoning",
         "off",
-        "--n-gpu-layers",
-        &gpu_layers_str,
         "--ctx-size",
         &ctx_size.to_string(),
         "--batch-size",
@@ -158,6 +152,7 @@ fn spawn_server(
         "--threads-batch",
         "6",
     ]);
+    gpu.apply(&mut cmd).map_err(GemmaError::GpuConfigInvalid)?;
     crate::llama_mtp::apply_mtp_flags(&mut cmd, model).map_err(GemmaError::DrafterAmbiguous)?;
     llama_runtime::apply_output_capture(&mut cmd);
     llama_runtime::apply_no_window(&mut cmd);

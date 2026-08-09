@@ -62,7 +62,7 @@ mod tests {
             bin: PathBuf::from("/usr/bin/llama-server"),
             model: PathBuf::from("/models/gemma.gguf"),
             port: 8080,
-            gpu_layers: -1,
+            gpu: crate::llama_gpu::GpuConfig::layers_only(-1),
         };
         assert_eq!(backend_display_name(&backend), "llama.cpp");
     }

@@ -15,6 +15,7 @@ mod word_budget_ab_tests;
 pub use session::{start_sweep_session, SweepSession};
 pub use tool_session::{start_tool_session, ToolSession};
 
+use crate::llama_gpu::GpuConfig;
 use crate::readers::ChatProvider;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -34,7 +35,7 @@ pub enum InferenceBackend {
         bin: PathBuf,
         model: PathBuf,
         port: u16,
-        gpu_layers: i32,
+        gpu: GpuConfig,
     },
     Ollama {
         host: String,
@@ -82,6 +83,10 @@ pub enum GemmaError {
     /// `Conflict`, which the sweep treats as "defer and retry" — this one is a
     /// model-directory problem that retrying will never clear.
     DrafterAmbiguous(String),
+    /// GPU placement settings llama-server would reject. Like
+    /// `DrafterAmbiguous`, retrying never clears it — the user has to fix the
+    /// setting — so the sweep must not treat it as a transient conflict.
+    GpuConfigInvalid(String),
     EmptyResponse,
     BadToolCall(String),
 }
@@ -96,6 +101,7 @@ impl fmt::Display for GemmaError {
             Self::Http(s) => write!(f, "HTTP error: {s}"),
             Self::Conflict(s) => write!(f, "inference conflict: {s}"),
             Self::DrafterAmbiguous(s) => write!(f, "MTP drafter ambiguous: {s}"),
+            Self::GpuConfigInvalid(s) => write!(f, "GPU settings invalid: {s}"),
             Self::EmptyResponse => write!(f, "Gemma returned an empty response"),
             Self::BadToolCall(s) => write!(f, "tool-call response invalid: {s}"),
         }
@@ -121,12 +127,12 @@ pub fn run_inference(
             bin,
             model,
             port,
-            gpu_layers,
+            gpu,
         } => llamacpp::run(
             bin,
             model,
             *port,
-            *gpu_layers,
+            gpu,
             ctx_size,
             max_tokens,
             &system_prompt,

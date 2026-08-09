@@ -6,6 +6,7 @@
 // model until the idle watchdog or a sweep happened to kill it. Matching on the
 // spawn spec makes a model change take effect on the next turn instead.
 
+use crate::llama_gpu::GpuConfig;
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::sync::{Mutex, OnceLock};
@@ -17,7 +18,7 @@ use std::time::Duration;
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) struct ServerSpec {
     pub(crate) model: PathBuf,
-    pub(crate) gpu_layers: i32,
+    pub(crate) gpu: GpuConfig,
     pub(crate) ctx_size: u32,
     pub(crate) reasoning_enabled: bool,
     pub(crate) multimodal: bool,
@@ -26,14 +27,14 @@ pub(crate) struct ServerSpec {
 impl ServerSpec {
     pub(crate) fn new(
         model: &Path,
-        gpu_layers: i32,
+        gpu: &GpuConfig,
         ctx_size: u32,
         reasoning_enabled: bool,
         multimodal: bool,
     ) -> Self {
         Self {
             model: model.to_path_buf(),
-            gpu_layers,
+            gpu: gpu.clone(),
             ctx_size,
             reasoning_enabled,
             multimodal,
@@ -52,7 +53,7 @@ impl ServerSpec {
     /// once any image has been sent, until the idle watchdog unloads the server.
     fn can_serve(&self, wanted: &ServerSpec) -> bool {
         self.model == wanted.model
-            && self.gpu_layers == wanted.gpu_layers
+            && self.gpu == wanted.gpu
             && self.ctx_size == wanted.ctx_size
             && self.reasoning_enabled == wanted.reasoning_enabled
             && (self.multimodal || !wanted.multimodal)
@@ -139,7 +140,13 @@ mod tests {
     use super::*;
 
     fn spec(model: &str, multimodal: bool) -> ServerSpec {
-        ServerSpec::new(Path::new(model), -1, 4096, false, multimodal)
+        ServerSpec::new(
+            Path::new(model),
+            &GpuConfig::layers_only(-1),
+            4096,
+            false,
+            multimodal,
+        )
     }
 
     #[test]
@@ -179,21 +186,21 @@ mod tests {
         assert!(!warm.can_serve(&spec("/models/b.gguf", false)));
         assert!(!warm.can_serve(&ServerSpec::new(
             Path::new("/models/a.gguf"),
-            -1,
+            &GpuConfig::layers_only(-1),
             8192, // different ctx
             false,
             false
         )));
         assert!(!warm.can_serve(&ServerSpec::new(
             Path::new("/models/a.gguf"),
-            27, // different gpu layers
+            &GpuConfig::layers_only(27), // different gpu layers
             4096,
             false,
             false
         )));
         assert!(!warm.can_serve(&ServerSpec::new(
             Path::new("/models/a.gguf"),
-            -1,
+            &GpuConfig::layers_only(-1),
             4096,
             true, // different reasoning
             false
@@ -202,19 +209,44 @@ mod tests {
 
     #[test]
     fn spec_differs_on_each_spawn_flag() {
-        let base = ServerSpec::new(Path::new("/models/a.gguf"), -1, 4096, false, false);
+        let all_layers = GpuConfig::layers_only(-1);
+        let base = ServerSpec::new(Path::new("/models/a.gguf"), &all_layers, 4096, false, false);
         assert_ne!(
             base,
-            ServerSpec::new(Path::new("/models/a.gguf"), 20, 4096, false, false)
+            ServerSpec::new(
+                Path::new("/models/a.gguf"),
+                &GpuConfig::layers_only(20),
+                4096,
+                false,
+                false
+            )
         );
         assert_ne!(
             base,
-            ServerSpec::new(Path::new("/models/a.gguf"), -1, 8192, false, false)
+            ServerSpec::new(Path::new("/models/a.gguf"), &all_layers, 8192, false, false)
         );
         assert_ne!(
             base,
-            ServerSpec::new(Path::new("/models/a.gguf"), -1, 4096, true, false)
+            ServerSpec::new(Path::new("/models/a.gguf"), &all_layers, 4096, true, false)
         );
+    }
+
+    #[test]
+    fn changing_gpu_placement_retires_the_warm_server() {
+        // Pinning to a different card changes which GPU holds the weights, so a
+        // server spawned before the change cannot answer for the new setting.
+        let warm = spec("/models/a.gguf", false);
+        let pinned = ServerSpec::new(
+            Path::new("/models/a.gguf"),
+            &GpuConfig {
+                devices: "CUDA1".to_string(),
+                ..GpuConfig::layers_only(-1)
+            },
+            4096,
+            false,
+            false,
+        );
+        assert!(!warm.can_serve(&pinned));
     }
 
     #[test]

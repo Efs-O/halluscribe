@@ -46,14 +46,8 @@ pub fn start_sweep_session(
             bin,
             model,
             port,
-            gpu_layers,
-        } => Backend::LlamaCpp(LlamaServer::start(
-            bin,
-            model,
-            *port,
-            *gpu_layers,
-            ctx_size,
-        )?),
+            gpu,
+        } => Backend::LlamaCpp(LlamaServer::start(bin, model, *port, gpu, ctx_size)?),
         InferenceBackend::Ollama { host, port, model } => {
             Backend::Ollama(OllamaSession::start(host, *port, model, ctx_size)?)
         }

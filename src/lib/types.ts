@@ -39,6 +39,14 @@ export interface HalluScribeSettings {
   window_height: number | null;
   embedding_model_path: string;
   gpu_layers: number;
+  /** `--device`: comma-separated llama.cpp device names. Empty = all devices. */
+  gpu_devices: string;
+  /** `--split-mode`: none | layer | row | tensor. Empty = llama.cpp default. */
+  gpu_split_mode: string;
+  /** `--tensor-split`: per-device fractions, e.g. "0.7,0.3". Empty = even. */
+  gpu_tensor_split: string;
+  /** `--main-gpu`: device holding the KV cache. -1 = unset. */
+  gpu_main_index: number;
   llama_server_port: number;
   ollama_host: string;
   ollama_port: number;

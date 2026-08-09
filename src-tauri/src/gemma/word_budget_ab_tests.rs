@@ -98,7 +98,7 @@ fn summary_word_budget_ab() {
         bin,
         model,
         port: AB_PORT,
-        gpu_layers: cfg.gpu_layers,
+        gpu: cfg.gpu_config(),
     };
     let session =
         start_tool_session(&backend, cfg.ctx_size).expect("failed to start llama-server for A/B");

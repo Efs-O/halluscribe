@@ -88,6 +88,55 @@
           </label>
 
           <label class="row-label">
+            <span>GPU devices</span>
+            <input
+              type="text"
+              bind:value={settings.gpu_devices}
+              onblur={onBlur}
+              placeholder="empty = all devices"
+            />
+          </label>
+          <p class="field-note">
+            Comma-separated names from <code>llama-server --list-devices</code>, e.g.
+            <code>CUDA1</code>. Pin the model to one card when the machine has GPUs of
+            different speeds — llama.cpp otherwise offloads to every device it can see.
+          </p>
+
+          <label class="row-label">
+            <span>Split mode</span>
+            <select bind:value={settings.gpu_split_mode} onchange={onBlur}>
+              <option value="">Default (layer)</option>
+              <option value="none">none — single GPU</option>
+              <option value="layer">layer — split by layer</option>
+              <option value="row">row — split by row</option>
+              <option value="tensor">tensor — split by tensor</option>
+            </select>
+          </label>
+
+          <label class="row-label">
+            <span>Tensor split</span>
+            <input
+              type="text"
+              bind:value={settings.gpu_tensor_split}
+              onblur={onBlur}
+              placeholder="empty = even split"
+            />
+          </label>
+          <p class="field-note">
+            Fraction of the model per device, in device order, e.g. <code>0.8,0.2</code>.
+            Only applies when more than one device is in use.
+          </p>
+
+          <label class="row-label">
+            <span>Main GPU (-1 = unset)</span>
+            <input type="number" bind:value={settings.gpu_main_index} onblur={onBlur} min="-1" />
+          </label>
+          <p class="field-note">
+            Device index holding the KV cache and intermediate results. Leave unset unless
+            device 0 is the card you want to avoid.
+          </p>
+
+          <label class="row-label">
             <span>llama-server port</span>
             <input
               type="number"

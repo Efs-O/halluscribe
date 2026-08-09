@@ -1,5 +1,6 @@
 // HalluScribe - EmbeddingGemma bridge via a local llama.cpp embedding runtime.
 
+use crate::llama_gpu::GpuConfig;
 use crate::llama_runtime::{self, ServerWaitError};
 use crate::settings::HalluScribeSettings;
 use serde_json::Value;
@@ -231,16 +232,11 @@ fn embedding_runtime(settings: &HalluScribeSettings) -> Result<EmbeddingRuntime,
         bin,
         model,
         port: settings.llama_server_port.saturating_add(1),
-        gpu_layers: settings.gpu_layers,
+        gpu: settings.gpu_config(),
     })
 }
 
 fn spawn_server(runtime: &EmbeddingRuntime) -> Result<Child, String> {
-    let gpu_layers = match runtime.gpu_layers {
-        -1 => "all".to_string(),
-        0 => "auto".to_string(),
-        n => n.to_string(),
-    };
     let mut cmd = Command::new(&runtime.bin);
     llama_runtime::apply_serve_subcommand(&mut cmd, &runtime.bin);
     cmd.args([
@@ -248,8 +244,6 @@ fn spawn_server(runtime: &EmbeddingRuntime) -> Result<Child, String> {
         &runtime.model.to_string_lossy(),
         "--port",
         &runtime.port.to_string(),
-        "--n-gpu-layers",
-        &gpu_layers,
         "--ctx-size",
         "4096",
         "--batch-size",
@@ -268,6 +262,7 @@ fn spawn_server(runtime: &EmbeddingRuntime) -> Result<Child, String> {
         "--pooling",
         "mean",
     ]);
+    runtime.gpu.apply(&mut cmd)?;
     llama_runtime::apply_output_capture(&mut cmd);
     llama_runtime::apply_no_window(&mut cmd);
     cmd.spawn()
@@ -291,7 +286,7 @@ struct EmbeddingRuntime {
     bin: PathBuf,
     model: PathBuf,
     port: u16,
-    gpu_layers: i32,
+    gpu: GpuConfig,
 }
 
 #[cfg(test)]

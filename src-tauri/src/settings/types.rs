@@ -56,6 +56,20 @@ pub struct HalluScribeSettings {
     pub gemma_model_path: String,
     pub embedding_model_path: String,
     pub gpu_layers: i32,
+    /// `--device`: which llama.cpp devices may hold the model, comma-separated
+    /// (`CUDA0,CUDA1`) as printed by `llama-server --list-devices`. Empty = use
+    /// every visible device. Set this to pin work to one card on a mixed-GPU
+    /// machine, where enumeration order otherwise decides.
+    pub gpu_devices: String,
+    /// `--split-mode`: `none`, `layer`, `row` or `tensor`. Empty = llama.cpp's
+    /// default (`layer`).
+    pub gpu_split_mode: String,
+    /// `--tensor-split`: per-device fractions of the model in device order
+    /// (`0.7,0.3`). Empty = split evenly.
+    pub gpu_tensor_split: String,
+    /// `--main-gpu`: device holding intermediate results and the KV cache.
+    /// -1 = unset, leaving llama.cpp's default of device 0.
+    pub gpu_main_index: i32,
     pub llama_server_port: u16,
     pub ollama_host: String,
     pub ollama_port: u16,
@@ -121,6 +135,12 @@ impl Default for HalluScribeSettings {
             gemma_model_path: String::new(),
             embedding_model_path: String::new(),
             gpu_layers: -1,
+            // All four unset: a fresh install behaves exactly as llama.cpp
+            // would on its own. Placement is opt-in, never guessed.
+            gpu_devices: String::new(),
+            gpu_split_mode: String::new(),
+            gpu_tensor_split: String::new(),
+            gpu_main_index: -1,
             llama_server_port: 8080,
             ollama_host: "localhost".to_string(),
             ollama_port: 11434,

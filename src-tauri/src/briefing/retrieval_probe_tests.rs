@@ -276,7 +276,7 @@ fn drive_turn(
             bin,
             model,
             PROBE_PORT,
-            cfg.gpu_layers,
+            &cfg.gpu_config(),
             cfg.ctx_size,
             cfg.max_tokens,
             false,

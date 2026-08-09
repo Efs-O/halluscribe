@@ -143,18 +143,37 @@ mod tests {
             llama_server_bin: "/usr/bin/llama-server".to_string(),
             gemma_model_path: "/models/gemma.gguf".to_string(),
             gpu_layers: 35,
+            gpu_devices: "CUDA1".to_string(),
+            gpu_split_mode: "layer".to_string(),
+            gpu_tensor_split: "0.8,0.2".to_string(),
+            gpu_main_index: 1,
             llama_server_port: 8080,
             ..Default::default()
         };
         let backend = settings.to_inference_backend().unwrap();
-        assert!(matches!(
-            backend,
-            InferenceBackend::LlamaCpp {
-                port: 8080,
-                gpu_layers: 35,
-                ..
-            }
-        ));
+        let InferenceBackend::LlamaCpp { port, gpu, .. } = backend else {
+            panic!("expected a llama.cpp backend");
+        };
+        assert_eq!(port, 8080);
+        // Every GPU placement setting has to reach the backend, or the sweep
+        // would silently spawn on whatever card enumerated first.
+        assert_eq!(gpu.layers, 35);
+        assert_eq!(gpu.devices, "CUDA1");
+        assert_eq!(gpu.split_mode, "layer");
+        assert_eq!(gpu.tensor_split, "0.8,0.2");
+        assert_eq!(gpu.main_gpu, 1);
+    }
+
+    #[test]
+    fn gpu_placement_defaults_to_fully_unset() {
+        // A fresh install must behave exactly as bare llama.cpp does.
+        let gpu = HalluScribeSettings::default().gpu_config();
+        assert_eq!(gpu.layers, -1);
+        assert!(gpu.devices.is_empty());
+        assert!(gpu.split_mode.is_empty());
+        assert!(gpu.tensor_split.is_empty());
+        assert_eq!(gpu.main_gpu, -1);
+        assert!(gpu.validate().is_ok());
     }
 
     #[test]
