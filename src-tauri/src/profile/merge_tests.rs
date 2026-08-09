@@ -296,3 +296,50 @@ fn work_scope_never_merges_personal_context() {
     assert_eq!(sections.personal_context, "");
     assert_eq!(sections.identity, "merged");
 }
+
+#[test]
+fn identity_merge_input_carries_the_conflicting_attribute_warning() {
+    // The generic "recency wins on contradictions" rule turned three ages
+    // belonging to three different people into "46 (previously 45 and 43)".
+    // Identity gets an explicit counter-instruction; other sections must not,
+    // since for them recency genuinely is the right rule.
+    let facts = vec![
+        fact(ProfileSection::Identity, "Name is A.", "2026-06-02"),
+        fact(ProfileSection::Conventions, "Prefers tabs.", "2026-06-01"),
+    ];
+    let calls = Mutex::new(Vec::<String>::new());
+    let tool_call: &ToolCallFn = &|_sys, user, _tool, _max| {
+        calls.lock().unwrap().push(user.to_string());
+        Ok(section_response("merged [s1]"))
+    };
+    run_reduce(
+        ProfileScope::Work,
+        None,
+        &facts,
+        tool_call,
+        &mut Vec::new(),
+        &mut |_, _| {},
+    )
+    .unwrap();
+
+    let calls = calls.lock().unwrap();
+    let identity = calls
+        .iter()
+        .find(|c| c.starts_with("Section: Identity & Context"))
+        .expect("identity section merged");
+    assert!(identity.contains("DIFFERENT people"));
+    assert!(identity.contains("omit it"));
+
+    let conventions = calls
+        .iter()
+        .find(|c| c.starts_with("Section: Conventions & Preferences"))
+        .expect("conventions section merged");
+    assert!(!conventions.contains("DIFFERENT people"));
+}
+
+#[test]
+fn section_merge_prompt_keeps_recency_away_from_identity_attributes() {
+    // The recency clause must stay qualified: unqualified, it applies to names
+    // and ages too, which is what manufactured the false biography.
+    assert!(SECTION_MERGE_SYSTEM_PROMPT.contains("contradictions about tools, projects"));
+}

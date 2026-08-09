@@ -13,9 +13,11 @@ fn base_context() -> ChatPromptContext {
 }
 
 #[test]
-fn archive_only_prompt_excludes_web_evidence() {
+fn archive_only_prompt_allows_general_conversation_without_web_evidence() {
     let prompt = build_chat_system_prompt(&base_context());
-    assert!(prompt.contains("only allowed evidence source is the user's session archive"));
+    assert!(prompt
+        .contains("answer general questions and have normal conversation using general knowledge"));
+    assert!(prompt.contains("natural, helpful conversation about general topics"));
     assert!(!prompt.contains("two evidence sources"));
 }
 

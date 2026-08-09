@@ -388,3 +388,41 @@ fn validate_evidence_ambiguous_prefix_is_dropped_not_repaired() {
     assert!(facts.is_empty());
     assert!(warnings.iter().any(|w| w.contains("abcd1234")));
 }
+
+#[test]
+fn both_map_prompts_bind_facts_to_the_user_not_to_content_subjects() {
+    // Regression guard for the 2026-08-08 fix: a Personal run over an imported
+    // chat archive filed a name and three different ages — all people who only
+    // appear IN the content — as the user's own identity. The evidence block
+    // carries no speaker attribution, so the prompt has to supply the rule.
+    for scope in [ProfileScope::Work, ProfileScope::Personal] {
+        let prompt = map_system_prompt(scope);
+        for marker in [
+            "OTHER people",
+            "imported chat logs",
+            "fictional characters",
+            "whose detail it is",
+        ] {
+            assert!(prompt.contains(marker), "scope {scope:?} missing {marker}");
+        }
+    }
+}
+
+#[test]
+fn both_map_prompts_still_admit_first_person_self_statements() {
+    // The attribution rule must stay two-sided: it exists to stop third-party
+    // details being adopted, NOT to suppress identity facts. A session where
+    // the user says who they are is exactly what the profile is for, so the
+    // positive example must survive alongside the prohibitions.
+    for scope in [ProfileScope::Work, ProfileScope::Personal] {
+        let prompt = map_system_prompt(scope);
+        assert!(
+            prompt.contains("I am Chara, I am 46"),
+            "scope {scope:?} dropped the first-person example"
+        );
+        assert!(
+            prompt.contains("exactly what belongs here"),
+            "scope {scope:?} dropped the positive framing"
+        );
+    }
+}

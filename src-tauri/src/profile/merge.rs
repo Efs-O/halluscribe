@@ -38,14 +38,37 @@ const SECTION_MERGE_SYSTEM_PROMPT: &str = "You maintain one section of a durable
 the user distilled from their AI session archive. You are given the section name, the \
 previous content of that section (if any), and new candidate facts, newest first. Call \
 save_profile_section with the merged prose for THIS section only. Rules: recency wins on \
-contradictions, but note the change (e.g. \"previously used X, switched to Y around \
-2026-03\"). Every non-obvious claim must carry session-id references like [abc-123] drawn \
+contradictions about tools, projects, conventions and preferences, but note the change (e.g. \
+\"previously used X, switched to Y around 2026-03\"). Every non-obvious claim must carry \
+session-id references like [abc-123] drawn \
 ONLY from the evidence ids given to you - never invent an id. Keep the section concise (a \
 CV, not a diary).";
 
 /// Appended to the user content for the Projects section only.
 const PROJECTS_SECTION_NOTE: &str = "Note: projects unseen for more than 12 months belong in \
 the Timeline section, not here — omit them.";
+
+/// Appended to the user content for the Identity section only. The generic
+/// recency rule above is right for tools and preferences and actively harmful
+/// here: conflicting core attributes are the misattribution alarm (see
+/// `distill::MAP_ATTRIBUTION_RULES`), and resolving them by recency launders
+/// that alarm into a confident biography — observed live as "46-year-old
+/// female (previously identified as 45 and 43)", three ages belonging to three
+/// different people.
+const IDENTITY_SECTION_NOTE: &str = "Note: conflicting core attributes (name, age, gender, \
+location, family) usually mean facts about DIFFERENT people were mixed in, not that the user \
+changed — do not resolve them by recency and do not write them up as a history. State such an \
+attribute only where the candidate facts agree; where they conflict, omit it.";
+
+/// The extra clause appended to a section's merge input, if that section has
+/// one.
+fn section_note(section: ProfileSection) -> Option<&'static str> {
+    match section {
+        ProfileSection::Projects => Some(PROJECTS_SECTION_NOTE),
+        ProfileSection::Identity => Some(IDENTITY_SECTION_NOTE),
+        _ => None,
+    }
+}
 
 const CONSOLIDATE_SYSTEM_PROMPT: &str = "You are compressing a long list of candidate facts for \
 one profile section into a shorter set of bullet lines, preserving every session-id reference \
@@ -150,9 +173,9 @@ fn merge_section(
         heading = section.heading(),
         prev = if previous.is_empty() { "(none)" } else { previous },
     );
-    if section == ProfileSection::Projects {
+    if let Some(note) = section_note(section) {
         user_content.push_str("\n\n");
-        user_content.push_str(PROJECTS_SECTION_NOTE);
+        user_content.push_str(note);
     }
     let result = tool_call(
         SECTION_MERGE_SYSTEM_PROMPT,

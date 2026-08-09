@@ -219,7 +219,15 @@ pub fn run_refresh(
     // soon as it has planned its calls, but a reduce that makes no calls at all
     // (no section had new facts) would otherwise never announce the stage.
     on_progress(0, 1, Stage::Merging);
-    let previous_md = writer::read_profile_md(archive_dir, scope);
+    // `full` means "re-derive from the sessions", so it must not inherit the
+    // old prose: `run_reduce` keeps a section verbatim (no model call at all)
+    // when that section gets no new facts, so a stale or misattributed claim
+    // would otherwise survive a full rebuild completely untouched.
+    let previous_md = if full {
+        None
+    } else {
+        writer::read_profile_md(archive_dir, scope)
+    };
     // A failed merge must not discard the outcome (and with it the collected
     // map-batch errors): record it, skip the write, and keep the watermark so
     // the next run retries — the UI then shows every error, not a bare abort.

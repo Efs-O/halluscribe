@@ -326,3 +326,136 @@ fn empty_selection_returns_early_without_touching_profile() {
         meta_before.generated_at
     );
 }
+
+/// Capture every per-section merge input a run produces.
+fn recording_tool_call(
+    seen: &std::sync::Mutex<Vec<String>>,
+) -> impl Fn(&str, &str, &serde_json::Value, u32) -> Result<serde_json::Value, ProfileError>
+       + Send
+       + Sync
+       + '_ {
+    move |_sys, user, tool, _max| {
+        if tool["function"]["name"].as_str() == Some("save_profile_section") {
+            seen.lock().unwrap().push(user.to_string());
+        }
+        Ok(canned_response(tool))
+    }
+}
+
+#[test]
+fn full_refresh_does_not_feed_the_previous_profile_back_into_the_merge() {
+    // Regression guard for the 2026-08-08 fix: `full` used to clear only the
+    // watermark, while the merge still received the old profile.md as
+    // "Previous content". Since run_reduce keeps a section verbatim when that
+    // section gets no new facts, a misattributed claim survived a full rebuild
+    // completely untouched — the rebuild could never repair it.
+    let dir = tmp_dir("full_ignores_previous");
+    fs::write(dir.join("s1.md"), "body one").unwrap();
+    write_index(
+        &dir,
+        &[session_json(
+            "s1",
+            "claude_code",
+            "2026-06-10T00:00:00+00:00",
+        )],
+    );
+    let sources = vec!["claude_code".to_string()];
+    let seen = std::sync::Mutex::new(Vec::<String>::new());
+    let recorder = recording_tool_call(&seen);
+    let tool_call: &ToolCallFn = &recorder;
+
+    // First full run establishes a profile on disk.
+    run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        true,
+        tool_call,
+        |_, _, _| {},
+    )
+    .unwrap();
+    assert!(read_profile_md(&dir, ProfileScope::Work)
+        .unwrap()
+        .contains("proj [s1]"));
+    seen.lock().unwrap().clear();
+
+    // A second FULL run must re-derive from the sessions alone.
+    run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        true,
+        tool_call,
+        |_, _, _| {},
+    )
+    .unwrap();
+    let inputs = seen.lock().unwrap();
+    assert!(!inputs.is_empty(), "expected at least one merge call");
+    for input in inputs.iter() {
+        assert!(
+            input.contains("Previous content:\n(none)"),
+            "full rebuild leaked the previous profile into the merge: {input}"
+        );
+    }
+}
+
+#[test]
+fn incremental_refresh_still_merges_against_the_previous_profile() {
+    // The counterpart guard: only `full` discards the previous prose. An
+    // incremental run must keep building on it, or every refresh would drop
+    // everything distilled before its watermark.
+    let dir = tmp_dir("incremental_keeps_previous");
+    fs::write(dir.join("s1.md"), "body one").unwrap();
+    fs::write(dir.join("s2.md"), "body two").unwrap();
+    write_index(
+        &dir,
+        &[session_json(
+            "s1",
+            "claude_code",
+            "2026-06-10T00:00:00+00:00",
+        )],
+    );
+    let sources = vec!["claude_code".to_string()];
+    let seen = std::sync::Mutex::new(Vec::<String>::new());
+    let recorder = recording_tool_call(&seen);
+    let tool_call: &ToolCallFn = &recorder;
+
+    run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        true,
+        tool_call,
+        |_, _, _| {},
+    )
+    .unwrap();
+    seen.lock().unwrap().clear();
+
+    // A newer session gives the incremental run something to map.
+    write_index(
+        &dir,
+        &[
+            session_json("s1", "claude_code", "2026-06-10T00:00:00+00:00"),
+            session_json("s2", "claude_code", "2026-06-20T00:00:00+00:00"),
+        ],
+    );
+    run_refresh(
+        &dir,
+        ProfileScope::Work,
+        &sources,
+        false,
+        tool_call,
+        |_, _, _| {},
+    )
+    .unwrap();
+
+    let inputs = seen.lock().unwrap();
+    let projects = inputs
+        .iter()
+        .find(|c| c.starts_with("Section: Active Projects"))
+        .expect("projects section merged");
+    assert!(
+        projects.contains("proj [s1]"),
+        "incremental run lost the previous profile: {projects}"
+    );
+}

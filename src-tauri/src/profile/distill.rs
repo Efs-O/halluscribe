@@ -32,6 +32,23 @@ and never one that is not in this batch. Do not invent facts not supported by th
 batch contains no qualifying facts, still call save_profile_facts with an empty facts array - \
 never reply in plain text.";
 
+/// Attribution contract, shared by both scopes. Added 2026-08-08 after a
+/// Personal run over an imported chat archive filed a name and three different
+/// ages — all belonging to people who appear *in* the content — as the user's
+/// own identity. The evidence block (`evidence.rs`) is flattened summary prose
+/// with no speaker attribution, so without this clause the model cannot tell
+/// "the user said they are 46" from "this session processed a document about a
+/// 46-year-old". Deliberately two-sided: a genuine first-person statement must
+/// still be extracted, so the rule names the positive case before the negative.
+const MAP_ATTRIBUTION_RULES: &str = " The evidence summarises sessions the user ran; it is not \
+written by the user, and it often quotes, drafts, or processes material about OTHER people. \
+Attribute a fact to the user when the evidence shows the user stating it about themselves (e.g. \
+\"I am Chara, I am 46\") or plainly describing their own situation - such self-statements are \
+exactly what belongs here. But a name, age, gender, location, job, or family detail that appears \
+in material the user was working ON - imported chat logs, documents, drafts, letters, CVs, client \
+or customer records, sample data, fictional characters, or a third party being discussed - is not \
+a fact about the user. If the evidence does not make clear whose detail it is, leave it out.";
+
 /// Work scope: the original coding-oriented framing and section list.
 const WORK_MAP_INTRO: &str = "You are distilling a batch of archived AI coding session \
 summaries into durable facts about the user (their identity/context, active projects, \
@@ -64,9 +81,13 @@ stated outright.";
 /// section that `parse_facts` will then reject.
 fn map_system_prompt(scope: ProfileScope) -> String {
     match scope {
-        ProfileScope::Work => format!("{WORK_MAP_INTRO}{MAP_PROMPT_RULES}{WORK_MAP_EXTRA}"),
+        ProfileScope::Work => {
+            format!("{WORK_MAP_INTRO}{MAP_ATTRIBUTION_RULES}{MAP_PROMPT_RULES}{WORK_MAP_EXTRA}")
+        }
         ProfileScope::Personal => {
-            format!("{PERSONAL_MAP_INTRO}{MAP_PROMPT_RULES}{PERSONAL_MAP_EXTRA}")
+            format!(
+                "{PERSONAL_MAP_INTRO}{MAP_ATTRIBUTION_RULES}{MAP_PROMPT_RULES}{PERSONAL_MAP_EXTRA}"
+            )
         }
     }
 }
