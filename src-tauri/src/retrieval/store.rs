@@ -57,16 +57,12 @@ pub fn has_current_embedding(
     session_id: &str,
     model_name: &str,
     summary_hash: &str,
-) -> bool {
-    load_embeddings(archive_dir)
-        .ok()
-        .unwrap_or_default()
-        .into_iter()
-        .any(|record| {
-            record.session_id == session_id
-                && record.model_name == model_name
-                && record.summary_hash == summary_hash
-        })
+) -> Result<bool, String> {
+    Ok(load_embeddings(archive_dir)?.into_iter().any(|record| {
+        record.session_id == session_id
+            && record.model_name == model_name
+            && record.summary_hash == summary_hash
+    }))
 }
 
 pub fn build_embedding_input(archive_dir: &Path, entry: &IndexEntry) -> Result<String, String> {
@@ -110,7 +106,8 @@ fn save_embeddings(archive_dir: &Path, records: Vec<EmbeddingRecord>) -> Result<
     let json = serde_json::to_string_pretty(&store)
         .map_err(|error| format!("failed to serialize embeddings store: {error}"))?;
     let path = embeddings_path(archive_dir);
-    fs::write(&path, json).map_err(|error| format!("failed to write {}: {error}", path.display()))
+    crate::atomic_file::write_atomic(&path, json)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 fn embeddings_path(archive_dir: &Path) -> PathBuf {
@@ -195,8 +192,8 @@ mod tests {
         )
         .unwrap();
 
-        assert!(has_current_embedding(&dir, "a", "m1", "1"));
-        assert!(!has_current_embedding(&dir, "a", "m2", "1"));
+        assert!(has_current_embedding(&dir, "a", "m1", "1").unwrap());
+        assert!(!has_current_embedding(&dir, "a", "m2", "1").unwrap());
     }
 
     #[test]

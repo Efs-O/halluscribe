@@ -16,7 +16,7 @@ pub(crate) struct ApiKeyValidationResult {
 #[tauri::command]
 pub(crate) fn get_settings(app: tauri::AppHandle) -> Result<settings::HalluScribeSettings, String> {
     let dir = archive_dir(&app)?;
-    Ok(settings::load_with_import_paths(&dir))
+    settings::load_with_import_paths(&dir).map_err(|error| error.to_string())
 }
 
 /// Persist updated settings to disk.
@@ -33,7 +33,9 @@ pub(crate) fn save_settings(
     // `last_sweep_date` is managed by the scheduler, not the UI. Preserve the
     // on-disk value so saving settings never resets the catch-up state (audit
     // A-2) - otherwise a save would let the nightly sweep re-run the same day.
-    new_settings.last_sweep_date = settings::load_settings(&dir).last_sweep_date;
+    new_settings.last_sweep_date = settings::load_settings(&dir)
+        .map_err(|error| error.to_string())?
+        .last_sweep_date;
     settings::save_settings(&dir, &new_settings).map_err(|error| error.to_string())
 }
 

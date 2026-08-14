@@ -119,6 +119,24 @@ fn write_session_is_idempotent() {
 }
 
 #[test]
+fn write_session_refuses_to_overwrite_a_corrupt_index() {
+    let dir = tmp_dir("corrupt_index");
+    fs::create_dir_all(&dir).unwrap();
+    let index_path = dir.join("index.json");
+    fs::write(&index_path, b"{ not valid json").unwrap();
+
+    let source = Path::new("/fake/corrupt-index.jsonl");
+    let error = match write_session(&dir, &sample_meta(source), &sample_output(), fixed_now()) {
+        Ok(_) => panic!("a corrupt existing index must not be replaced"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("JSON error"));
+    assert_eq!(fs::read(&index_path).unwrap(), b"{ not valid json");
+    assert!(!dir.join("sessions").exists());
+}
+
+#[test]
 fn is_archived_true_after_write() {
     let dir = tmp_dir("is_archived");
     let src = Path::new("/fake/my-session-id.jsonl");

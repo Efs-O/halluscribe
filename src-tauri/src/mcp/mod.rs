@@ -53,6 +53,11 @@ pub fn archive_identity(archive_dir: &Path) -> String {
     let registry = default_root
         .as_deref()
         .map(crate::workspace::load_registry)
+        .transpose()
+        .unwrap_or_else(|error| {
+            eprintln!("[mcp] failed to load workspace registry: {error}");
+            None
+        })
         .unwrap_or_default();
     identity_label(archive_dir, default_root.as_deref(), &registry)
 }

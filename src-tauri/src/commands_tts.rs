@@ -26,7 +26,7 @@ pub(crate) fn tts_list_voices(app: tauri::AppHandle) -> Vec<VoiceInfo> {
 #[tauri::command]
 pub(crate) fn tts_status(app: tauri::AppHandle) -> Result<TtsStatus, String> {
     let dir = archive_dir(&app)?;
-    let loaded_settings = settings::load_settings(&dir);
+    let loaded_settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     let piper_installed = tts::find_piper_bin(&app, &loaded_settings.tts_piper_bin).is_some();
     let voice_count = tts::scan_voices(&app).len();
     Ok(TtsStatus {
@@ -50,7 +50,7 @@ pub(crate) async fn tts_speak(
 ) -> Result<tauri::ipc::Response, String> {
     let wav = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<u8>, String> {
         let dir = archive_dir(&app)?;
-        let loaded_settings = settings::load_settings(&dir);
+        let loaded_settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
         tts::synth_wav(&app, &loaded_settings, &text)
     })
     .await

@@ -83,7 +83,8 @@ pub(crate) fn run_profile_refresh(
 ) -> Result<(), String> {
     let profile_scope = parse_scope(&scope)?;
     let dir = archive_dir(&app)?;
-    let settings = settings::load_settings(&dir);
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
+    let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     let backend = settings
         .to_inference_backend()
         .ok_or_else(|| "backend not configured (check Settings)".to_string())?;
@@ -262,7 +263,8 @@ pub(crate) fn export_persona_pack(
 ) -> Result<PackResult, String> {
     let profile_scope = parse_scope(&scope)?;
     let dir = archive_dir(&app)?;
-    let settings = settings::load_settings(&dir);
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
+    let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     let sources = profile::sources_for_scope(&settings.profile_sources, profile_scope);
     let profile_md = profile::read_profile_md(&dir, profile_scope)
         .ok_or_else(|| pack::PackError::NoProfile.to_string())?;
@@ -312,7 +314,8 @@ pub(crate) fn export_persona_pack(
 pub(crate) fn count_available_raw(app: tauri::AppHandle, scope: String) -> Result<usize, String> {
     let profile_scope = parse_scope(&scope)?;
     let dir = archive_dir(&app)?;
-    let settings = settings::load_settings(&dir);
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
+    let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     let sources = profile::sources_for_scope(&settings.profile_sources, profile_scope);
     Ok(pack::count_available_raw(&dir, &sources))
 }

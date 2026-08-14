@@ -1,3 +1,5 @@
+// HalluScribe - shared Tauri-side application support helpers.
+
 use crate::{archive, scanner, scheduler, settings};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
@@ -50,24 +52,30 @@ pub(crate) fn default_archive_dir(app: &tauri::AppHandle) -> Result<PathBuf, Str
 /// this one chokepoint.
 pub(crate) fn archive_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let default_root = default_archive_dir(app)?;
-    Ok(crate::workspace::resolve_active_dir(&default_root))
+    crate::workspace::resolve_active_dir(&default_root)
 }
 
 /// Build a SweepConfig from saved settings. Returns None if the backend config
 /// is incomplete (e.g. empty llama-server bin path).
-pub(crate) fn sweep_config(app: &tauri::AppHandle, force: bool) -> Option<scheduler::SweepConfig> {
-    let dir = archive_dir(app).ok()?;
-    let default_root = default_archive_dir(app).ok()?;
-    let import_only = crate::workspace::is_active_import_only(&default_root, &dir);
-    let settings = settings::load_settings(&dir);
-    let mut config = settings.to_sweep_config(dir, force)?;
+pub(crate) fn sweep_config(
+    app: &tauri::AppHandle,
+    force: bool,
+) -> Result<Option<scheduler::SweepConfig>, String> {
+    let dir = archive_dir(app)?;
+    let default_root = default_archive_dir(app)?;
+    let import_only = crate::workspace::is_active_import_only(&default_root, &dir)?;
+    let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
+    let Some(mut config) = settings.to_sweep_config(dir, force) else {
+        return Ok(None);
+    };
     config.import_only = import_only;
-    Some(config)
+    Ok(Some(config))
 }
 
 /// Return aggregate stats across all archived sessions.
 pub(crate) fn collect_session_stats(app: &tauri::AppHandle) -> Result<SessionStats, String> {
     let dir = archive_dir(app)?;
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
     let sessions = archive::read_sessions(&dir);
 
     let mut by_tool: HashMap<String, u32> = HashMap::new();
@@ -99,8 +107,8 @@ pub(crate) fn collect_session_stats(app: &tauri::AppHandle) -> Result<SessionSta
 pub(crate) fn collect_raw_session_total(app: &tauri::AppHandle) -> Result<u32, String> {
     let dir = archive_dir(app)?;
     let default_root = default_archive_dir(app)?;
-    let import_only = crate::workspace::is_active_import_only(&default_root, &dir);
-    let settings = settings::load_settings(&dir);
+    let import_only = crate::workspace::is_active_import_only(&default_root, &dir)?;
+    let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     Ok(
         scanner::scan_sessions(&dir, &settings, u64::MAX, 0.0, import_only)
             .into_iter()
@@ -112,29 +120,19 @@ pub(crate) fn collect_raw_session_total(app: &tauri::AppHandle) -> Result<u32, S
     )
 }
 
-/// After a successful sweep, flip `first_run` to false so subsequent sweeps
-/// use the normal lookback_hours window instead of scanning all history.
-pub(crate) fn clear_first_run(app: &tauri::AppHandle) {
-    if let Ok(dir) = archive_dir(app) {
-        let mut settings = settings::load_settings(&dir);
-        if settings.first_run {
-            settings.first_run = false;
-            let _ = settings::save_settings(&dir, &settings);
-        }
+/// Persist both sweep-success markers in one write. This avoids recording a
+/// day as complete while leaving `first_run` behind after a partial failure.
+pub(crate) fn mark_sweep_success(app: &tauri::AppHandle) -> Result<(), String> {
+    let dir = archive_dir(app)?;
+    let mut settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    let changed = settings.first_run || settings.last_sweep_date != today;
+    if changed {
+        settings.first_run = false;
+        settings.last_sweep_date = today;
+        settings::save_settings(&dir, &settings).map_err(|error| error.to_string())?;
     }
-}
-
-/// Record today's local date as the last successful sweep date, so the
-/// catch-up scheduler runs the nightly sweep at most once per day (audit A-2).
-pub(crate) fn record_sweep_date(app: &tauri::AppHandle) {
-    if let Ok(dir) = archive_dir(app) {
-        let mut settings = settings::load_settings(&dir);
-        let today = Local::now().format("%Y-%m-%d").to_string();
-        if settings.last_sweep_date != today {
-            settings.last_sweep_date = today;
-            let _ = settings::save_settings(&dir, &settings);
-        }
-    }
+    Ok(())
 }
 
 fn top_n(counts: HashMap<String, u32>, n: usize) -> Vec<String> {

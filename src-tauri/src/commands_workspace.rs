@@ -24,7 +24,7 @@ pub struct WorkspaceListDto {
 #[tauri::command]
 pub(crate) fn list_workspaces(app: tauri::AppHandle) -> Result<WorkspaceListDto, String> {
     let default_root = default_archive_dir(&app)?;
-    let reg = workspace::load_registry(&default_root);
+    let reg = workspace::load_registry(&default_root)?;
     Ok(WorkspaceListDto {
         default_root: default_root.to_string_lossy().into_owned(),
         default_name: reg.default_name,
@@ -78,7 +78,7 @@ pub(crate) fn create_workspace(
 
     std::fs::create_dir_all(&ws_path).map_err(|e| e.to_string())?;
 
-    let host = settings::load_settings(&default_root);
+    let host = settings::load_settings(&default_root).map_err(|error| error.to_string())?;
     let mut seeded = host.seed_workspace_settings();
     // `seed_workspace_settings` blanks the import paths so a guest can never
     // inherit the host's folders; deriving them here - where the new archive
@@ -86,7 +86,7 @@ pub(crate) fn create_workspace(
     settings::ensure_import_paths(&ws_path, &mut seeded);
     settings::save_settings(&ws_path, &seeded).map_err(|e| e.to_string())?;
 
-    let mut reg = workspace::load_registry(&default_root);
+    let mut reg = workspace::load_registry(&default_root)?;
     let ws = Workspace {
         name,
         path: ws_path,
@@ -132,7 +132,7 @@ pub(crate) fn move_workspace(
         return Err("cannot move a workspace onto the default archive root".to_string());
     }
 
-    let mut reg = workspace::load_registry(&default_root);
+    let mut reg = workspace::load_registry(&default_root)?;
     if !reg.workspaces.iter().any(|ws| ws.path == from) {
         return Err("no workspace registered at that path".to_string());
     }
@@ -154,7 +154,7 @@ pub(crate) fn move_workspace(
 #[tauri::command]
 pub(crate) fn switch_workspace(app: tauri::AppHandle, path: Option<String>) -> Result<(), String> {
     let default_root = default_archive_dir(&app)?;
-    let mut reg = workspace::load_registry(&default_root);
+    let mut reg = workspace::load_registry(&default_root)?;
     let target = path.map(|p| PathBuf::from(p.trim()));
     if let Some(ref p) = target {
         if !p.exists() {
@@ -178,7 +178,7 @@ pub(crate) fn rename_workspace(
         return Err("workspace name is required".to_string());
     }
     let default_root = default_archive_dir(&app)?;
-    let mut reg = workspace::load_registry(&default_root);
+    let mut reg = workspace::load_registry(&default_root)?;
     workspace::rename(&mut reg, Path::new(path.trim()), name)?;
     workspace::save_registry(&default_root, &reg)?;
     Ok(())
@@ -193,7 +193,7 @@ pub(crate) fn rename_default_workspace(app: tauri::AppHandle, name: String) -> R
         return Err("workspace name is required".to_string());
     }
     let default_root = default_archive_dir(&app)?;
-    let mut reg = workspace::load_registry(&default_root);
+    let mut reg = workspace::load_registry(&default_root)?;
     workspace::set_default_name(&mut reg, name);
     workspace::save_registry(&default_root, &reg)?;
     Ok(())
@@ -205,7 +205,7 @@ pub(crate) fn rename_default_workspace(app: tauri::AppHandle, name: String) -> R
 #[tauri::command]
 pub(crate) fn delete_workspace(app: tauri::AppHandle, path: String) -> Result<(), String> {
     let default_root = default_archive_dir(&app)?;
-    let mut reg = workspace::load_registry(&default_root);
+    let mut reg = workspace::load_registry(&default_root)?;
     workspace::remove_workspace(&mut reg, Path::new(path.trim()))?;
     workspace::save_registry(&default_root, &reg)?;
     Ok(())
@@ -219,7 +219,7 @@ pub(crate) fn set_workspace_import_only(
     import_only: bool,
 ) -> Result<(), String> {
     let default_root = default_archive_dir(&app)?;
-    let mut reg = workspace::load_registry(&default_root);
+    let mut reg = workspace::load_registry(&default_root)?;
     workspace::set_import_only(&mut reg, Path::new(path.trim()), import_only)?;
     workspace::save_registry(&default_root, &reg)?;
     Ok(())

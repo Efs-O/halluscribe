@@ -30,6 +30,7 @@ pub(crate) fn search_sessions(
     limit: Option<usize>,
 ) -> Result<Vec<archive::IndexEntry>, String> {
     let dir = archive_dir(&app)?;
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
     let params = search::SearchParams {
         query,
         date_from,
@@ -50,6 +51,7 @@ pub(crate) fn search_sessions_fulltext(
     query: String,
 ) -> Result<Vec<archive::IndexEntry>, String> {
     let dir = archive_dir(&app)?;
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
     Ok(search::search_fulltext(&dir, &query))
 }
 
@@ -60,6 +62,7 @@ pub(crate) fn search_raw_transcripts(
     query: String,
 ) -> Result<search::RawSearchResult, String> {
     let dir = archive_dir(&app)?;
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
     search::search_raw(&dir, &query, None).map_err(|error| error.to_string())
 }
 
@@ -72,7 +75,8 @@ pub(crate) fn search_sessions_semantic(
     allowed_session_ids: Option<Vec<String>>,
 ) -> Result<Vec<retrieval::SemanticSearchResult>, String> {
     let dir = archive_dir(&app)?;
-    let settings = settings::load_settings(&dir);
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
+    let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     let allowed_ids = allowed_session_ids
         .filter(|ids| !ids.is_empty())
         .map(|ids| ids.into_iter().collect::<HashSet<_>>());
@@ -92,7 +96,8 @@ pub(crate) async fn rebuild_session_embeddings(
     app: tauri::AppHandle,
 ) -> Result<retrieval::EmbeddingRebuildResult, String> {
     let dir = archive_dir(&app)?;
-    let settings = settings::load_settings(&dir);
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
+    let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     if !retrieval::embedding_runtime_ready(&settings) {
         return Err(
             "Semantic search is not configured. Set the llama-server binary path and EmbeddingGemma GGUF model path in Settings first.".to_string(),

@@ -1,6 +1,6 @@
 // HalluScribe - markdown archive writer and archive-specific tests.
 
-use super::index::append_index;
+use super::index::{append_index, ensure_index_readable};
 use super::redact::{apply_rules, rules_for_session};
 use super::{ArchiveError, IndexEntry, SessionMeta, WrittenSession};
 use crate::gemma::{GemmaOutput, SessionType};
@@ -15,6 +15,10 @@ pub fn write_session(
     output: &GemmaOutput,
     now: DateTime<Utc>,
 ) -> Result<WrittenSession, ArchiveError> {
+    // Refuse before creating a summary file when the existing archive index
+    // cannot be read. Otherwise a corrupt index leaves an unindexed markdown
+    // orphan even though `append_index` correctly declines to overwrite it.
+    ensure_index_readable(archive_dir)?;
     let sweep_date_str = now.format("%Y-%m-%d").to_string();
     let time_str = now.format("%H-%M-%S").to_string();
     let session_date_str = meta.session_timestamp.format("%Y-%m-%d").to_string();

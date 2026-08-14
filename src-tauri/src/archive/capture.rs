@@ -11,7 +11,9 @@
 // from under us, so their raws keep coming from the sweep as today.
 
 use super::captured_manifest::{self, CapturedManifest, CapturedRecord};
-use super::{preserve_raw, raw_rel_path, read_sessions, session_id, set_raw_path};
+use super::{
+    ensure_index_readable, preserve_raw, raw_rel_path, read_sessions, session_id, set_raw_path,
+};
 use crate::scanner::{self, ScanTargetKind};
 use crate::settings::HalluScribeSettings;
 use std::path::Path;
@@ -29,11 +31,18 @@ pub enum CaptureStatus {
         done: usize,
         total: usize,
         captured: usize,
+        failed: usize,
     },
     Done {
         done: usize,
         total: usize,
         captured: usize,
+    },
+    Failed {
+        done: usize,
+        total: usize,
+        captured: usize,
+        errors: Vec<String>,
     },
     Cancelled,
 }
@@ -59,6 +68,16 @@ pub fn run_capture(
     cancel: &AtomicBool,
     mut on_progress: impl FnMut(&CaptureStatus),
 ) -> CaptureStatus {
+    if let Err(error) = ensure_index_readable(archive_dir) {
+        let status = CaptureStatus::Failed {
+            done: 0,
+            total: 0,
+            captured: 0,
+            errors: vec![format!("archive index: {error}")],
+        };
+        on_progress(&status);
+        return status;
+    }
     let mut manifest: CapturedManifest = captured_manifest::load_captured(archive_dir);
 
     // Load the index ONCE for membership checks: `is_archived` re-parses the
@@ -79,6 +98,7 @@ pub fn run_capture(
     let total = targets.len();
     let mut done = 0usize;
     let mut captured = 0usize;
+    let mut errors = Vec::new();
 
     for target in &targets {
         if cancel.load(Ordering::Relaxed) {
@@ -97,6 +117,7 @@ pub fn run_capture(
                 done,
                 total,
                 captured,
+                failed: errors.len(),
             });
             continue;
         };
@@ -109,45 +130,55 @@ pub fn run_capture(
             || (indexed_ids.contains(&id) && archive_dir.join(raw_rel_path(&id)).is_file());
 
         if !unchanged {
-            if let Ok(rel) = preserve_raw(archive_dir, &id, &target.path) {
-                if indexed_ids.contains(&id) {
-                    // Best-effort: a failed index write here just means the
-                    // index won't point at the raw until the next sweep or
-                    // backfill pass - the raw copy itself is already safe.
-                    let _ = set_raw_path(archive_dir, &id, rel);
+            match preserve_raw(archive_dir, &id, &target.path) {
+                Ok(rel) => {
+                    if indexed_ids.contains(&id) {
+                        if let Err(error) = set_raw_path(archive_dir, &id, rel) {
+                            errors.push(format!("{id}: failed to update archive index: {error}"));
+                        }
+                    }
+                    manifest.insert(
+                        id,
+                        CapturedRecord {
+                            source_path: target.path.to_string_lossy().to_string(),
+                            size,
+                            mtime_secs: mtime,
+                            captured_at: chrono::Utc::now().to_rfc3339(),
+                        },
+                    );
+                    captured += 1;
                 }
-                manifest.insert(
-                    id,
-                    CapturedRecord {
-                        source_path: target.path.to_string_lossy().to_string(),
-                        size,
-                        mtime_secs: mtime,
-                        captured_at: chrono::Utc::now().to_rfc3339(),
-                    },
-                );
-                captured += 1;
+                Err(error) => {
+                    errors.push(format!("{id}: failed to preserve raw transcript: {error}"))
+                }
             }
-            // A failed preserve_raw (e.g. source vanished) is non-fatal, same
-            // as the sweep's own raw-preserve failure handling - the pass
-            // continues and simply retries this file next launch.
         }
 
         on_progress(&CaptureStatus::Running {
             done,
             total,
             captured,
+            failed: errors.len(),
         });
     }
 
-    // Best-effort: a failed manifest write only costs a redundant re-copy on
-    // the next capture pass, never data loss (the raw files themselves are
-    // already durable via their own atomic rename).
-    let _ = captured_manifest::save_captured(archive_dir, &manifest);
+    if let Err(error) = captured_manifest::save_captured(archive_dir, &manifest) {
+        errors.push(format!("failed to save capture manifest: {error}"));
+    }
 
-    let status = CaptureStatus::Done {
-        done,
-        total,
-        captured,
+    let status = if errors.is_empty() {
+        CaptureStatus::Done {
+            done,
+            total,
+            captured,
+        }
+    } else {
+        CaptureStatus::Failed {
+            done,
+            total,
+            captured,
+            errors,
+        }
     };
     on_progress(&status);
     status
@@ -240,6 +271,22 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&archive_dir);
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn corrupt_index_is_reported_as_a_failed_capture() {
+        let archive_dir = tmp_dir("corrupt_index");
+        std::fs::write(archive_dir.join("index.json"), b"{ not valid json").unwrap();
+        let settings = HalluScribeSettings::default();
+        let cancel = AtomicBool::new(false);
+
+        let status = run_capture(&archive_dir, &settings, false, &cancel, |_| {});
+
+        assert!(matches!(
+            status,
+            CaptureStatus::Failed { ref errors, .. }
+                if errors.iter().any(|error| error.contains("archive index"))
+        ));
     }
 
     #[test]

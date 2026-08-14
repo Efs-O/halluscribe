@@ -17,7 +17,8 @@ const TEMPERATURE: f64 = 0.15;
 fn main() {
     let archive_dir = archive_dir();
     let settings = HalluScribeSettings::default();
-    let persisted = app_lib::settings::load_settings(&archive_dir);
+    let persisted =
+        app_lib::settings::load_settings(&archive_dir).expect("failed to load settings.json");
     let model = env::var("GEMMA_MODEL")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(persisted.gemma_model_path.trim()));

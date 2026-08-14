@@ -120,7 +120,7 @@ fn retrieval_prompt_probe() {
         return;
     };
     let archive_dir = PathBuf::from(dir);
-    let cfg = settings::load_settings(&archive_dir);
+    let cfg = settings::load_settings(&archive_dir).expect("failed to load settings");
     let bin = PathBuf::from(&cfg.llama_server_bin);
     let model = PathBuf::from(&cfg.gemma_model_path);
     assert!(bin.exists(), "llama_server_bin missing: {}", bin.display());

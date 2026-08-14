@@ -35,17 +35,14 @@ pub fn load_captured(archive_dir: &Path) -> CapturedManifest {
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
-/// Persist the manifest atomically: write to a `.tmp` sibling then rename
-/// over the real path, so a crash or a concurrent sweep never observes a
-/// half-written `captured.json`.
+/// Persist the manifest atomically so a crash or a concurrent sweep never
+/// observes a half-written `captured.json`.
 pub fn save_captured(archive_dir: &Path, manifest: &CapturedManifest) -> Result<(), ArchiveError> {
     let path = archive_dir.join(CAPTURED_MANIFEST_REL_PATH);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp_path = path.with_file_name("captured.json.tmp");
-    std::fs::write(&tmp_path, serde_json::to_string_pretty(manifest)?)?;
-    std::fs::rename(&tmp_path, &path)?;
+    crate::atomic_file::write_atomic(&path, serde_json::to_string_pretty(manifest)?)?;
     Ok(())
 }
 
@@ -85,7 +82,7 @@ mod tests {
         let loaded = load_captured(&dir);
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded["abc-123"].size, 42);
-        assert!(!dir.join("raw/captured.json.tmp").exists());
+        assert!(!dir.join("raw/.captured.json.tmp").exists());
         assert!(dir.join("raw/captured.json").exists());
 
         let _ = std::fs::remove_dir_all(&dir);

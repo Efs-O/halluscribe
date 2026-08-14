@@ -11,6 +11,7 @@ pub(crate) fn get_recent_sessions(
     app: tauri::AppHandle,
 ) -> Result<Vec<archive::IndexEntry>, String> {
     let dir = archive_dir(&app)?;
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
     let mut sessions = archive::read_sessions(&dir);
     sessions.sort_by_key(|session| {
         std::cmp::Reverse(if !session.updated_at.is_empty() {
@@ -41,6 +42,7 @@ pub(crate) async fn get_raw_session_total(app: tauri::AppHandle) -> Result<u32, 
 #[tauri::command]
 pub(crate) fn read_session(app: tauri::AppHandle, session_id: String) -> Result<String, String> {
     let dir = archive_dir(&app)?;
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
     search::read_session(&dir, &session_id)
 }
 
@@ -52,7 +54,9 @@ pub(crate) fn delete_sessions(
 ) -> Result<Vec<String>, String> {
     let dir = archive_dir(&app)?;
     let deleted = archive::delete_sessions(&dir, &ids).map_err(|error| error.to_string())?;
-    let _ = retrieval::remove_embeddings(&dir, &deleted);
+    retrieval::remove_embeddings(&dir, &deleted).map_err(|error| {
+        format!("archive entries were deleted, but their embeddings could not be removed: {error}")
+    })?;
     Ok(deleted)
 }
 
@@ -64,6 +68,7 @@ pub(crate) fn preview_redaction(
     find: String,
 ) -> Result<archive::RedactionPreview, String> {
     let dir = archive_dir(&app)?;
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
     archive::preview_redaction(&dir, &session_id, &find).map_err(|error| error.to_string())
 }
 
@@ -77,5 +82,6 @@ pub(crate) fn apply_redaction(
     replace: String,
 ) -> Result<archive::RedactionOutcome, String> {
     let dir = archive_dir(&app)?;
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
     archive::apply_redaction(&dir, &session_id, &find, &replace).map_err(|error| error.to_string())
 }

@@ -56,12 +56,14 @@ pub fn ensure_import_paths(archive_dir: &Path, settings: &mut HalluScribeSetting
 /// Load settings for `archive_dir`, derive any missing import folders, and
 /// persist when that changed anything. The single runtime entry point for
 /// A1 seeding - both app startup and workspace creation go through it.
-pub fn load_with_import_paths(archive_dir: &Path) -> HalluScribeSettings {
-    let mut settings = super::load_settings(archive_dir);
+pub fn load_with_import_paths(
+    archive_dir: &Path,
+) -> Result<HalluScribeSettings, super::SettingsError> {
+    let mut settings = super::load_settings(archive_dir)?;
     if ensure_import_paths(archive_dir, &mut settings) {
-        let _ = super::save_settings(archive_dir, &settings);
+        super::save_settings(archive_dir, &settings)?;
     }
-    settings
+    Ok(settings)
 }
 
 #[cfg(test)]
@@ -150,11 +152,11 @@ mod tests {
     #[test]
     fn load_with_import_paths_persists_the_derived_values() {
         let dir = tmp_dir("persist");
-        let first = load_with_import_paths(&dir);
+        let first = load_with_import_paths(&dir).unwrap();
         assert!(!first.chatgpt_import_path.is_empty());
 
         // Re-read from disk (not in memory) to prove the save stuck.
-        let reloaded = super::super::load_settings(&dir);
+        let reloaded = super::super::load_settings(&dir).unwrap();
         assert_eq!(reloaded.chatgpt_import_path, first.chatgpt_import_path);
 
         let _ = fs::remove_dir_all(&dir);

@@ -189,8 +189,9 @@ export interface BackfillResult {
  *  `archive::CaptureStatus` enum's internally-tagged JSON shape. */
 export type CaptureStatus =
   | { state: "idle" }
-  | { state: "running"; done: number; total: number; captured: number }
+  | { state: "running"; done: number; total: number; captured: number; failed: number }
   | { state: "done"; done: number; total: number; captured: number }
+  | { state: "failed"; done: number; total: number; captured: number; errors: string[] }
   | { state: "cancelled" };
 
 export interface RawExcerpt {

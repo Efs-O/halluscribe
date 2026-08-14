@@ -33,7 +33,9 @@ pub struct BackfillResult {
 /// Recover raw transcripts for archived sessions that don't have one yet,
 /// using the active archive's own settings to locate user-owned imports.
 pub fn backfill_raw(archive_dir: &Path) -> Result<BackfillResult, ArchiveError> {
-    let settings = crate::settings::load_settings(archive_dir);
+    super::ensure_index_readable(archive_dir)?;
+    let settings = crate::settings::load_settings(archive_dir)
+        .map_err(|error| ArchiveError::Invalid(error.to_string()))?;
     backfill_raw_with(archive_dir, &settings)
 }
 

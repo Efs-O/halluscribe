@@ -1,3 +1,5 @@
+// HalluScribe - scheduler configuration and sweep result types.
+
 use crate::gemma::InferenceBackend;
 use crate::settings::HalluScribeSettings;
 use serde::Serialize;
@@ -41,6 +43,8 @@ pub struct SweepResult {
     /// (a concurrent sweep, briefing, chat, or embedding run) held the
     /// process-wide inference lock. Distinct from a quiet out-of-window skip.
     pub busy: bool,
+    /// The caller stopped the run before all eligible work completed.
+    pub cancelled: bool,
     pub processed: u32,
     pub skipped: u32,
     pub deferred: u32,
@@ -48,4 +52,11 @@ pub struct SweepResult {
     /// at least one high-confidence secret shape (Phase 0b scan).
     pub flagged: u32,
     pub errors: Vec<String>,
+}
+
+impl SweepResult {
+    /// Daily success markers may advance only after a fully successful run.
+    pub fn completed_successfully(&self) -> bool {
+        self.ran && !self.busy && !self.cancelled && self.deferred == 0 && self.errors.is_empty()
+    }
 }

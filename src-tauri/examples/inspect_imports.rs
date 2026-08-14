@@ -7,7 +7,7 @@ fn main() {
         .or_else(|_| env::var("HOME"))
         .unwrap();
     let dir = PathBuf::from(home).join(".halluscribe");
-    let settings = settings::load_settings(&dir);
+    let settings = settings::load_settings(&dir).expect("failed to load settings.json");
     println!("chatgpt_import_path={}", settings.chatgpt_import_path);
     println!("claudeai_import_path={}", settings.claudeai_import_path);
     println!("gemini_import_path={}", settings.gemini_import_path);

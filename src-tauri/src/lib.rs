@@ -3,6 +3,7 @@
 
 mod app_state;
 mod app_support;
+mod atomic_file;
 mod chat_prompt;
 mod commands;
 mod commands_capture;
@@ -35,9 +36,7 @@ pub mod settings;
 pub mod workspace;
 
 use app_state::{BriefingCancel, CaptureCancel, CaptureStatusState, ChatCancel, SweepCancel};
-use app_support::{
-    archive_dir, clear_first_run, default_archive_dir, record_sweep_date, sweep_config,
-};
+use app_support::{archive_dir, default_archive_dir, mark_sweep_success, sweep_config};
 use chrono::{Datelike, Local, Timelike};
 use commands::{
     apply_redaction, cancel_briefing, cancel_chat, cancel_sweep, delete_sessions,
@@ -106,7 +105,7 @@ fn apply_always_on_top(app: &tauri::AppHandle, always_on_top: bool) -> Result<()
 
 fn persist_always_on_top(app: &tauri::AppHandle, always_on_top: bool) -> Result<(), String> {
     let dir = archive_dir(app)?;
-    let mut settings = settings::load_settings(&dir);
+    let mut settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     settings.always_on_top = always_on_top;
     settings::save_settings(&dir, &settings).map_err(|error| error.to_string())
 }
@@ -142,10 +141,16 @@ pub fn run() {
             if let Ok(dir) = archive_dir(app.handle()) {
                 llama_runtime::set_log_dir(dir.join("logs"));
             }
-            let saved_settings = archive_dir(app.handle())
-                .ok()
-                .map(|dir| settings::load_settings(&dir))
-                .unwrap_or_default();
+            let saved_settings = match archive_dir(app.handle())
+                .map_err(|error| format!("archive path: {error}"))
+                .and_then(|dir| settings::load_settings(&dir).map_err(|error| error.to_string()))
+            {
+                Ok(settings) => settings,
+                Err(error) => {
+                    eprintln!("[settings] failed to load at startup: {error}");
+                    settings::HalluScribeSettings::default()
+                }
+            };
             if let Err(error) = apply_always_on_top(app.handle(), saved_settings.always_on_top) {
                 eprintln!("[window] failed to apply always-on-top at startup: {error}");
             }
@@ -221,7 +226,14 @@ pub fn run() {
                 let mut last_triggered_minute: Option<(i32, u32, u32, u32, u32)> = None;
                 loop {
                     std::thread::sleep(std::time::Duration::from_secs(5));
-                    if let Some(config) = sweep_config(&handle, false) {
+                    let config = match sweep_config(&handle, false) {
+                        Ok(config) => config,
+                        Err(error) => {
+                            eprintln!("[scheduler] could not load sweep configuration: {error}");
+                            continue;
+                        }
+                    };
+                    if let Some(config) = config {
                         let now = Local::now();
                         let current_minute =
                             (now.year(), now.month(), now.day(), now.hour(), now.minute());
@@ -235,14 +247,40 @@ pub fn run() {
                         let result = scheduler::run_sweep(&handle, &config, cancel);
                         if result.ran {
                             last_triggered_minute = Some(current_minute);
-                            clear_first_run(&handle);
-                            record_sweep_date(&handle);
+                            let marker_errors = if result.completed_successfully() {
+                                mark_sweep_success(&handle)
+                                    .err()
+                                    .into_iter()
+                                    .collect::<Vec<_>>()
+                            } else {
+                                Vec::new()
+                            };
                             let mut message = format!(
-                                "Sweep complete - processed: {}, skipped: {}, deferred: {}",
-                                result.processed, result.skipped, result.deferred,
+                                "Sweep {} - processed: {}, skipped: {}, deferred: {}",
+                                if result.completed_successfully() {
+                                    "complete"
+                                } else {
+                                    "incomplete"
+                                },
+                                result.processed,
+                                result.skipped,
+                                result.deferred,
                             );
+                            if result.cancelled {
+                                message.push_str(", cancelled");
+                            }
                             if !result.errors.is_empty() {
                                 message.push_str(&format!(", errors: {}", result.errors.len()));
+                            }
+                            if !marker_errors.is_empty() {
+                                message.push_str(&format!(
+                                    ", settings errors: {}",
+                                    marker_errors.len()
+                                ));
+                                eprintln!(
+                                    "[sweep] failed to persist completion state: {}",
+                                    marker_errors.join("; ")
+                                );
                             }
                             if result.flagged > 0 {
                                 message.push_str(&format!(
@@ -266,12 +304,23 @@ pub fn run() {
                 let Ok(dir) = archive_dir(&capture_handle) else {
                     return;
                 };
-                let import_only = default_archive_dir(&capture_handle)
-                    .map(|default_root| {
+                let import_only =
+                    match default_archive_dir(&capture_handle).and_then(|default_root| {
                         crate::workspace::is_active_import_only(&default_root, &dir)
-                    })
-                    .unwrap_or(false);
-                let loaded_settings = settings::load_settings(&dir);
+                    }) {
+                        Ok(import_only) => import_only,
+                        Err(error) => {
+                            eprintln!("[capture] could not load workspace registry: {error}");
+                            return;
+                        }
+                    };
+                let loaded_settings = match settings::load_settings(&dir) {
+                    Ok(settings) => settings,
+                    Err(error) => {
+                        eprintln!("[capture] could not load settings: {error}");
+                        return;
+                    }
+                };
                 let cancel = capture_handle.state::<CaptureCancel>().0.clone();
                 let status_state = capture_handle.state::<CaptureStatusState>().0.clone();
                 let progress_handle = capture_handle.clone();

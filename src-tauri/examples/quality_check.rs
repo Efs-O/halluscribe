@@ -36,7 +36,7 @@ fn main() {
     // sets ctx_size and max_tokens to 0 ("must be set before generation can run"), and passing
     // those zeros to llama.cpp makes every tool call come back as bare `<|tool_call>` content
     // with no parsed tool_calls. Everything else can stay on defaults.
-    let defaults = settings::load_settings(&archive_dir);
+    let defaults = settings::load_settings(&archive_dir).expect("failed to load settings.json");
     assert!(
         defaults.ctx_size > 0 && defaults.max_tokens > 0,
         "ctx_size/max_tokens are unset in {}/settings.json — configure them in the app first",

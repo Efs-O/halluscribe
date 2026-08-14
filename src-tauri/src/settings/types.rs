@@ -14,14 +14,14 @@ pub enum BackendKind {
 #[derive(Debug)]
 pub enum SettingsError {
     Io(io::Error),
-    Serialize(serde_json::Error),
+    Json(serde_json::Error),
 }
 
 impl fmt::Display for SettingsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(error) => write!(f, "settings I/O error: {error}"),
-            Self::Serialize(error) => write!(f, "settings serialize error: {error}"),
+            Self::Json(error) => write!(f, "settings JSON error: {error}"),
         }
     }
 }
@@ -34,7 +34,7 @@ impl From<io::Error> for SettingsError {
 
 impl From<serde_json::Error> for SettingsError {
     fn from(error: serde_json::Error) -> Self {
-        Self::Serialize(error)
+        Self::Json(error)
     }
 }
 

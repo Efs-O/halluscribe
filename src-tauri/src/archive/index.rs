@@ -18,6 +18,12 @@ pub fn session_id(source: &Path) -> String {
         .to_string()
 }
 
+/// Verify that the archive index is either absent (a new archive) or readable.
+/// Call UI and job entry points before treating an empty list as meaningful.
+pub fn ensure_index_readable(archive_dir: &Path) -> Result<(), ArchiveError> {
+    load_index(archive_dir).map(|_| ())
+}
+
 pub fn find_session(archive_dir: &Path, id: &str) -> Option<IndexEntry> {
     load_index(archive_dir)
         .ok()?
@@ -66,10 +72,7 @@ pub fn delete_sessions(archive_dir: &Path, ids: &[String]) -> Result<Vec<String>
         }
     }
     if !deleted.is_empty() {
-        fs::write(
-            archive_dir.join("index.json"),
-            serde_json::to_string_pretty(&idx)?,
-        )?;
+        save_index(archive_dir, &idx)?;
     }
     Ok(deleted)
 }
@@ -87,10 +90,7 @@ pub fn set_secret_flags(
         return Ok(());
     };
     entry.secret_flags = flags;
-    fs::write(
-        archive_dir.join("index.json"),
-        serde_json::to_string_pretty(&idx)?,
-    )?;
+    save_index(archive_dir, &idx)?;
     Ok(())
 }
 
@@ -103,21 +103,26 @@ pub fn set_raw_path(archive_dir: &Path, id: &str, rel: String) -> Result<(), Arc
         return Ok(());
     };
     entry.raw_path = rel;
-    fs::write(
-        archive_dir.join("index.json"),
-        serde_json::to_string_pretty(&idx)?,
-    )?;
+    save_index(archive_dir, &idx)?;
     Ok(())
 }
 
 pub(super) fn append_index(archive_dir: &Path, entry: IndexEntry) -> Result<(), ArchiveError> {
     fs::create_dir_all(archive_dir)?;
-    let mut idx = load_index(archive_dir).unwrap_or_default();
+    // `load_index` already treats an absent index as a new empty archive. Do
+    // not extend that recovery to a corrupt or unreadable existing file: doing
+    // so would replace every prior entry with just this new one.
+    let mut idx = load_index(archive_dir)?;
     idx.sessions.retain(|e| e.id != entry.id);
     idx.sessions.push(entry);
-    fs::write(
-        archive_dir.join("index.json"),
-        serde_json::to_string_pretty(&idx)?,
+    save_index(archive_dir, &idx)?;
+    Ok(())
+}
+
+fn save_index(archive_dir: &Path, index: &Index) -> Result<(), ArchiveError> {
+    crate::atomic_file::write_atomic(
+        &archive_dir.join("index.json"),
+        serde_json::to_string_pretty(index)?,
     )?;
     Ok(())
 }

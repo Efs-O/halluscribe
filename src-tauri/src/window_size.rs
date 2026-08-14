@@ -73,7 +73,13 @@ pub fn remember(archive_dir: &Path, size: PhysicalSize<u32>, force: bool) {
     if !force && !throttle_allows() {
         return;
     }
-    let mut current = settings::load_settings(archive_dir);
+    let mut current = match settings::load_settings(archive_dir) {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("[window] could not load settings to save window size: {error}");
+            return;
+        }
+    };
     if current.window_width == Some(size.width) && current.window_height == Some(size.height) {
         return;
     }

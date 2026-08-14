@@ -2,7 +2,7 @@
 
 use crate::app_state::BriefingCancel;
 use crate::app_support::archive_dir;
-use crate::{briefing, settings};
+use crate::{archive, briefing, settings};
 use std::sync::atomic::Ordering;
 use tauri::{Emitter, Manager};
 
@@ -23,7 +23,8 @@ pub(crate) fn run_briefing(
     session_ids: Option<Vec<String>>,
 ) -> Result<(), String> {
     let dir = archive_dir(&app)?;
-    let settings = settings::load_settings(&dir);
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
+    let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     let backend = settings
         .to_inference_backend()
         .ok_or_else(|| "backend not configured (check Settings)".to_string())?;

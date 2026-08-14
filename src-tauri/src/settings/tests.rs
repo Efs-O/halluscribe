@@ -33,7 +33,7 @@ mod tests {
     #[test]
     fn load_returns_defaults_when_file_absent() {
         let dir = tmp();
-        let settings = load_settings(dir.path());
+        let settings = load_settings(dir.path()).unwrap();
         assert_eq!(settings.schedule_time, "02:00");
     }
 
@@ -45,7 +45,7 @@ mod tests {
             r#"{"schedule_time": "03:15", "ollama_model": "gemma4:12b"}"#,
         )
         .unwrap();
-        let settings = load_settings(dir.path());
+        let settings = load_settings(dir.path()).unwrap();
         assert_eq!(settings.schedule_time, "03:15");
         assert_eq!(settings.ollama_model, "gemma4:12b");
         assert_eq!(settings.summary_min_fill_pct, 50.0);
@@ -54,11 +54,21 @@ mod tests {
     }
 
     #[test]
-    fn load_malformed_json_returns_defaults() {
+    fn load_malformed_json_returns_an_error() {
         let dir = tmp();
         fs::write(dir.path().join("settings.json"), "not json at all").unwrap();
-        let settings = load_settings(dir.path());
-        assert_eq!(settings.schedule_time, "02:00");
+        let error = load_settings(dir.path()).unwrap_err();
+        assert!(error.to_string().contains("settings JSON error"));
+    }
+
+    #[test]
+    fn save_refuses_to_replace_malformed_settings() {
+        let dir = tmp();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "not json at all").unwrap();
+
+        assert!(save_settings(dir.path(), &HalluScribeSettings::default()).is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), "not json at all");
     }
 
     #[test]
@@ -73,7 +83,7 @@ mod tests {
             ..Default::default()
         };
         save_settings(dir.path(), &settings).unwrap();
-        let reloaded = load_settings(dir.path());
+        let reloaded = load_settings(dir.path()).unwrap();
         assert_eq!(reloaded.schedule_time, "05:30");
         assert!(reloaded.always_on_top);
         assert_eq!(reloaded.ollama_model, "gemma4:12b");
@@ -85,7 +95,7 @@ mod tests {
     fn load_legacy_schedule_hour_migrates_to_top_of_hour() {
         let dir = tmp();
         fs::write(dir.path().join("settings.json"), r#"{"schedule_time": 4}"#).unwrap();
-        let settings = load_settings(dir.path());
+        let settings = load_settings(dir.path()).unwrap();
         assert_eq!(settings.schedule_time, "04:00");
     }
 
@@ -283,7 +293,7 @@ mod tests {
             ..Default::default()
         };
         save_settings(dir.path(), &settings).unwrap();
-        let reloaded = load_settings(dir.path());
+        let reloaded = load_settings(dir.path()).unwrap();
         assert_eq!(reloaded.ctx_size, 65_536);
         assert_eq!(reloaded.max_tokens, 24_576);
         assert_eq!(reloaded.briefing_window_hours, 12);
@@ -297,7 +307,7 @@ mod tests {
             r#"{"schedule_time": "04:00"}"#,
         )
         .unwrap();
-        let settings = load_settings(dir.path());
+        let settings = load_settings(dir.path()).unwrap();
         assert!(!settings.always_on_top);
         assert_eq!(settings.ctx_size, 0);
         assert_eq!(settings.max_tokens, 0);
@@ -359,7 +369,7 @@ mod tests {
             r#"{"schedule_time": "04:00", "ollama_model": "gemma4:12b"}"#,
         )
         .unwrap();
-        let settings = load_settings(dir.path());
+        let settings = load_settings(dir.path()).unwrap();
         assert_eq!(settings.ollama_model, "gemma4:12b");
         assert_eq!(
             settings.profile_sources,
@@ -375,7 +385,7 @@ mod tests {
             ..Default::default()
         };
         save_settings(dir.path(), &settings).unwrap();
-        let reloaded = load_settings(dir.path());
+        let reloaded = load_settings(dir.path()).unwrap();
         assert_eq!(reloaded.profile_sources, vec!["claude_code".to_string()]);
     }
 
@@ -391,7 +401,7 @@ mod tests {
             r#"{"schedule_time": "04:00", "preserve_raw_transcripts": true}"#,
         )
         .unwrap();
-        let settings = load_settings(dir.path());
+        let settings = load_settings(dir.path()).unwrap();
         assert_eq!(settings.schedule_time, "04:00");
     }
 

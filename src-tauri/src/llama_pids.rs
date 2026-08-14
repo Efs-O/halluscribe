@@ -57,8 +57,16 @@ fn home_dir() -> Option<PathBuf> {
 
 fn read_entries() -> Vec<Entry> {
     let path = marker_path();
-    let Ok(contents) = std::fs::read_to_string(&path) else {
-        return Vec::new();
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => {
+            crate::llama_runtime::record_diagnostic(
+                "llama-pids",
+                &format!("could not read {}: {error}", path.display()),
+            );
+            return Vec::new();
+        }
     };
     parse_entries(&contents)
 }
@@ -89,12 +97,12 @@ fn serialize_entries(entries: &[Entry]) -> String {
     out
 }
 
-fn write_entries(entries: &[Entry]) {
+fn write_entries(entries: &[Entry]) -> Result<(), String> {
     let path = marker_path();
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    let _ = std::fs::write(&path, serialize_entries(entries));
+    std::fs::write(&path, serialize_entries(entries)).map_err(|error| error.to_string())
 }
 
 /// Record a llama-server we just spawned so a future launch can reap it if we die
@@ -108,7 +116,12 @@ pub fn register(server_pid: u32) {
     };
     if !entries.contains(&entry) {
         entries.push(entry);
-        write_entries(&entries);
+        if let Err(error) = write_entries(&entries) {
+            crate::llama_runtime::record_diagnostic(
+                "llama-pids",
+                &format!("could not register server PID {server_pid}: {error}"),
+            );
+        }
     }
 }
 
@@ -121,7 +134,12 @@ pub fn unregister(server_pid: u32) {
     let before = entries.len();
     entries.retain(|entry| !(entry.app_pid == our_pid && entry.server_pid == server_pid));
     if entries.len() != before {
-        write_entries(&entries);
+        if let Err(error) = write_entries(&entries) {
+            crate::llama_runtime::record_diagnostic(
+                "llama-pids",
+                &format!("could not unregister server PID {server_pid}: {error}"),
+            );
+        }
     }
 }
 
@@ -133,9 +151,19 @@ pub fn reap_orphans() {
     let entries = read_entries();
     let plan = plan_reap(&entries, std::process::id(), pid_alive, pid_is_llama_server);
     for server_pid in &plan.to_kill {
-        kill_pid(*server_pid);
+        if let Err(error) = kill_pid(*server_pid) {
+            crate::llama_runtime::record_diagnostic(
+                "llama-pids",
+                &format!("could not reap orphan server PID {server_pid}: {error}"),
+            );
+        }
     }
-    write_entries(&plan.keep);
+    if let Err(error) = write_entries(&plan.keep) {
+        crate::llama_runtime::record_diagnostic(
+            "llama-pids",
+            &format!("could not update orphan PID registry: {error}"),
+        );
+    }
 }
 
 struct ReapPlan {
@@ -214,16 +242,29 @@ fn process_image(pid: u32) -> Option<String> {
 }
 
 #[cfg(target_os = "windows")]
-fn kill_pid(pid: u32) {
+fn kill_pid(pid: u32) -> Result<(), String> {
     let mut cmd = Command::new("taskkill");
     cmd.args(["/F", "/PID", &pid.to_string()]);
     crate::llama_runtime::apply_no_window(&mut cmd);
-    let _ = cmd.output();
+    let output = cmd.output().map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn kill_pid(pid: u32) {
-    let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+fn kill_pid(pid: u32) -> Result<(), String> {
+    let output = Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
 }
 
 #[cfg(test)]

@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 fn main() {
     let archive_dir = archive_dir();
-    let mut config = settings::load_settings(&archive_dir);
+    let mut config = settings::load_settings(&archive_dir).expect("failed to load settings.json");
 
     if let Ok(path) = env::var("LLAMA_SERVER_BIN") {
         config.llama_server_bin = path;

@@ -5,7 +5,7 @@ use crate::app_state::ChatCancel;
 use crate::app_support::{archive_dir, ChatMessage};
 use crate::chat_prompt::{build_chat_system_prompt, ChatPromptContext, SearchModePrompt};
 use crate::recorded_sessions::{SaveRecordedChatRequest, SaveRecordedChatResult};
-use crate::{briefing, profile, retrieval, settings};
+use crate::{archive, briefing, profile, retrieval, settings};
 use serde::Serialize;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -46,12 +46,13 @@ pub(crate) fn send_chat_message(
     profile_scope: Option<String>,
 ) -> Result<(), String> {
     let dir = archive_dir(&app)?;
+    archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
     let profile_scope = match profile_scope.as_deref() {
         None => profile::ProfileScope::Work,
         Some(key) => profile::ProfileScope::from_key(key)
             .ok_or_else(|| format!("unknown profile scope: {key}"))?,
     };
-    let settings = settings::load_settings(&dir);
+    let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     let has_images = messages.iter().any(|message| {
         message
             .images

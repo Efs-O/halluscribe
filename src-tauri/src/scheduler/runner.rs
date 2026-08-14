@@ -1,3 +1,5 @@
+// HalluScribe - scheduled sweep execution and completion reporting.
+
 use super::helpers::{backend_display_name, is_sweep_due, provider_display_name};
 use super::{SweepConfig, SweepProgress, SweepResult};
 use crate::archive::{self, ArchiveError, SessionMeta};
@@ -56,6 +58,10 @@ pub fn run_sweep(
         ran: true,
         ..Default::default()
     };
+    if let Err(error) = archive::ensure_index_readable(&config.archive_dir) {
+        result.errors.push(format!("archive index: {error}"));
+        return result;
+    }
     let sources = scan_sessions(
         &config.archive_dir,
         &config.settings,
@@ -67,6 +73,7 @@ pub fn run_sweep(
 
     for source in &sources {
         if cancel.load(Ordering::Relaxed) {
+            result.cancelled = true;
             break;
         }
 
@@ -99,6 +106,11 @@ pub fn run_sweep(
         }
     }
 
+    if cancel.load(Ordering::Relaxed) {
+        result.cancelled = true;
+        return result;
+    }
+
     let total = worklist.len();
 
     // Load the model once for the whole sweep instead of a cold start per
@@ -118,6 +130,7 @@ pub fn run_sweep(
 
     for (idx, session) in worklist.into_iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
+            result.cancelled = true;
             break;
         }
 

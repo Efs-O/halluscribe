@@ -5,6 +5,7 @@
 // instead of drifting across three near-identical copies (audit Q-1).
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
@@ -104,7 +105,34 @@ fn log_dir() -> &'static OnceLock<PathBuf> {
 /// Point release-build llama-server logging at `<archive_dir>/logs`. Called
 /// once during setup; later calls are ignored.
 pub fn set_log_dir(dir: PathBuf) {
-    let _ = log_dir().set(dir);
+    if log_dir().set(dir).is_err() {
+        eprintln!("[llama] log directory was already configured; keeping the original location");
+    }
+}
+
+/// Record a bounded, human-readable operational diagnostic beside llama-server
+/// stderr logs. When even that directory is unavailable, preserve the message
+/// on stderr rather than silently discarding it.
+pub fn record_diagnostic(component: &str, message: &str) {
+    let line = format!("[{}] {}\n", component, message);
+    let Some(dir) = log_dir().get() else {
+        eprintln!("{line}");
+        return;
+    };
+    let outcome = (|| -> std::io::Result<()> {
+        fs::create_dir_all(dir)?;
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("halluscribe.log"))?
+            .write_all(line.as_bytes())
+    })();
+    if let Err(error) = outcome {
+        eprintln!(
+            "[{}] {} (also failed to write diagnostic: {})",
+            component, message, error
+        );
+    }
 }
 
 /// Decide what happens to a spawned llama-server's stdout/stderr.
@@ -129,27 +157,43 @@ pub fn apply_output_capture(command: &mut Command) {
     #[cfg(debug_assertions)]
     command.stderr(Stdio::inherit());
     #[cfg(not(debug_assertions))]
-    command.stderr(open_log().unwrap_or_else(Stdio::null));
+    command.stderr(match open_log() {
+        Ok(stderr) => stderr,
+        Err(error) => {
+            record_diagnostic(
+                "llama",
+                &format!("could not open llama-server stderr log: {error}"),
+            );
+            Stdio::null()
+        }
+    });
 }
 
 /// Open the log for appending, rotating first if it has grown past the cap.
 /// Only the release path calls this.
 #[cfg_attr(debug_assertions, allow(dead_code))]
-fn open_log() -> Option<Stdio> {
-    let dir = log_dir().get()?;
-    fs::create_dir_all(dir).ok()?;
+fn open_log() -> Result<Stdio, String> {
+    let dir = log_dir()
+        .get()
+        .ok_or_else(|| "log directory is not configured".to_string())?;
+    fs::create_dir_all(dir).map_err(|error| error.to_string())?;
     let path = dir.join("llama-server.log");
     // Keep exactly one previous generation: enough to survive a rotation
     // mid-investigation, bounded at 2x LOG_MAX_BYTES on disk.
     if fs::metadata(&path).is_ok_and(|meta| meta.len() > LOG_MAX_BYTES) {
-        let _ = fs::rename(&path, dir.join("llama-server.log.1"));
+        if let Err(error) = fs::rename(&path, dir.join("llama-server.log.1")) {
+            record_diagnostic(
+                "llama",
+                &format!("could not rotate {}: {error}", path.display()),
+            );
+        }
     }
     fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
-        .ok()
         .map(Stdio::from)
+        .map_err(|error| error.to_string())
 }
 
 /// Poll `GET /v1/models` once per second until the server answers 200, the

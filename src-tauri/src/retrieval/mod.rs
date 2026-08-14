@@ -22,6 +22,7 @@ pub fn index_session(
     settings: &HalluScribeSettings,
     session_id: &str,
 ) -> Result<(), String> {
+    archive::ensure_index_readable(archive_dir).map_err(|error| error.to_string())?;
     let entry = archive::find_session(archive_dir, session_id)
         .ok_or_else(|| format!("session '{session_id}' not found in archive index"))?;
     let input = store::build_embedding_input(archive_dir, &entry).map_err(|error| {
@@ -32,7 +33,7 @@ pub fn index_session(
         format!("failed to start embedding runtime for session '{session_id}': {error}")
     })?;
     let model_name = runner.model_name().to_string();
-    if store::has_current_embedding(archive_dir, session_id, &model_name, &summary_hash) {
+    if store::has_current_embedding(archive_dir, session_id, &model_name, &summary_hash)? {
         return Ok(());
     }
     let embedding = runner
@@ -63,6 +64,13 @@ pub fn index_sessions(
     session_ids: &[String],
 ) -> Vec<(String, String)> {
     let mut errors = Vec::new();
+    if let Err(error) = archive::ensure_index_readable(archive_dir) {
+        let message = error.to_string();
+        return session_ids
+            .iter()
+            .map(|id| (id.clone(), message.clone()))
+            .collect();
+    }
     let mut pending = Vec::new(); // (id, input, summary_hash)
     for id in session_ids {
         let Some(entry) = archive::find_session(archive_dir, id) else {
@@ -101,7 +109,17 @@ pub fn index_sessions(
         let fresh = batch
             .iter()
             .filter(|(id, _, summary_hash)| {
-                !store::has_current_embedding(archive_dir, id, &model_name, summary_hash)
+                match store::has_current_embedding(archive_dir, id, &model_name, summary_hash) {
+                    Ok(true) => false,
+                    Ok(false) => true,
+                    Err(error) => {
+                        errors.push((
+                            id.clone(),
+                            format!("failed to load existing embeddings: {error}"),
+                        ));
+                        false
+                    }
+                }
             })
             .collect::<Vec<_>>();
         if fresh.is_empty() {
@@ -158,15 +176,14 @@ pub fn rebuild_embeddings_with_progress<F>(
 where
     F: FnMut(usize, usize, &EmbeddingRebuildResult),
 {
+    archive::ensure_index_readable(archive_dir).map_err(|error| error.to_string())?;
     let sessions = archive::read_sessions(archive_dir);
     let live_ids = sessions
         .iter()
         .map(|entry| entry.id.clone())
         .collect::<HashSet<_>>();
     let mut result = EmbeddingRebuildResult::default();
-    let existing_records = store::load_embeddings(archive_dir)
-        .ok()
-        .unwrap_or_default()
+    let existing_records = store::load_embeddings(archive_dir)?
         .into_iter()
         .filter(|record| live_ids.contains(&record.session_id))
         .collect::<Vec<_>>();
@@ -281,6 +298,7 @@ pub fn semantic_search(
     limit: usize,
     allowed_ids: Option<&HashSet<String>>,
 ) -> Result<Vec<SemanticSearchResult>, String> {
+    archive::ensure_index_readable(archive_dir).map_err(|error| error.to_string())?;
     if query.trim().is_empty() {
         return Ok(Vec::new());
     }
