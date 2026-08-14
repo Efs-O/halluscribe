@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.19] - 2026-08-14
+
+### Fixed
+- Prevent corrupt archive, settings, workspace, and embedding state from being silently treated as empty or overwritten
+- Report incomplete sweeps and raw-capture persistence failures instead of showing false success
+- Surface llama-server process, PID-registry, and diagnostic-log failures for recovery
+
 ## [0.3.18] - 2026-08-08
 
 ### Added
