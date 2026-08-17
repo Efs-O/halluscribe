@@ -1,6 +1,6 @@
 [package]
 name = "halluscribe"
-version = "0.3.20"
+version = "0.3.21"
 # Two [[bin]] targets exist (the app + halluscribe-mcp); the Tauri bundler
 # needs default-run to know which one is the application binary.
 default-run = "halluscribe"

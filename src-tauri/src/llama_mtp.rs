@@ -65,22 +65,31 @@ pub fn find_mtp_drafter(model: &Path) -> Result<Option<PathBuf>, String> {
     Ok(matches.pop())
 }
 
-/// Strip the terminal quantisation suffix from a target name, leaving the model
-/// identity a drafter is bound to.
+/// Markers that describe how a model was PACKAGED rather than which model it
+/// is. Unsloth ships one MTP drafter per family, named without any of these, so
+/// they have to come off the target name before the two can be compared.
 ///
-/// Two things get removed, and only these two. The `-Q…` suffix itself, and a
-/// `-UD` sitting immediately in front of it: Unsloth Dynamic is a way of
-/// quantising a model, not a different model, and the drafters ship without it
-/// in their names. Leaving it on meant every `-UD-` file failed to find the
-/// sidecar sitting right next to it and silently ran with no drafting at all.
+/// `qat` is on this list on purpose, and it did not used to be. Quantisation-
+/// aware training does produce different weights, and llama-server really did
+/// exit while loading `mtp-gemma-4-26B-A4B-it.gguf` against the QAT 26B - which
+/// is why an earlier fix concluded the pairing was invalid and blocked it. That
+/// conclusion was wrong. Forge runs exactly this pairing daily
+/// (`.forge/config.yaml`, `gemma4-26b-a4b-it-qat-q4kxl`, whose own comment calls
+/// it "its matching Q8_0 MTP assistant draft model"), so the drafter does belong
+/// to this model. The load failure was the flags around it, not the file:
+/// HalluScribe passed `--model-draft` with no `--spec-draft-ngl` while GPU
+/// layers sat at -2, and it ran on llama.cpp b10237 rather than the b10430 Forge
+/// uses. Both are addressed elsewhere now - the tuning file supplies the full
+/// draft flag set, and layers are 999.
+const PACKAGING_MARKERS: [&str; 2] = ["-ud", "-qat"];
+
+/// Strip the terminal quantisation suffix and any packaging markers from a
+/// target name, leaving the model identity a drafter is bound to.
 ///
-/// `-qat` is NOT stripped, and the difference is the whole point. Quantisation-
-/// aware training produces a genuinely different set of weights, so
-/// `gemma-…-qat-UD-Q4_K_XL` reduces to `gemma-…-qat` and still cannot be paired
-/// with the base `mtp-gemma-….gguf`. An earlier prefix check made exactly that
-/// pairing and llama-server exited during load.
+/// `gemma-4-26B-A4B-it-qat-UD-Q4_K_XL` reduces to `gemma-4-26b-a4b-it`, which is
+/// what `mtp-gemma-4-26B-A4B-it.gguf` names itself for.
 fn mtp_target_family(model_stem: &str) -> &str {
-    let Some(without_quant) = model_stem
+    let Some(mut family) = model_stem
         .rfind("-q")
         .filter(|&index| {
             model_stem
@@ -92,7 +101,15 @@ fn mtp_target_family(model_stem: &str) -> &str {
     else {
         return model_stem;
     };
-    without_quant.strip_suffix("-ud").unwrap_or(without_quant)
+    // Markers can stack in either order (`-qat-UD-Q4…`), so peel until none is
+    // left rather than assuming one arrangement.
+    while let Some(shorter) = PACKAGING_MARKERS
+        .iter()
+        .find_map(|marker| family.strip_suffix(marker))
+    {
+        family = shorter;
+    }
+    family
 }
 
 /// Add the MTP speculative-decoding flags when this model can draft ahead.
@@ -184,23 +201,29 @@ mod tests {
     }
 
     #[test]
-    fn find_mtp_drafter_rejects_base_drafter_for_qat_variant() {
+    fn find_mtp_drafter_pairs_the_qat_variant_with_the_family_drafter() {
+        // Unsloth ships ONE drafter per family and the QAT download carries it
+        // (along with an mmproj named the same way). Forge runs this exact pair
+        // daily. An earlier fix blocked it after a load failure that turned out
+        // to be the surrounding flags - see PACKAGING_MARKERS.
         let (dir, model) = model_dir_with(
-            "qat-miss",
+            "qat",
             "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
-            &["mtp-gemma-4-26B-A4B-it.gguf"],
+            &["mtp-gemma-4-26B-A4B-it.gguf", "mmproj-BF16.gguf"],
         );
-        assert_eq!(find_mtp_drafter(&model).unwrap(), None);
+        assert_eq!(
+            find_mtp_drafter(&model).unwrap(),
+            Some(dir.join("mtp-gemma-4-26B-A4B-it.gguf"))
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn target_family_keeps_qat_identity_but_drops_quantisation() {
-        // -qat survives (different weights); -UD does not (same weights, packed
-        // differently). Both appear here, so this pins the distinction itself.
+    fn target_family_drops_stacked_packaging_markers() {
+        // Both markers, in the order the real filename carries them.
         assert_eq!(
             mtp_target_family("gemma-4-26b-a4b-it-qat-ud-q4_k_xl"),
-            "gemma-4-26b-a4b-it-qat"
+            "gemma-4-26b-a4b-it"
         );
     }
 
@@ -229,13 +252,13 @@ mod tests {
     }
 
     #[test]
-    fn a_ud_quant_of_a_qat_model_still_refuses_the_base_drafter() {
-        // Stripping -UD must not open the door to the -qat pairing that made
-        // llama-server exit during load.
+    fn a_drafter_for_a_different_family_is_still_refused() {
+        // Peeling packaging markers must not turn into "close enough": a 12B
+        // drafter against a 26B target is the pairing that genuinely cannot load.
         let (dir, model) = model_dir_with(
-            "qat-ud",
+            "cross-family",
             "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
-            &["mtp-gemma-4-26B-A4B-it.gguf"],
+            &["mtp-gemma-4-12b-it.gguf"],
         );
         assert_eq!(find_mtp_drafter(&model).unwrap(), None);
         let _ = fs::remove_dir_all(dir);
