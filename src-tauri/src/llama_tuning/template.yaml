@@ -1,0 +1,168 @@
+# HalluScribe - llama-server tuning
+#
+# THIS TEXT IS THE STARTER TEMPLATE, COMPILED INTO THE APP.
+# Editing it changes what a FRESH install starts from; it does not change how
+# your machine runs. The file to edit is the copy in your archive:
+#
+#     ~/.halluscribe/llama-tuning.yaml
+#
+# HalluScribe writes that copy once, the first time it needs it, and never
+# overwrites it afterwards - your edits there are safe across app updates.
+#
+# Spawn-time flags for every llama-server HalluScribe starts: the nightly sweep,
+# the briefing chat and the embedding runtime. Edit and save; the next server to
+# start picks the change up. No app restart, no rebuild.
+#
+# HOW A BLOCK IS CHOSEN
+#   HalluScribe reads `general.architecture` out of the GGUF header of whichever
+#   model Settings points at, then uses the block of that name under
+#   `architectures:`. No entry for it means `default:` is used instead.
+#   Exactly ONE block ever applies - blocks are selected, never merged - so the
+#   flags a server runs with are always one readable section of this file.
+#
+#   To learn a model's architecture, look at the loader log line
+#   `llama_model_loader: - kv 0: general.architecture str = ...`
+#
+# WHAT IS *NOT* HERE, AND WHY
+#   Model path, llama-server binary, port ....... Settings
+#   Context window (--ctx-size), max tokens ..... Settings
+#   GPU placement (--n-gpu-layers, --device,
+#     --split-mode, --tensor-split, --main-gpu)   Settings
+#   temperature ................................. the calling path, in code
+#   --model-draft / --mmproj paths .............. derived from the model's folder
+#   Each of those already has one authority. A second copy here would silently
+#   override it, so they are deliberately absent.
+#
+#   temperature is per-ROLE, not per-model: the nightly sweep runs colder than
+#   briefing chat on purpose. One value here would override both.
+#
+#   The draft and projector PATHS are derived because a wrong one makes
+#   llama-server exit before it opens a port - but how they are placed
+#   (speculative.*, mmproj_offload) is yours to set below.
+#
+# LLAMA.CPP ONLY. The Ollama backend addresses models by name rather than by
+# file, so there is no GGUF header to read an architecture from; it keeps its
+# built-in values regardless of this file.
+#
+# DELETING A KEY restores its built-in default (shown under `default:` below).
+# An unknown key is an ERROR rather than being ignored, so a typo surfaces here
+# instead of as a server that quietly ran with the wrong flags.
+
+
+# Applied to any architecture with no entry of its own. These are HalluScribe's
+# built-in values - conservative, and what every model used before this file
+# existed.
+default:
+  batch_size: 512
+  cache_type_k: q8_0
+  cache_type_v: q8_0
+  parallel: 1
+  flash_attn: true
+  threads: 6
+  threads_batch: 6
+  kv_unified: false
+  mmproj_offload: true
+  # reasoning_budget: omitted = no --reasoning-budget flag at all.
+  speculative:
+    n_max: 4
+  # Empty = nothing added to the request, so llama.cpp's own sampler defaults
+  # apply. This is what every model got before this file existed.
+  sampling: {}
+  extra_args: []
+
+
+architectures:
+
+  # ---------------------------------------------------------------------------
+  # Gemma 4 - every size and quant (12B, 26B-A4B, 31B, E4B, QAT variants) reports
+  # `gemma4`, so one block covers the family.
+  # ---------------------------------------------------------------------------
+  gemma4:
+    batch_size: 512
+    # q4_0 rather than q8_0: halves KV cost, which is what buys back the context
+    # the bigger quants spend on weights. Raise to q8_0 only if you have VRAM to
+    # spare and can measure a quality difference.
+    cache_type_k: q4_0
+    cache_type_v: q4_0
+    parallel: 1
+    flash_attn: true
+    threads: 6
+    threads_batch: 6
+    # One shared KV cache instead of one per slot.
+    kv_unified: true
+    # Keep the vision projector in system RAM. On 26B/31B it is ~0.9-1.2 GB, and
+    # that VRAM buys more as KV cache and draft-model space. Set true on the
+    # smaller models (E4B, 12B) if you have room and want faster image encoding.
+    mmproj_offload: false
+    # Cap on thinking tokens when reasoning is on.
+    reasoning_budget: 4096
+    # Gemma 4's MTP head ships as a SIDECAR file (`mtp-<family>.gguf`) next to
+    # the model, which HalluScribe finds automatically. With no sidecar present,
+    # none of this applies and no speculative decoding happens at all.
+    speculative:
+      n_max: 1
+      # The drafter is small - keep all of it on the card even when the main
+      # model cannot be. This is the DRAFT model's layers, not the main model's
+      # (those are the GPU layers setting in the app).
+      gpu_layers: all
+      # The draft KV cache is tiny, so it can afford q8_0 even where the main
+      # cache runs q4_0. Precision here costs almost no VRAM and rejected
+      # draft tokens are pure waste.
+      cache_type_k: q8_0
+      cache_type_v: q8_0
+    # Gemma is trained for top_k 64. Omitted fields are not sent at all, so
+    # llama.cpp's own sampler defaults apply to anything left out.
+    sampling:
+      top_k: 64
+      min_p: 0
+    extra_args: []
+
+  # ---------------------------------------------------------------------------
+  # Qwen 3.5 / 3.8 - hybrid (Gated Delta Net) attention. Reports `qwen35`.
+  # ---------------------------------------------------------------------------
+  qwen35:
+    batch_size: 512
+    # q4_0 is the load-bearing choice here, not a preference. KV is cheap on
+    # these hybrids (only the interleaved full-attention layers scale with
+    # context; the recurrent state is a constant ~400 MB), but at q8_0 a large
+    # context still spills out of a 16 GB card - and Windows WDDM pages VRAM
+    # over PCIe rather than failing, so the symptom is a silent collapse to a
+    # few tokens/sec instead of an error.
+    cache_type_k: q4_0
+    cache_type_v: q4_0
+    parallel: 1
+    flash_attn: true
+    threads: 6
+    threads_batch: 6
+    kv_unified: false
+    # The vision projector is ~888 MB and the text config leaves almost no slack
+    # on a 16 GB card. CPU-side encoding costs nothing in VRAM.
+    mmproj_offload: false
+    reasoning_budget: 6144
+    # Qwen 3.8 carries its MTP head INSIDE the model GGUF
+    # (`qwen35.nextn_predict_layers`), so there is no sidecar drafter to find:
+    # no --model-draft is passed and there is no separate draft model to place
+    # or give a cache to. `gpu_layers` and the draft cache types are therefore
+    # left unset here - they describe a sidecar drafter that does not exist.
+    speculative:
+      n_max: 2
+    # Qwen's precise-coding sampler recipe.
+    sampling:
+      top_k: 20
+      top_p: 0.95
+      min_p: 0
+      reasoning_effort: medium
+    extra_args: []
+    #
+    # WATCH OUT - reasoning and MTP interact on this family. With a reasoning
+    # budget set AND MTP drafting, the reply can land entirely in
+    # `reasoning_content` and leave `content` empty. If chat replies come back
+    # blank on a Qwen model, that is this, not a HalluScribe bug - drop
+    # reasoning_budget above, or turn reasoning off for that path.
+    #
+    # Also relevant if you change GPU layers in Settings: on these hybrids a
+    # SINGLE layer left on the CPU makes llama.cpp disable the fused Gated Delta
+    # Net kernel for the whole model - measured elsewhere as roughly halving
+    # throughput. Recent llama.cpp treats -1/auto as auto-fit and holds back a
+    # ~1 GB margin, which can strand a layer; an explicit large number such as
+    # 999 disables auto-fit and keeps the whole model on the card.

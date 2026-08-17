@@ -15,6 +15,7 @@ pub mod llama_gpu;
 mod llama_mtp;
 mod llama_pids;
 mod llama_runtime;
+pub mod llama_tuning;
 mod recorded_sessions;
 mod tts;
 mod window_size;
