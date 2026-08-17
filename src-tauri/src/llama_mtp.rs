@@ -65,13 +65,22 @@ pub fn find_mtp_drafter(model: &Path) -> Result<Option<PathBuf>, String> {
     Ok(matches.pop())
 }
 
-/// Remove only the terminal `-Q…` quantisation suffix from a target name.
+/// Strip the terminal quantisation suffix from a target name, leaving the model
+/// identity a drafter is bound to.
 ///
-/// `gemma-…-qat-UD-Q4_K_XL` keeps its `-qat-UD` identity, so it cannot be
-/// paired with the base `mtp-gemma-….gguf` drafter. The previous prefix check
-/// made precisely that invalid pairing and llama-server exited during load.
+/// Two things get removed, and only these two. The `-Q…` suffix itself, and a
+/// `-UD` sitting immediately in front of it: Unsloth Dynamic is a way of
+/// quantising a model, not a different model, and the drafters ship without it
+/// in their names. Leaving it on meant every `-UD-` file failed to find the
+/// sidecar sitting right next to it and silently ran with no drafting at all.
+///
+/// `-qat` is NOT stripped, and the difference is the whole point. Quantisation-
+/// aware training produces a genuinely different set of weights, so
+/// `gemma-…-qat-UD-Q4_K_XL` reduces to `gemma-…-qat` and still cannot be paired
+/// with the base `mtp-gemma-….gguf`. An earlier prefix check made exactly that
+/// pairing and llama-server exited during load.
 fn mtp_target_family(model_stem: &str) -> &str {
-    model_stem
+    let Some(without_quant) = model_stem
         .rfind("-q")
         .filter(|&index| {
             model_stem
@@ -80,7 +89,10 @@ fn mtp_target_family(model_stem: &str) -> &str {
                 .is_some_and(u8::is_ascii_digit)
         })
         .map(|index| &model_stem[..index])
-        .unwrap_or(model_stem)
+    else {
+        return model_stem;
+    };
+    without_quant.strip_suffix("-ud").unwrap_or(without_quant)
 }
 
 /// Add the MTP speculative-decoding flags when this model can draft ahead.
@@ -184,10 +196,49 @@ mod tests {
 
     #[test]
     fn target_family_keeps_qat_identity_but_drops_quantisation() {
+        // -qat survives (different weights); -UD does not (same weights, packed
+        // differently). Both appear here, so this pins the distinction itself.
         assert_eq!(
             mtp_target_family("gemma-4-26b-a4b-it-qat-ud-q4_k_xl"),
-            "gemma-4-26b-a4b-it-qat-ud"
+            "gemma-4-26b-a4b-it-qat"
         );
+    }
+
+    #[test]
+    fn target_family_drops_an_unsloth_dynamic_marker() {
+        assert_eq!(
+            mtp_target_family("gemma-4-12b-it-ud-q5_k_xl"),
+            "gemma-4-12b-it"
+        );
+    }
+
+    #[test]
+    fn a_ud_quant_finds_the_sidecar_sitting_next_to_it() {
+        // The regression this fix exists for: the drafter was right there, named
+        // without the -UD the model carried, and was never matched.
+        let (dir, model) = model_dir_with(
+            "ud",
+            "gemma-4-12b-it-UD-Q5_K_XL.gguf",
+            &["mtp-gemma-4-12b-it.gguf", "mmproj-F16.gguf"],
+        );
+        assert_eq!(
+            find_mtp_drafter(&model).unwrap(),
+            Some(dir.join("mtp-gemma-4-12b-it.gguf"))
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_ud_quant_of_a_qat_model_still_refuses_the_base_drafter() {
+        // Stripping -UD must not open the door to the -qat pairing that made
+        // llama-server exit during load.
+        let (dir, model) = model_dir_with(
+            "qat-ud",
+            "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+            &["mtp-gemma-4-26B-A4B-it.gguf"],
+        );
+        assert_eq!(find_mtp_drafter(&model).unwrap(), None);
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
