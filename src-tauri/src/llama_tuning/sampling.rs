@@ -39,6 +39,19 @@ pub struct SamplingTuning {
     /// spawn-time `--reasoning-budget`, which caps thinking tokens; this asks
     /// the model how hard to think in the first place.
     pub reasoning_effort: Option<String>,
+    /// `presence_penalty`: flat penalty on any token that has already appeared,
+    /// regardless of how often. 0 disables it. Qwen's instruct (non-thinking)
+    /// recipe recommends 1.5 to suppress repetition; its thinking recipe leaves
+    /// it at 0.
+    pub presence_penalty: Option<f64>,
+    /// `repeat_penalty`: penalty scaled by how recently a token appeared.
+    ///
+    /// Named for llama.cpp, which is the only backend this file drives - model
+    /// cards and other runtimes call the same knob `repetition_penalty`, and
+    /// sending THAT name to `/v1/chat/completions` would be ignored silently.
+    /// 1.0 disables it. Gemma guidance: try 1.05-1.15 if output repeats, and
+    /// never above 1.2.
+    pub repeat_penalty: Option<f64>,
 }
 
 /// The values llama.cpp accepts for `reasoning_effort`. Anything else is
@@ -62,6 +75,24 @@ impl SamplingTuning {
                 return Err(format!(
                     "llama-tuning.yaml: {key}.sampling.reasoning_effort must be one of {} (got \"{effort}\")",
                     REASONING_EFFORTS.join(", ")
+                ));
+            }
+        }
+        if let Some(presence) = self.presence_penalty {
+            if !(-2.0..=2.0).contains(&presence) {
+                return Err(format!(
+                    "llama-tuning.yaml: {key}.sampling.presence_penalty must be between -2 and 2 (got {presence})"
+                ));
+            }
+        }
+        if let Some(repeat) = self.repeat_penalty {
+            // 1.0 is "off" and below 1.0 REWARDS repetition, which is never what
+            // the setting is reached for - rejected rather than sent, so a typo
+            // like 0.1 surfaces here instead of as a model that loops.
+            if repeat < 1.0 {
+                return Err(format!(
+                    "llama-tuning.yaml: {key}.sampling.repeat_penalty must be 1.0 or above \
+                     (1.0 disables it; below 1.0 rewards repetition) (got {repeat})"
                 ));
             }
         }
@@ -91,6 +122,12 @@ impl SamplingTuning {
         }
         if let Some(effort) = &self.reasoning_effort {
             object.insert("reasoning_effort".to_string(), Value::from(effort.clone()));
+        }
+        if let Some(presence) = self.presence_penalty {
+            object.insert("presence_penalty".to_string(), Value::from(presence));
+        }
+        if let Some(repeat) = self.repeat_penalty {
+            object.insert("repeat_penalty".to_string(), Value::from(repeat));
         }
     }
 }
@@ -129,6 +166,8 @@ mod tests {
             min_p: Some(0.0),
             stop: vec!["<end_of_turn>".to_string()],
             reasoning_effort: Some("medium".to_string()),
+            presence_penalty: Some(1.5),
+            repeat_penalty: Some(1.1),
         };
         let mut payload = base_payload();
         sampling.apply_to_payload(&mut payload);
@@ -137,8 +176,45 @@ mod tests {
         assert_eq!(payload["min_p"], 0.0);
         assert_eq!(payload["stop"], serde_json::json!(["<end_of_turn>"]));
         assert_eq!(payload["reasoning_effort"], "medium");
+        assert_eq!(payload["presence_penalty"], 1.5);
+        assert_eq!(payload["repeat_penalty"], 1.1);
         // The role's own temperature survives - it is not ours to overwrite.
         assert_eq!(payload["temperature"], 0.2);
+    }
+
+    #[test]
+    fn the_penalty_key_sent_is_llama_cpps_name_not_the_model_cards() {
+        // Model cards say `repetition_penalty`; llama.cpp's server parses
+        // `repeat_penalty` and ignores anything else without complaining, so
+        // the wrong name here would be a silent no-op.
+        let sampling = SamplingTuning {
+            repeat_penalty: Some(1.15),
+            ..SamplingTuning::default()
+        };
+        let mut payload = base_payload();
+        sampling.apply_to_payload(&mut payload);
+        assert!(payload.get("repeat_penalty").is_some());
+        assert!(payload.get("repetition_penalty").is_none());
+    }
+
+    #[test]
+    fn a_repeat_penalty_below_one_is_rejected() {
+        let sampling = SamplingTuning {
+            repeat_penalty: Some(0.1),
+            ..SamplingTuning::default()
+        };
+        let error = sampling.validate("architectures.gemma4").unwrap_err();
+        assert!(error.contains("1.0 or above"), "got: {error}");
+    }
+
+    #[test]
+    fn an_out_of_range_presence_penalty_is_rejected() {
+        let sampling = SamplingTuning {
+            presence_penalty: Some(3.0),
+            ..SamplingTuning::default()
+        };
+        let error = sampling.validate("architectures.qwen35").unwrap_err();
+        assert!(error.contains("between -2 and 2"), "got: {error}");
     }
 
     #[test]

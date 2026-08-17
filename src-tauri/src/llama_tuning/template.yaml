@@ -111,11 +111,22 @@ architectures:
       # draft tokens are pure waste.
       cache_type_k: q8_0
       cache_type_v: q8_0
-    # Gemma is trained for top_k 64. Omitted fields are not sent at all, so
-    # llama.cpp's own sampler defaults apply to anything left out.
+    # Google's published recipe for Gemma 4 is temperature 1.0 / top_p 0.95 /
+    # top_k 64, and QAT does not change it. Omitted fields are not sent at all,
+    # so llama.cpp's own sampler defaults apply to anything left out.
+    #
+    # temperature is absent ON PURPOSE - HalluScribe sets it per role (the sweep
+    # runs colder than briefing chat) and one value here would override both.
     sampling:
       top_k: 64
+      top_p: 0.95
       min_p: 0
+      # Both penalties are OFF by default, matching Gemma's own recipe. Reach
+      # for repeat_penalty only if output actually repeats: 1.05-1.15 is the
+      # useful band and above 1.2 starts damaging coherence. (llama.cpp parses
+      # `repeat_penalty`; model cards call the same knob `repetition_penalty`.)
+      # presence_penalty: 0
+      # repeat_penalty: 1.0
     extra_args: []
 
   # ---------------------------------------------------------------------------
@@ -147,12 +158,21 @@ architectures:
     # left unset here - they describe a sidecar drafter that does not exist.
     speculative:
       n_max: 2
-    # Qwen's precise-coding sampler recipe.
+    # Qwen's precise-coding sampler recipe - this matches the vendor's own
+    # launch line for the 27B (`--top-p 0.95 --top-k 20 --min-p 0.0` with
+    # reasoning_effort medium), so change it only with a measurement in hand.
     sampling:
       top_k: 20
       top_p: 0.95
       min_p: 0
       reasoning_effort: medium
+      # Qwen publishes TWO recipes and the penalties are where they differ:
+      # thinking mode wants presence_penalty 0, instruct/non-thinking wants 1.5
+      # to suppress repetition. HalluScribe runs this family with reasoning on,
+      # so 0 (the default, omitted) is the matching half. If you turn reasoning
+      # off, or see the model looping, 1.5 is the vendor's answer - it can cause
+      # occasional language mixing, which is the trade they document.
+      # presence_penalty: 1.5
     extra_args: []
     #
     # WATCH OUT - reasoning and MTP interact on this family. With a reasoning
