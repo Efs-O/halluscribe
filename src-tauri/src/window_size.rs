@@ -73,7 +73,12 @@ pub fn remember(archive_dir: &Path, size: PhysicalSize<u32>, force: bool) {
     if !force && !throttle_allows() {
         return;
     }
-    let mut current = match settings::load_settings(archive_dir) {
+    // Window geometry describes the machine's screen, not the archive, so it is
+    // host-owned: the write goes to the root that owns it. Targeting the active
+    // workspace instead would land in a guest file, where the host-owned fields
+    // are stripped on save and the size would never stick.
+    let target = settings::host_settings_dir(archive_dir);
+    let mut current = match settings::load_settings(&target) {
         Ok(settings) => settings,
         Err(error) => {
             eprintln!("[window] could not load settings to save window size: {error}");
@@ -85,7 +90,7 @@ pub fn remember(archive_dir: &Path, size: PhysicalSize<u32>, force: bool) {
     }
     current.window_width = Some(size.width);
     current.window_height = Some(size.height);
-    if let Err(error) = settings::save_settings(archive_dir, &current) {
+    if let Err(error) = settings::save_settings(&target, &current) {
         eprintln!("[window] failed to save window size: {error}");
     }
 }

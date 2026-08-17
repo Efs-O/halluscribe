@@ -144,8 +144,14 @@ pub fn run() {
             }
             // llama-tuning.yaml describes this machine's cards and cores, so it
             // lives at the DEFAULT root and is shared by every workspace.
+            // The machine's inference config lives at the DEFAULT root too, and
+            // guest workspaces read it through from there rather than holding a
+            // copy that drifts. Both roots are resolved from one lookup.
             match default_archive_dir(app.handle()) {
-                Ok(dir) => llama_tuning::set_host_root(dir),
+                Ok(dir) => {
+                    settings::set_host_root(dir.clone());
+                    llama_tuning::set_host_root(dir);
+                }
                 Err(error) => eprintln!("[llama] tuning root unavailable: {error}"),
             }
             let saved_settings = match archive_dir(app.handle())
