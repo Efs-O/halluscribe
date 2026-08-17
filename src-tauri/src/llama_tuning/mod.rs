@@ -7,11 +7,13 @@
 // Design and staging: docs/internal/LLAMA_TUNING_PLAN.md
 
 mod gguf;
+mod host;
 mod persistence;
 mod sampling;
 mod types;
 
 pub use gguf::{read_identity, ModelIdentity};
+pub use host::{resolve_host_tuning, set_host_root};
 pub use persistence::{load_tuning, tuning_path, write_template};
 pub use sampling::SamplingTuning;
 pub use types::{ArchTuning, SpeculativeTuning, TuningFile};
@@ -123,6 +125,37 @@ mod tests {
         let args = args_of(&command);
         let index = args.iter().position(|a| a == "--flash-attn").unwrap();
         assert_eq!(args[index + 1], "off");
+    }
+
+    /// Print the flag line each real GGUF in `HALLUSCRIBE_TEST_GGUF` (a
+    /// `;`-separated list) would now be spawned with, resolved against a fresh
+    /// copy of the shipped template - which is exactly what a first run writes.
+    /// Silently passes when the variable is unset, so CI stays green on a
+    /// machine with no models. Run with:
+    ///   cargo test --lib llama_tuning::tests::prints_the -- --nocapture
+    #[test]
+    fn prints_the_resolved_flag_line_for_a_real_gguf_when_one_is_pointed_at() {
+        let Ok(list) = std::env::var("HALLUSCRIBE_TEST_GGUF") else {
+            return;
+        };
+        let root =
+            std::env::temp_dir().join(format!("halluscribe-tuning-preview-{}", std::process::id()));
+        for entry in list.split(';').filter(|entry| !entry.trim().is_empty()) {
+            let model = Path::new(entry.trim());
+            let resolved = resolve_for_model(&root, model).expect("resolve");
+            let mut command = Command::new("llama-server");
+            resolved.tuning.apply(&mut command);
+            crate::llama_mtp::apply_mtp_flags(&mut command, model, &resolved).expect("mtp");
+            println!(
+                "\n{}\n  block={} arch={} builtin_mtp={}\n  {}",
+                model.display(),
+                resolved.matched_key,
+                resolved.identity.architecture,
+                resolved.identity.has_builtin_mtp,
+                args_of(&command).join(" ")
+            );
+        }
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -4,6 +4,7 @@ use super::schema::{extract_openai_tool_args, parse_openai_tool_args, save_sessi
 use super::{GemmaError, GemmaOutput, INFER_TIMEOUT, STARTUP_TIMEOUT_SECS, TEMPERATURE};
 use crate::llama_gpu::GpuConfig;
 use crate::llama_runtime::{self, ServerWaitError};
+use crate::llama_tuning::{resolve_host_tuning, ResolvedTuning, SamplingTuning};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -16,6 +17,10 @@ pub(crate) struct LlamaServer {
     child: Child,
     port: u16,
     model_name: String,
+    /// The sampler this model's architecture asks for. Resolved once at spawn
+    /// and reused for every request, so a mid-sweep edit to the tuning file
+    /// cannot make two sessions in one sweep run on different samplers.
+    sampling: SamplingTuning,
 }
 
 impl LlamaServer {
@@ -39,7 +44,8 @@ impl LlamaServer {
         // Reap any llama-server this app orphaned on a prior hard-kill so it
         // releases VRAM before we load a fresh model (OPS-1).
         crate::llama_pids::reap_orphans();
-        let mut child = spawn_server(&bin, model, port, gpu, ctx_size)?;
+        let resolved = resolve_host_tuning(model).map_err(GemmaError::TuningInvalid)?;
+        let mut child = spawn_server(&bin, model, port, gpu, ctx_size, &resolved)?;
         if let Err(error) = wait_for_server(port, &mut child) {
             let _ = child.kill();
             return Err(error);
@@ -49,6 +55,7 @@ impl LlamaServer {
             child,
             port,
             model_name,
+            sampling: resolved.tuning.sampling,
         })
     }
 
@@ -64,6 +71,7 @@ impl LlamaServer {
             max_tokens,
             system_prompt,
             transcript,
+            &self.sampling,
         )
     }
 
@@ -84,6 +92,7 @@ impl LlamaServer {
             system_prompt,
             user_content,
             tool,
+            &self.sampling,
         )
     }
 }
@@ -125,9 +134,12 @@ fn spawn_server(
     port: u16,
     gpu: &GpuConfig,
     ctx_size: u32,
+    resolved: &ResolvedTuning,
 ) -> Result<Child, GemmaError> {
     let mut cmd = Command::new(bin);
     llama_runtime::apply_serve_subcommand(&mut cmd, bin);
+    // Path, port, reasoning and context stay here: Settings and this role own
+    // them. Everything else comes from the model's block of llama-tuning.yaml.
     cmd.args([
         "-m",
         &model.to_string_lossy(),
@@ -137,23 +149,11 @@ fn spawn_server(
         "off",
         "--ctx-size",
         &ctx_size.to_string(),
-        "--batch-size",
-        "512",
-        "--cache-type-k",
-        "q8_0",
-        "--cache-type-v",
-        "q8_0",
-        "--parallel",
-        "1",
-        "--flash-attn",
-        "on",
-        "--threads",
-        "6",
-        "--threads-batch",
-        "6",
     ]);
+    resolved.tuning.apply(&mut cmd);
     gpu.apply(&mut cmd).map_err(GemmaError::GpuConfigInvalid)?;
-    crate::llama_mtp::apply_mtp_flags(&mut cmd, model).map_err(GemmaError::DrafterAmbiguous)?;
+    crate::llama_mtp::apply_mtp_flags(&mut cmd, model, resolved)
+        .map_err(GemmaError::DrafterAmbiguous)?;
     llama_runtime::apply_output_capture(&mut cmd);
     llama_runtime::apply_no_window(&mut cmd);
     cmd.spawn()
@@ -175,8 +175,9 @@ fn call(
     max_tokens: u32,
     system_prompt: &str,
     transcript: &str,
+    sampling: &SamplingTuning,
 ) -> Result<GemmaOutput, GemmaError> {
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -187,6 +188,8 @@ fn call(
         "max_tokens": max_tokens,
         "stream": false
     });
+    // The sweep's own temperature above stays: it is per-role, not per-model.
+    sampling.apply_to_payload(&mut payload);
     let value: Value = reqwest::blocking::Client::new()
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
         .json(&payload)
@@ -205,8 +208,9 @@ fn call_tool(
     system_prompt: &str,
     user_content: &str,
     tool: &Value,
+    sampling: &SamplingTuning,
 ) -> Result<Value, GemmaError> {
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -217,6 +221,7 @@ fn call_tool(
         "max_tokens": max_tokens,
         "stream": false
     });
+    sampling.apply_to_payload(&mut payload);
     let value: Value = reqwest::blocking::Client::new()
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
         .json(&payload)

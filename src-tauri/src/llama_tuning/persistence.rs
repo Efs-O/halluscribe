@@ -52,6 +52,7 @@ pub fn write_template(default_archive_dir: &Path) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::SamplingTuning;
     use super::*;
 
     fn temp_root(tag: &str) -> PathBuf {
@@ -70,6 +71,26 @@ mod tests {
         tuning.validate().expect("template must validate");
         assert!(tuning.architectures.contains_key("gemma4"));
         assert!(tuning.architectures.contains_key("qwen35"));
+    }
+
+    #[test]
+    fn the_embedding_block_preserves_the_flags_that_runtime_had_hardcoded() {
+        // The embedding runtime never shared the generation flag block - it runs
+        // a 4x batch and an unquantised cache. Falling to `default` here would
+        // quietly quarter its indexing batch, so it needs an entry of its own.
+        let tuning: TuningFile = serde_yaml::from_str(TEMPLATE).expect("template must parse");
+        let embedding = &tuning.architectures["gemma-embedding"];
+        assert_eq!(embedding.batch_size, 2048);
+        assert_eq!(embedding.ubatch_size, Some(2048));
+        assert_eq!(embedding.cache_type_k, "f16");
+        assert_eq!(embedding.cache_type_v, "f16");
+        assert!(embedding.flash_attn);
+        assert_eq!(embedding.parallel, 1);
+        assert_eq!(embedding.threads, 6);
+        assert_eq!(embedding.threads_batch, 6);
+        // An embedding model never drafts, never samples and has no projector.
+        assert_eq!(embedding.sampling, SamplingTuning::default());
+        assert!(embedding.reasoning_budget.is_none());
     }
 
     #[test]

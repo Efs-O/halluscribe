@@ -6,6 +6,7 @@ use super::tools::ToolCallResult;
 use super::{INFER_TIMEOUT, STARTUP_TIMEOUT_SECS, TEMPERATURE};
 use crate::llama_gpu::GpuConfig;
 use crate::llama_runtime::{self, ServerWaitError};
+use crate::llama_tuning::{resolve_host_tuning, ResolvedTuning, SamplingTuning};
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
@@ -31,6 +32,10 @@ pub(crate) fn stream(
     }
     let multimodal = has_images(messages);
     let prepared_messages = prepare_messages(messages)?;
+    // Resolved every turn, not only when a server is spawned: the sampler goes
+    // into the request body, so a warm server must still pick up an edit to the
+    // tuning file on the next message rather than at the next cold start.
+    let resolved = resolve_host_tuning(model)?;
     // Reuse the warm server only when it was spawned with these exact settings.
     // A changed model path (or ctx/gpu/reasoning/multimodal flag) retires it, so
     // picking a different GGUF takes effect on this turn instead of whenever the
@@ -51,6 +56,7 @@ pub(crate) fn stream(
                 ctx_size,
                 reasoning_enabled,
                 multimodal,
+                &resolved,
             )?;
             if let Err(e) = wait_ready(free, &mut child) {
                 let _ = child.kill();
@@ -72,6 +78,7 @@ pub(crate) fn stream(
         max_tokens,
         &prepared_messages,
         tools,
+        &resolved.tuning.sampling,
         &mut emit,
         cancel,
     )
@@ -84,6 +91,7 @@ fn do_stream(
     max_tokens: u32,
     messages: &[Value],
     tools: &[Value],
+    sampling: &SamplingTuning,
     emit: &mut impl FnMut(String, bool),
     cancel: &AtomicBool,
 ) -> Result<ToolCallResult, String> {
@@ -98,6 +106,8 @@ fn do_stream(
     if !tools.is_empty() {
         payload["tools"] = serde_json::json!(tools);
     }
+    // Chat's own, warmer temperature above stays: it is per-role, not per-model.
+    sampling.apply_to_payload(&mut payload);
     let response = reqwest::blocking::Client::new()
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
         .json(&payload)
@@ -116,9 +126,12 @@ fn spawn_server(
     ctx_size: u32,
     reasoning_enabled: bool,
     multimodal: bool,
+    resolved: &ResolvedTuning,
 ) -> Result<Child, String> {
     let mut command = Command::new(bin);
     llama_runtime::apply_serve_subcommand(&mut command, bin);
+    // Path, port, context and the reasoning switch stay here: Settings and this
+    // turn own them. The rest comes from the model's block of llama-tuning.yaml.
     command
         .args([
             "-m",
@@ -127,32 +140,19 @@ fn spawn_server(
             &port.to_string(),
             "--ctx-size",
             &ctx_size.to_string(),
-            "--batch-size",
-            "512",
-            "--cache-type-k",
-            "q8_0",
-            "--cache-type-v",
-            "q8_0",
-            "--parallel",
-            "1",
-            "--flash-attn",
-            "on",
-            "--threads",
-            "6",
-            "--threads-batch",
-            "6",
         ])
         .args(if reasoning_enabled {
             vec!["--reasoning", "on"]
         } else {
             vec!["--reasoning", "off"]
         });
+    resolved.tuning.apply(&mut command);
     gpu.apply(&mut command)?;
     if multimodal {
         let mmproj = find_mmproj(model)?;
         command.args(["--mmproj", &mmproj.to_string_lossy()]);
     }
-    crate::llama_mtp::apply_mtp_flags(&mut command, model)?;
+    crate::llama_mtp::apply_mtp_flags(&mut command, model, resolved)?;
     llama_runtime::apply_output_capture(&mut command);
     llama_runtime::apply_no_window(&mut command);
     command

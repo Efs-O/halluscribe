@@ -87,6 +87,10 @@ pub enum GemmaError {
     /// `DrafterAmbiguous`, retrying never clears it — the user has to fix the
     /// setting — so the sweep must not treat it as a transient conflict.
     GpuConfigInvalid(String),
+    /// `llama-tuning.yaml` could not be read, or the model's GGUF header could
+    /// not be. Like the two above, retrying never clears it - the user has to
+    /// fix the file - so the sweep must not treat it as a transient conflict.
+    TuningInvalid(String),
     EmptyResponse,
     BadToolCall(String),
 }
@@ -102,6 +106,7 @@ impl fmt::Display for GemmaError {
             Self::Conflict(s) => write!(f, "inference conflict: {s}"),
             Self::DrafterAmbiguous(s) => write!(f, "MTP drafter ambiguous: {s}"),
             Self::GpuConfigInvalid(s) => write!(f, "GPU settings invalid: {s}"),
+            Self::TuningInvalid(s) => write!(f, "llama-server tuning invalid: {s}"),
             Self::EmptyResponse => write!(f, "Gemma returned an empty response"),
             Self::BadToolCall(s) => write!(f, "tool-call response invalid: {s}"),
         }

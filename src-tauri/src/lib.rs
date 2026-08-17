@@ -142,6 +142,12 @@ pub fn run() {
             if let Ok(dir) = archive_dir(app.handle()) {
                 llama_runtime::set_log_dir(dir.join("logs"));
             }
+            // llama-tuning.yaml describes this machine's cards and cores, so it
+            // lives at the DEFAULT root and is shared by every workspace.
+            match default_archive_dir(app.handle()) {
+                Ok(dir) => llama_tuning::set_host_root(dir),
+                Err(error) => eprintln!("[llama] tuning root unavailable: {error}"),
+            }
             let saved_settings = match archive_dir(app.handle())
                 .map_err(|error| format!("archive path: {error}"))
                 .and_then(|dir| settings::load_settings(&dir).map_err(|error| error.to_string()))

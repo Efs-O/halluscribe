@@ -237,8 +237,15 @@ fn embedding_runtime(settings: &HalluScribeSettings) -> Result<EmbeddingRuntime,
 }
 
 fn spawn_server(runtime: &EmbeddingRuntime) -> Result<Child, String> {
+    // EmbeddingGemma reports `gemma-embedding`, a different architecture from
+    // the `gemma4` the sweep and chat run, so it gets its own block of
+    // llama-tuning.yaml and its much larger batch size is a value the user can
+    // now see and change.
+    let resolved = crate::llama_tuning::resolve_host_tuning(&runtime.model)?;
     let mut cmd = Command::new(&runtime.bin);
     llama_runtime::apply_serve_subcommand(&mut cmd, &runtime.bin);
+    // The context and the embedding switches are this role's own: an embedding
+    // server that is not in embedding mode is not an embedding server.
     cmd.args([
         "-m",
         &runtime.model.to_string_lossy(),
@@ -246,22 +253,11 @@ fn spawn_server(runtime: &EmbeddingRuntime) -> Result<Child, String> {
         &runtime.port.to_string(),
         "--ctx-size",
         "4096",
-        "--batch-size",
-        "2048",
-        "--ubatch-size",
-        "2048",
-        "--parallel",
-        "1",
-        "--threads",
-        "6",
-        "--threads-batch",
-        "6",
-        "--flash-attn",
-        "on",
         "--embedding",
         "--pooling",
         "mean",
     ]);
+    resolved.tuning.apply(&mut cmd);
     runtime.gpu.apply(&mut cmd)?;
     llama_runtime::apply_output_capture(&mut cmd);
     llama_runtime::apply_no_window(&mut cmd);

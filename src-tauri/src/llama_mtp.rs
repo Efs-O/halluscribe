@@ -3,14 +3,10 @@
 // to draft ahead — and with which drafter. Kept out of `llama_runtime` so the
 // shared subprocess plumbing stays under the file-size limit.
 
+use crate::llama_tuning::ResolvedTuning;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
-/// How many tokens the MTP head drafts per step. llama.cpp's own default is 3.
-/// Not a user setting: the best value is a property of the drafter/GPU pair, not
-/// of the archive, and a wrong one costs throughput rather than correctness.
-const SPEC_DRAFT_N_MAX: &str = "4";
 
 /// Locate the multi-token-prediction drafter GGUF belonging to `model`.
 ///
@@ -87,28 +83,64 @@ fn mtp_target_family(model_stem: &str) -> &str {
         .unwrap_or(model_stem)
 }
 
-/// Add the MTP speculative-decoding flags when a drafter sits beside `model`.
-/// A model with no drafter gets no flags, so a single argument list serves both
-/// MTP and non-MTP models and swapping the model can never leave a stale
+/// Add the MTP speculative-decoding flags when this model can draft ahead.
+///
+/// Two ways it can. A SIDECAR drafter beside the model gets `--model-draft`
+/// pointed at it. A head built INTO the model GGUF - which the header declares
+/// and `ResolvedTuning::identity` carries - gets the same `--spec-*` block with
+/// no `--model-draft`, because there is no second file to point at. A model with
+/// neither gets no flags at all, so swapping the model can never leave a stale
 /// `--model-draft` behind to kill the server on load.
-pub fn apply_mtp_flags(command: &mut Command, model: &Path) -> Result<(), String> {
-    let Some(drafter) = find_mtp_drafter(model)? else {
-        return Ok(());
-    };
-    command.args([
-        "--model-draft",
-        &drafter.to_string_lossy(),
-        "--spec-type",
-        "draft-mtp",
-        "--spec-draft-n-max",
-        SPEC_DRAFT_N_MAX,
-    ]);
+///
+/// The values come from the model's own block of `llama-tuning.yaml`; a family
+/// that drafts badly at 4 tokens can be dialled down without a rebuild.
+pub fn apply_mtp_flags(
+    command: &mut Command,
+    model: &Path,
+    resolved: &ResolvedTuning,
+) -> Result<(), String> {
+    match find_mtp_drafter(model)? {
+        Some(drafter) => resolved.tuning.apply_speculative(command, Some(&drafter)),
+        // A sidecar wins when both exist: it is a separate, larger drafter that
+        // the user deliberately placed there.
+        None if resolved.identity.has_builtin_mtp => {
+            resolved.tuning.apply_speculative(command, None)
+        }
+        None => {}
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llama_tuning::{ArchTuning, ModelIdentity, SpeculativeTuning};
+
+    /// A resolved tuning that drafts 2 tokens, so a flag carrying that value is
+    /// visibly from the file rather than from a leftover constant.
+    fn resolved(has_builtin_mtp: bool) -> ResolvedTuning {
+        ResolvedTuning {
+            identity: ModelIdentity {
+                architecture: "test-arch".to_string(),
+                has_builtin_mtp,
+            },
+            matched_key: "test-arch".to_string(),
+            tuning: ArchTuning {
+                speculative: SpeculativeTuning {
+                    n_max: 2,
+                    ..SpeculativeTuning::default()
+                },
+                ..ArchTuning::default()
+            },
+        }
+    }
+
+    fn args_of(command: &Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
 
     /// Build a throwaway model directory containing `files`, returning its path
     /// and the path of the model itself.
@@ -193,15 +225,31 @@ mod tests {
             &["mtp-gemma-4-26B-A4B-it.gguf"],
         );
         let mut command = Command::new("llama-server");
-        apply_mtp_flags(&mut command, &model).unwrap();
-        let args: Vec<String> = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect();
+        apply_mtp_flags(&mut command, &model, &resolved(false)).unwrap();
+        let args = args_of(&command);
+        assert!(args.contains(&"--model-draft".to_string()));
         assert!(args.contains(&"--spec-type".to_string()));
         assert!(args.contains(&"draft-mtp".to_string()));
-        assert!(args.contains(&"--spec-draft-n-max".to_string()));
-        assert!(args.contains(&SPEC_DRAFT_N_MAX.to_string()));
+        // The count comes from the tuning file now, not from a constant.
+        let index = args
+            .iter()
+            .position(|arg| arg == "--spec-draft-n-max")
+            .unwrap();
+        assert_eq!(args[index + 1], "2");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_builtin_mtp_head_drafts_without_a_sidecar_file() {
+        // Qwen 3.8 carries its drafter inside the model GGUF. Before the header
+        // was read, this model got no speculative decoding at all.
+        let (dir, model) = model_dir_with("builtin", "Qwen3.8-27B-Q3_K_M.gguf", &[]);
+        let mut command = Command::new("llama-server");
+        apply_mtp_flags(&mut command, &model, &resolved(true)).unwrap();
+        assert_eq!(
+            args_of(&command),
+            vec!["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"]
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -209,7 +257,7 @@ mod tests {
     fn apply_mtp_flags_is_a_no_op_without_a_drafter() {
         let (dir, model) = model_dir_with("bare", "gemma-4-26B-A4B-it-Q4_K_M.gguf", &[]);
         let mut command = Command::new("llama-server");
-        apply_mtp_flags(&mut command, &model).unwrap();
+        apply_mtp_flags(&mut command, &model, &resolved(false)).unwrap();
         assert_eq!(command.get_args().count(), 0);
         let _ = fs::remove_dir_all(dir);
     }

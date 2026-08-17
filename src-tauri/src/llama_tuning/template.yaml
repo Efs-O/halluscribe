@@ -26,6 +26,7 @@
 # WHAT IS *NOT* HERE, AND WHY
 #   Model path, llama-server binary, port ....... Settings
 #   Context window (--ctx-size), max tokens ..... Settings
+#   --embedding / --pooling, --reasoning on|off . the calling path, in code
 #   GPU placement (--n-gpu-layers, --device,
 #     --split-mode, --tensor-split, --main-gpu)   Settings
 #   temperature ................................. the calling path, in code
@@ -166,3 +167,29 @@ architectures:
     # throughput. Recent llama.cpp treats -1/auto as auto-fit and holds back a
     # ~1 GB margin, which can strand a layer; an explicit large number such as
     # 999 disables auto-fit and keeps the whole model on the card.
+
+  # ---------------------------------------------------------------------------
+  # EmbeddingGemma - the semantic-search model, which reports `gemma-embedding`
+  # rather than `gemma4`. A different job entirely: it encodes many short texts
+  # in one pass instead of generating, so it wants a large batch and has no use
+  # for drafting, a projector or a sampler. These are the values HalluScribe
+  # used before this file existed.
+  # ---------------------------------------------------------------------------
+  gemma-embedding:
+    # Four times the generation batch: indexing feeds it thousands of chunks,
+    # and the whole 4096-token context fits in one micro-batch.
+    batch_size: 2048
+    ubatch_size: 2048
+    # f16 - llama.cpp's own default. The context is small enough that
+    # quantising this cache saves little and costs recall precision.
+    cache_type_k: f16
+    cache_type_v: f16
+    parallel: 1
+    flash_attn: true
+    threads: 6
+    threads_batch: 6
+    # Nothing below applies to an embedding model: it never drafts, never sees
+    # an image and never samples a token.
+    speculative: {}
+    sampling: {}
+    extra_args: []
