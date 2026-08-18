@@ -7,6 +7,7 @@ mod claude;
 mod codex;
 mod continue_scan;
 mod forge;
+mod import_discovery_tests;
 pub mod secrets;
 mod shared;
 mod tests;
@@ -66,17 +67,22 @@ pub fn scan_sessions(
 /// disagree about which files an import folder holds.
 const CHATGPT_CANDIDATES: &[&str] = &["conversations.json"];
 const CLAUDEAI_CANDIDATES: &[&str] = &["conversations.json"];
-const GEMINI_CANDIDATES: &[&str] = &[
-    "Takeout/My Activity/Gemini Apps/My Activity.json",
-    "My Activity.json",
-];
+/// Gemini's Takeout nesting (`Takeout/My Activity/Gemini Apps/`) no longer needs
+/// to be spelled out: the bare file name is the anchor and the bounded-depth
+/// search in `resolve_import_paths` walks down to it. `settings::imports` still
+/// seeds the Takeout sub-path, because that is where the user unpacks it.
+const GEMINI_CANDIDATES: &[&str] = &["My Activity.json"];
 const GROK_CANDIDATES: &[&str] = &["prod-grok-backend.json"];
 
-/// Grok's export unpacks as `ttl/30d/export_data/<user_id>/prod-grok-backend.json`.
-/// `<user_id>` is a per-account UUID, so it cannot be a literal candidate the way
-/// Gemini's Takeout path can - the directory is enumerated instead (see
-/// `grok_export_roots`), which lets the folder be dropped in exactly as downloaded.
-const GROK_EXPORT_DATA_SUBPATH: [&str; 3] = ["ttl", "30d", "export_data"];
+/// How far below a configured import folder the search looks. Grok's real
+/// layout needs all four levels (`ttl`/`30d`/`export_data`/`<user_id>`/file),
+/// and that comfortably covers one wrapper folder around a ChatGPT, Claude.ai
+/// or Gemini export.
+const MAX_IMPORT_DEPTH: usize = 4;
+
+/// Hard cap on directories opened during one search, so pointing an import
+/// path at something enormous (a whole Desktop) still returns promptly.
+const MAX_IMPORT_DIRS_VISITED: usize = 2_000;
 
 pub fn scan_chat_imports(settings: &HalluScribeSettings, lookback_secs: u64) -> Vec<ScanTarget> {
     let mut targets = Vec::new();
@@ -136,7 +142,7 @@ pub fn chat_import_sources(settings: &HalluScribeSettings, provider_key: &str) -
     if trimmed.is_empty() {
         return Vec::new();
     }
-    resolve_provider_paths(&PathBuf::from(trimmed), provider_key, candidates)
+    resolve_import_paths(&PathBuf::from(trimmed), candidates)
 }
 
 fn maybe_add_import(
@@ -151,7 +157,7 @@ fn maybe_add_import(
         return;
     }
     let base = PathBuf::from(normalized_path);
-    for path in resolve_provider_paths(&base, provider.provider_key(), candidates) {
+    for path in resolve_import_paths(&base, candidates) {
         let Ok(meta) = fs::metadata(&path) else {
             continue;
         };
@@ -170,106 +176,104 @@ fn maybe_add_import(
     }
 }
 
-/// Resolve a provider's import files, applying any layout that provider alone
-/// has on top of the shared candidate search.
-///
-/// Both authorities go through this - the sweep via `maybe_add_import` and the
-/// raw backfill via `chat_import_sources` - so a provider-specific layout can
-/// never be honoured by one and missed by the other. See
-/// docs/internal/IMPORT_PATHS_PLAN.md § 2.
-fn resolve_provider_paths(base: &Path, provider_key: &str, candidates: &[&str]) -> Vec<PathBuf> {
-    let mut found = resolve_import_paths(base, candidates);
-    if provider_key == "grok" {
-        for root in grok_export_roots(base) {
-            found.extend(resolve_import_paths(&root, candidates));
-        }
-        found.sort();
-        found.dedup();
-    }
-    found
-}
-
-/// Every `ttl/30d/export_data/<user_id>` directory under `base`, so a Grok
-/// export can be dropped in as downloaded. Returns nothing when that nesting is
-/// absent, which is the case when the user points straight at the export folder.
-fn grok_export_roots(base: &Path) -> Vec<PathBuf> {
-    let export_data = GROK_EXPORT_DATA_SUBPATH
-        .iter()
-        .fold(base.to_path_buf(), |path, part| path.join(part));
-    let Ok(entries) = fs::read_dir(&export_data) else {
-        return Vec::new();
-    };
-    let mut roots: Vec<PathBuf> = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect();
-    roots.sort();
-    roots
-}
-
 /// Resolve one or more import files for a configured base path.
 ///
 /// A base that points directly at a file is used as-is. A base directory is
-/// searched for each expected candidate (e.g. `conversations.json`) plus any
-/// split-export siblings (e.g. `conversations-000.json` … `conversations-004.json`),
-/// which large ChatGPT/Claude.ai exports are chunked into. Each matching file is
-/// read independently, so every chunk contributes its conversations.
+/// searched for the provider's candidate file names (e.g. `conversations.json`)
+/// plus any split-export siblings (`conversations-000.json` …
+/// `conversations-004.json`), which large ChatGPT/Claude.ai exports are chunked
+/// into. Each matching file is read independently, so every chunk contributes
+/// its conversations.
+///
+/// The search is bounded-depth and **shallowest-wins**: subdirectories are only
+/// descended into while nothing has been found, and the first depth that yields
+/// any match is the answer. That is what lets every provider's export be
+/// dropped in exactly as downloaded — a wrapper folder, Gemini's Takeout
+/// nesting, Grok's `ttl/30d/export_data/<user_id>/` — with one rule instead of
+/// a per-provider special case. Shallowest-wins is also the safety property:
+/// with both `conversations.json` and `old-backup/conversations.json` present,
+/// only the top-level one is imported, so a stale copy can never write over the
+/// same session ids.
+///
+/// This is the SINGLE authority for locating chat imports: the sweep reaches it
+/// through `maybe_add_import`, the raw backfill through `chat_import_sources`.
+/// See docs/internal/IMPORT_PATHS_PLAN.md § 2.
 fn resolve_import_paths(base: &Path, candidates: &[&str]) -> Vec<PathBuf> {
     if base.is_file() {
         return vec![base.to_path_buf()];
     }
-    let mut found = Vec::new();
-    for candidate in candidates {
-        let direct = base.join(candidate);
-        if direct.exists() {
-            found.push(direct);
+    // Anchors are compared case-insensitively: `My Activity.json` and
+    // `my activity.json` are the same export, and only Linux (which CI runs)
+    // would ever tell them apart.
+    let anchors: Vec<String> = candidates
+        .iter()
+        .filter_map(|candidate| Path::new(candidate).file_name()?.to_str())
+        .map(|name| name.to_lowercase())
+        .collect();
+    let mut level = vec![base.to_path_buf()];
+    let mut visited = 0usize;
+    for _ in 0..=MAX_IMPORT_DEPTH {
+        let mut found = Vec::new();
+        let mut next = Vec::new();
+        for dir in &level {
+            if visited >= MAX_IMPORT_DIRS_VISITED {
+                break;
+            }
+            visited += 1;
+            let Ok(entries) = fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                if entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+                    // Dot-directories are tool state, never an export.
+                    if !name.starts_with('.') {
+                        next.push(path);
+                    }
+                    continue;
+                }
+                if matches_candidate(name, &anchors) {
+                    found.push(path);
+                }
+            }
         }
-        found.extend(split_export_siblings(base, candidate));
+        if !found.is_empty() {
+            found.sort();
+            found.dedup();
+            return found;
+        }
+        if next.is_empty() {
+            break;
+        }
+        level = next;
     }
-    found.sort();
-    found.dedup();
-    found
+    Vec::new()
 }
 
-/// Find split-export chunks for `candidate` inside `base`, i.e. files named
-/// `<stem>-<suffix>.<ext>` next to the expected `<stem>.<ext>` (nested candidate
-/// paths are resolved relative to `base`).
-fn split_export_siblings(base: &Path, candidate: &str) -> Vec<PathBuf> {
-    let candidate_path = Path::new(candidate);
-    let dir = match candidate_path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => base.join(parent),
-        _ => base.to_path_buf(),
-    };
-    let Some(file_name) = candidate_path.file_name().and_then(|name| name.to_str()) else {
-        return Vec::new();
-    };
-    let (stem, ext) = match file_name.rsplit_once('.') {
-        Some((stem, ext)) => (stem, Some(ext)),
-        None => (file_name, None),
-    };
-    let prefix = format!("{stem}-");
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        if !name.starts_with(&prefix) {
-            continue;
+/// True when `name` is one of the candidate export files, or a split-export
+/// sibling of one: `<stem>-<suffix>.<ext>` beside the expected `<stem>.<ext>`.
+/// `anchors` must already be lowercase.
+fn matches_candidate(name: &str, anchors: &[String]) -> bool {
+    let lower = name.to_lowercase();
+    anchors.iter().any(|anchor| {
+        if lower == *anchor {
+            return true;
         }
-        let ext_ok = match ext {
-            Some(ext) => name.ends_with(&format!(".{ext}")),
-            None => !name.contains('.'),
+        let (stem, ext) = match anchor.rsplit_once('.') {
+            Some((stem, ext)) => (stem, Some(ext)),
+            None => (anchor.as_str(), None),
         };
-        if ext_ok {
-            out.push(entry.path());
+        if !lower.starts_with(&format!("{stem}-")) {
+            return false;
         }
-    }
-    out
+        match ext {
+            Some(ext) => lower.ends_with(&format!(".{ext}")),
+            None => !lower.contains('.'),
+        }
+    })
 }
 
 fn scan_recorded_chat_sessions(archive_dir: &Path, _lookback_secs: u64) -> Vec<ScanTarget> {

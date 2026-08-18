@@ -14,6 +14,12 @@
 
       <section class="settings-section">
         <h2 class="section-title">CHAT IMPORTS</h2>
+        <p class="field-note">
+          Point each of these at the folder you unpack that provider's export into. The export can
+          be dropped in exactly as downloaded — a wrapper folder or the provider's own nesting
+          (Google Takeout, Grok's ttl/30d/export_data/…) is searched a few levels down. When the
+          same export file exists at two depths, only the shallower one is imported.
+        </p>
 
         <PathPickerField
           label="ChatGPT import path"
@@ -44,7 +50,7 @@
           bind:value={settings.grok_import_path}
           mode="folder"
           placeholder=".../chat_sessions/grok"
-          note="Folder holding prod-grok-backend.json. The export can be dropped in exactly as downloaded (ttl/30d/export_data/...) or unpacked flat."
+          note="Folder holding prod-grok-backend.json."
           onchange={onBlur}
         />
 
