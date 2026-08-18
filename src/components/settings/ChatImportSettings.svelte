@@ -40,6 +40,15 @@
         />
 
         <PathPickerField
+          label="Grok import path"
+          bind:value={settings.grok_import_path}
+          mode="folder"
+          placeholder=".../chat_sessions/grok"
+          note="Folder holding prod-grok-backend.json. The export can be dropped in exactly as downloaded (ttl/30d/export_data/...) or unpacked flat."
+          onchange={onBlur}
+        />
+
+        <PathPickerField
           label="Ollama Chat database path"
           bind:value={settings.ollama_chat_db_path}
           mode="file"

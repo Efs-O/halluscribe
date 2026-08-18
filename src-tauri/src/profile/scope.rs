@@ -32,7 +32,7 @@ const PERSONAL_SECTIONS: [ProfileSection; 4] = [
 /// Chat-export providers folded into the Personal scope's source list in
 /// addition to the user's configured `profile_sources`. Work scope never
 /// sees these unless the user explicitly added them to `profile_sources`.
-const PERSONAL_EXTRA_SOURCES: [&str; 3] = ["chatgpt", "claude_ai", "gemini"];
+const PERSONAL_EXTRA_SOURCES: [&str; 4] = ["chatgpt", "claude_ai", "gemini", "grok"];
 
 impl ProfileScope {
     /// Stable machine-readable key: also the on-disk directory name
@@ -138,7 +138,8 @@ mod tests {
         assert!(sources.contains(&"chatgpt".to_string()));
         assert!(sources.contains(&"claude_ai".to_string()));
         assert!(sources.contains(&"gemini".to_string()));
-        assert_eq!(sources.len(), 4);
+        assert!(sources.contains(&"grok".to_string()));
+        assert_eq!(sources.len(), 5);
     }
 
     #[test]
@@ -149,6 +150,6 @@ mod tests {
             sources.iter().filter(|s| s.as_str() == "chatgpt").count(),
             1
         );
-        assert_eq!(sources.len(), 4);
+        assert_eq!(sources.len(), 5);
     }
 }

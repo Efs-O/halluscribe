@@ -3,6 +3,7 @@ mod chatgpt;
 mod chatgpt_content;
 mod claudeai;
 mod gemini;
+mod grok;
 mod halluscribe_gemma_chat;
 mod ollama_chat;
 #[cfg(test)]
@@ -31,6 +32,7 @@ pub enum ChatProvider {
     ChatGPT,
     ClaudeAI,
     Gemini,
+    Grok,
     HalluScribeGemmaChat,
     OllamaChat,
 }
@@ -118,6 +120,7 @@ impl ChatProvider {
             Self::ChatGPT => "ChatGPT",
             Self::ClaudeAI => "Claude.ai",
             Self::Gemini => "Gemini",
+            Self::Grok => "Grok",
             Self::HalluScribeGemmaChat => "Gemma 4",
             Self::OllamaChat => "Ollama Chat",
         }
@@ -130,6 +133,7 @@ impl ChatProvider {
             Self::ChatGPT => "ChatGPT".to_string(),
             Self::ClaudeAI => "Claude".to_string(),
             Self::Gemini => "Gemini Apps".to_string(),
+            Self::Grok => "Grok".to_string(),
             Self::HalluScribeGemmaChat => "HalluScribe".to_string(),
             Self::OllamaChat => "Ollama".to_string(),
         }
@@ -151,6 +155,7 @@ impl ChatProvider {
             Self::ChatGPT => "chatgpt",
             Self::ClaudeAI => "claude_ai",
             Self::Gemini => "gemini",
+            Self::Grok => "grok",
             Self::HalluScribeGemmaChat => "halluscribe_gemma_chat",
             Self::OllamaChat => "ollama_chat",
         }
@@ -198,6 +203,7 @@ pub fn read_target(target: &ScanTarget) -> Result<Vec<ParsedSession>, ReaderErro
             ChatProvider::ChatGPT => chatgpt::read(&target.path),
             ChatProvider::ClaudeAI => claudeai::read(&target.path),
             ChatProvider::Gemini => gemini::read(&target.path),
+            ChatProvider::Grok => grok::read(&target.path),
             ChatProvider::HalluScribeGemmaChat => halluscribe_gemma_chat::read(&target.path),
             ChatProvider::OllamaChat => ollama_chat::read(&target.path),
             ChatProvider::ClaudeCode

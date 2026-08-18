@@ -93,7 +93,7 @@ const RAW_SESSION_MAX_CHARS_CAP: usize = 50_000;
 pub struct ScopeRequest {
     /// Which profile to return: "work" (default) or "personal". Personal is
     /// a SUPERSET that also carries private-chat-derived (ChatGPT/Claude.ai/
-    /// Gemini) life context, so request it only when that exposure is intended.
+    /// Gemini/Grok) life context, so request it only when that exposure is intended.
     #[serde(default)]
     pub scope: Option<String>,
 }
@@ -105,7 +105,7 @@ pub struct ScopeRequest {
 pub struct DigestRequest {
     /// Which scope's digest to return: "work" (default) or "personal". Personal
     /// is a SUPERSET that also carries private-chat-derived (ChatGPT/Claude.ai/
-    /// Gemini) life context, so request it only when that exposure is intended.
+    /// Gemini/Grok) life context, so request it only when that exposure is intended.
     #[serde(default)]
     pub scope: Option<String>,
     /// Byte offset to continue from (default 0). Use the `offset=N` value named
@@ -316,7 +316,7 @@ impl HalluscribeServer {
     }
 
     #[tool(
-        description = "Read the PRESERVED RAW TRANSCRIPT of one session VERBATIM - the untouched source file (agent JSONL, chat export, etc.) rather than a distilled summary. Use this to open the full raw of a search_sessions or search_raw_transcripts hit when you need everything, not just an excerpt. Works even for unsummarised captured sessions that have no read_session body (search_raw_transcripts groups with `summarised: false`) - this is the only way to read those. Paged by BYTE offsets into the UTF-8 text, clamped to character boundaries: pass `offset`/`max_chars` (default 20000, capped at 50000). Returns JSON {session_id, text, offset, next_offset, total_bytes, truncated}; when `truncated` is true, call again with `offset` set to `next_offset` to continue. For multi-chat providers (ChatGPT/Claude.ai/Gemini exports) the preserved file holds THIS session's own conversation, sliced out of the export - it does not contain sibling chats. Errors honestly (never fabricates content) when no raw copy exists for the session, or when the preserved file isn't valid UTF-8 text."
+        description = "Read the PRESERVED RAW TRANSCRIPT of one session VERBATIM - the untouched source file (agent JSONL, chat export, etc.) rather than a distilled summary. Use this to open the full raw of a search_sessions or search_raw_transcripts hit when you need everything, not just an excerpt. Works even for unsummarised captured sessions that have no read_session body (search_raw_transcripts groups with `summarised: false`) - this is the only way to read those. Paged by BYTE offsets into the UTF-8 text, clamped to character boundaries: pass `offset`/`max_chars` (default 20000, capped at 50000). Returns JSON {session_id, text, offset, next_offset, total_bytes, truncated}; when `truncated` is true, call again with `offset` set to `next_offset` to continue. For multi-chat providers (ChatGPT/Claude.ai/Gemini/Grok exports) the preserved file holds THIS session's own conversation, sliced out of the export - it does not contain sibling chats. Errors honestly (never fabricates content) when no raw copy exists for the session, or when the preserved file isn't valid UTF-8 text."
     )]
     fn read_raw_session(
         &self,
@@ -326,7 +326,7 @@ impl HalluscribeServer {
     }
 
     #[tool(
-        description = "Get the distilled profile.md for the requested scope: identity, projects, conventions, recurring problems, communication style, and timeline distilled from the user's archived sessions. Optional `scope` argument: \"work\" (default) or \"personal\". Personal is a SUPERSET that also carries private-chat-derived (ChatGPT/Claude.ai/Gemini) life context - request it only when that exposure is intended. Returns a placeholder message if no profile has been built yet for the requested scope."
+        description = "Get the distilled profile.md for the requested scope: identity, projects, conventions, recurring problems, communication style, and timeline distilled from the user's archived sessions. Optional `scope` argument: \"work\" (default) or \"personal\". Personal is a SUPERSET that also carries private-chat-derived (ChatGPT/Claude.ai/Gemini/Grok) life context - request it only when that exposure is intended. Returns a placeholder message if no profile has been built yet for the requested scope."
     )]
     fn get_profile(
         &self,

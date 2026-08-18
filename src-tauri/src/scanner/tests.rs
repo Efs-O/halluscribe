@@ -191,6 +191,81 @@ mod tests {
     }
 
     #[test]
+    fn scan_chat_imports_finds_grok_export_nested_as_downloaded() {
+        // A Grok export unpacks as ttl/30d/export_data/<user_id>/prod-grok-backend.json.
+        // <user_id> is a per-account UUID, so it cannot be a literal candidate -
+        // the folder must still be found when dropped in exactly as downloaded.
+        let dir = tempdir().unwrap();
+        let nested = dir
+            .path()
+            .join("ttl")
+            .join("30d")
+            .join("export_data")
+            .join("5134baa3-7e58-487e-a6bf-68bcd8d71450");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("prod-grok-backend.json"), "{}").unwrap();
+        // Sibling exports in the same folder must not be mistaken for it.
+        fs::write(nested.join("prod-mc-billing.json"), "{}").unwrap();
+
+        let settings = HalluScribeSettings {
+            grok_import_path: dir.path().display().to_string(),
+            ..HalluScribeSettings::default()
+        };
+
+        let targets = scan_chat_imports(&settings, u64::MAX);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].path, nested.join("prod-grok-backend.json"));
+        assert!(matches!(
+            targets[0].kind,
+            super::super::ScanTargetKind::Import(ChatProvider::Grok)
+        ));
+    }
+
+    #[test]
+    fn grok_export_is_also_found_unpacked_flat() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("prod-grok-backend.json"), "{}").unwrap();
+
+        let settings = HalluScribeSettings {
+            grok_import_path: dir.path().display().to_string(),
+            ..HalluScribeSettings::default()
+        };
+
+        let targets = scan_chat_imports(&settings, u64::MAX);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].path, dir.path().join("prod-grok-backend.json"));
+    }
+
+    /// The sweep and the raw backfill must locate the SAME files: a layout
+    /// honoured by one authority and missed by the other is the exact bug
+    /// IMPORT_PATHS_PLAN was written to prevent.
+    #[test]
+    fn both_import_authorities_agree_on_the_nested_grok_layout() {
+        let dir = tempdir().unwrap();
+        let nested = dir
+            .path()
+            .join("ttl")
+            .join("30d")
+            .join("export_data")
+            .join("some-uuid");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("prod-grok-backend.json"), "{}").unwrap();
+
+        let settings = HalluScribeSettings {
+            grok_import_path: dir.path().display().to_string(),
+            ..HalluScribeSettings::default()
+        };
+
+        let swept: Vec<PathBuf> = scan_chat_imports(&settings, u64::MAX)
+            .into_iter()
+            .map(|target| target.path)
+            .collect();
+        let backfilled = super::super::chat_import_sources(&settings, "grok");
+        assert_eq!(swept, backfilled);
+        assert_eq!(backfilled.len(), 1);
+    }
+
+    #[test]
     fn scan_chat_imports_discovers_split_chatgpt_export() {
         // Large ChatGPT exports arrive chunked as conversations-000.json, -001.json, …
         // (no plain conversations.json). Every chunk must be picked up.

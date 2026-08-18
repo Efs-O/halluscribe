@@ -58,6 +58,7 @@ export interface HalluScribeSettings {
   chatgpt_import_path: string;
   claudeai_import_path: string;
   gemini_import_path: string;
+  grok_import_path: string;
   ollama_chat_db_path: string;
   continue_data_path: string;
   scheduled_processing_enabled: boolean;

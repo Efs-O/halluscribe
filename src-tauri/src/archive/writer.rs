@@ -160,6 +160,8 @@ fn tool_slug(tool: &str) -> &str {
         "gemma4"
     } else if t.contains("gemini") {
         "gemini"
+    } else if t.contains("grok") {
+        "grok"
     } else if t.contains("claude.ai") || t == "claude" {
         "claude"
     } else {

@@ -2,7 +2,7 @@
 // sessions (chat exports, the Ollama DB). Used by the raw backfill to recover
 // correct raws for sessions archived before slicing existed.
 
-use super::{chatgpt, claudeai, gemini, ollama_chat};
+use super::{chatgpt, claudeai, gemini, grok, ollama_chat};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -14,7 +14,7 @@ use std::path::Path;
 pub fn is_multi_session_provider(provider_key: &str) -> bool {
     matches!(
         provider_key,
-        "chatgpt" | "claude_ai" | "gemini" | "ollama_chat"
+        "chatgpt" | "claude_ai" | "gemini" | "grok" | "ollama_chat"
     )
 }
 
@@ -33,6 +33,7 @@ pub fn raw_slices_for_source(source: &Path, provider_key: &str) -> Option<HashMa
         "chatgpt" => chatgpt::read(source),
         "claude_ai" => claudeai::read(source),
         "gemini" => gemini::read(source),
+        "grok" => grok::read(source),
         "ollama_chat" => ollama_chat::read(source),
         _ => return None,
     };

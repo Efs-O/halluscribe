@@ -7,7 +7,7 @@
 //
 // Privacy model: the pack is per-scope — a Work pack carries only the Work
 // profile and Work-consented coding providers; a Personal pack additionally
-// carries the private-chat-derived life context (ChatGPT/Claude.ai/Gemini),
+// carries the private-chat-derived life context (ChatGPT/Claude.ai/Gemini/Grok),
 // since Personal's consent list is a superset of Work's (`sources_for_scope`).
 // Which scope leaves the machine is the user's explicit choice on each
 // export — the button lives on both profile panels. Raw transcripts (`raw/`)

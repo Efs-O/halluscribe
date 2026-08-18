@@ -290,7 +290,7 @@
           <p>No profile has been built yet — run a full build to distill facts from your archived sessions into a persistent profile.</p>
         {/if}
         {#if scope === "personal"}
-          <p class="hint">Personal includes chat exports (ChatGPT/Claude.ai/Gemini), in addition to your coding tools.</p>
+          <p class="hint">Personal includes chat exports (ChatGPT/Claude.ai/Gemini/Grok), in addition to your coding tools.</p>
         {/if}
         <button class="btn-primary" onclick={requestFullRebuild} disabled={running}>Build profile</button>
         {#if confirmingFullRebuild}

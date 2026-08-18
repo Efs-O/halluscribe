@@ -35,6 +35,7 @@ pub fn ensure_import_paths(archive_dir: &Path, settings: &mut HalluScribeSetting
         ("chatgpt", &mut settings.chatgpt_import_path),
         ("claude", &mut settings.claudeai_import_path),
         ("gemini", &mut settings.gemini_import_path),
+        ("grok", &mut settings.grok_import_path),
     ] {
         if !field.trim().is_empty() {
             continue;

@@ -70,6 +70,13 @@ const GEMINI_CANDIDATES: &[&str] = &[
     "Takeout/My Activity/Gemini Apps/My Activity.json",
     "My Activity.json",
 ];
+const GROK_CANDIDATES: &[&str] = &["prod-grok-backend.json"];
+
+/// Grok's export unpacks as `ttl/30d/export_data/<user_id>/prod-grok-backend.json`.
+/// `<user_id>` is a per-account UUID, so it cannot be a literal candidate the way
+/// Gemini's Takeout path can - the directory is enumerated instead (see
+/// `grok_export_roots`), which lets the folder be dropped in exactly as downloaded.
+const GROK_EXPORT_DATA_SUBPATH: [&str; 3] = ["ttl", "30d", "export_data"];
 
 pub fn scan_chat_imports(settings: &HalluScribeSettings, lookback_secs: u64) -> Vec<ScanTarget> {
     let mut targets = Vec::new();
@@ -94,6 +101,13 @@ pub fn scan_chat_imports(settings: &HalluScribeSettings, lookback_secs: u64) -> 
         ChatProvider::Gemini,
         GEMINI_CANDIDATES,
     );
+    maybe_add_import(
+        &mut targets,
+        &settings.grok_import_path,
+        lookback_secs,
+        ChatProvider::Grok,
+        GROK_CANDIDATES,
+    );
     targets
 }
 
@@ -112,6 +126,7 @@ pub fn chat_import_sources(settings: &HalluScribeSettings, provider_key: &str) -
         "chatgpt" => (&settings.chatgpt_import_path, CHATGPT_CANDIDATES),
         "claude_ai" => (&settings.claudeai_import_path, CLAUDEAI_CANDIDATES),
         "gemini" => (&settings.gemini_import_path, GEMINI_CANDIDATES),
+        "grok" => (&settings.grok_import_path, GROK_CANDIDATES),
         // The Ollama chat DB is a single machine-local file with its own
         // resolver (optional override, else the OS default location).
         "ollama_chat" => return resolve_ollama_db_path(settings).into_iter().collect(),
@@ -121,7 +136,7 @@ pub fn chat_import_sources(settings: &HalluScribeSettings, provider_key: &str) -
     if trimmed.is_empty() {
         return Vec::new();
     }
-    resolve_import_paths(&PathBuf::from(trimmed), candidates)
+    resolve_provider_paths(&PathBuf::from(trimmed), provider_key, candidates)
 }
 
 fn maybe_add_import(
@@ -136,7 +151,7 @@ fn maybe_add_import(
         return;
     }
     let base = PathBuf::from(normalized_path);
-    for path in resolve_import_paths(&base, candidates) {
+    for path in resolve_provider_paths(&base, provider.provider_key(), candidates) {
         let Ok(meta) = fs::metadata(&path) else {
             continue;
         };
@@ -153,6 +168,44 @@ fn maybe_add_import(
             mtime_secs: shared::mtime_secs(modified),
         });
     }
+}
+
+/// Resolve a provider's import files, applying any layout that provider alone
+/// has on top of the shared candidate search.
+///
+/// Both authorities go through this - the sweep via `maybe_add_import` and the
+/// raw backfill via `chat_import_sources` - so a provider-specific layout can
+/// never be honoured by one and missed by the other. See
+/// docs/internal/IMPORT_PATHS_PLAN.md § 2.
+fn resolve_provider_paths(base: &Path, provider_key: &str, candidates: &[&str]) -> Vec<PathBuf> {
+    let mut found = resolve_import_paths(base, candidates);
+    if provider_key == "grok" {
+        for root in grok_export_roots(base) {
+            found.extend(resolve_import_paths(&root, candidates));
+        }
+        found.sort();
+        found.dedup();
+    }
+    found
+}
+
+/// Every `ttl/30d/export_data/<user_id>` directory under `base`, so a Grok
+/// export can be dropped in as downloaded. Returns nothing when that nesting is
+/// absent, which is the case when the user points straight at the export folder.
+fn grok_export_roots(base: &Path) -> Vec<PathBuf> {
+    let export_data = GROK_EXPORT_DATA_SUBPATH
+        .iter()
+        .fold(base.to_path_buf(), |path, part| path.join(part));
+    let Ok(entries) = fs::read_dir(&export_data) else {
+        return Vec::new();
+    };
+    let mut roots: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    roots.sort();
+    roots
 }
 
 /// Resolve one or more import files for a configured base path.

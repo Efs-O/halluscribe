@@ -6,7 +6,7 @@
 // the sweep's own source discovery (`scanner::scan_sessions`), and preserves
 // a raw copy of every coding-tool session file regardless of fill_pct or
 // recency - unconditionally, with no settings gate. Chat imports (ChatGPT,
-// Gemini, Claude.ai exports, Ollama's chat DB) are deliberately excluded:
+// Gemini, Grok, Claude.ai exports, Ollama's chat DB) are deliberately excluded:
 // they are user-imported files or persistent DBs that don't get pruned out
 // from under us, so their raws keep coming from the sweep as today.
 
