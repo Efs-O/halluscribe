@@ -9,6 +9,13 @@ pub(crate) struct BriefingCancel(pub(crate) Arc<AtomicBool>);
 /// reset to false at the start of each `trigger_sweep` call.
 pub(crate) struct SweepCancel(pub(crate) Arc<AtomicBool>);
 
+/// Shared cancel flag for a profile refresh / full rebuild. Set to true by
+/// `cancel_profile_refresh`, reset to false at the start of each
+/// `run_profile_refresh` call. One flag serves both scopes: only one profile
+/// job can run at a time (the inference lock is global), so a per-scope flag
+/// would be dead weight - `ProfileDonePayload::scope` says which one stopped.
+pub(crate) struct ProfileCancel(pub(crate) Arc<AtomicBool>);
+
 /// Shared cancel flag for chat turns. Set to true by `cancel_chat`,
 /// reset to false at the start of each `send_chat_message` call.
 pub(crate) struct ChatCancel(pub(crate) Arc<AtomicBool>);

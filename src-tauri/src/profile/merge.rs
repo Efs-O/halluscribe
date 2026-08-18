@@ -11,6 +11,7 @@ use super::scope::ProfileScope;
 use super::types::{ProfileFact, ProfileSection, ProfileSections};
 use super::ProfileError;
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Above this many serialized characters of candidate facts, consolidate each
 /// oversized section with intermediate calls before the final merge, so the
@@ -86,12 +87,17 @@ with the condensed text.";
 /// full archive the reduce is ~45 sequential calls taking the better part of an
 /// hour, so reporting it as a single tick made the UI look frozen for the whole
 /// stage; the call plan is therefore computed up front to give a real total.
+///
+/// `cancel` is polled before each section merge and before each consolidate
+/// chunk - never mid-call. When set, this returns `ProfileError::Cancelled`
+/// so the caller discards the half-merged sections instead of writing them.
 pub fn run_reduce(
     scope: ProfileScope,
     previous_profile_md: Option<&str>,
     facts: &[ProfileFact],
     tool_call: &ToolCallFn,
     warnings: &mut Vec<String>,
+    cancel: &AtomicBool,
     on_progress: &mut dyn FnMut(usize, usize),
 ) -> Result<ProfileSections, ProfileError> {
     let previous = parse_profile_sections(previous_profile_md.unwrap_or(""));
@@ -129,15 +135,20 @@ pub fn run_reduce(
 
     let mut step = 0usize;
     for (section, serialized, chunks) in plan {
+        // Safe boundary between sections: `merged` so far is discarded by the
+        // caller, so no partial profile can be written.
+        if cancel.load(Ordering::Relaxed) {
+            return Err(ProfileError::Cancelled);
+        }
         let prev = previous.get(section);
         let chunk_count = chunks.len();
         let bullets = if chunks.is_empty() {
             serialized
         } else {
             let base = step;
-            consolidate_section(section, &chunks, tool_call, warnings, &mut |done| {
+            consolidate_section(section, &chunks, tool_call, warnings, cancel, &mut |done| {
                 on_progress(base + done, total_steps);
-            })
+            })?
         };
         step += chunk_count + 1;
         on_progress(step, total_steps);
@@ -193,18 +204,23 @@ fn merge_section(
 /// stays within `CONSOLIDATE_MAX_TOKENS`. A failed chunk keeps its raw
 /// bullets (recorded in `warnings`) rather than aborting the whole reduce.
 /// `on_chunk` receives the 1-based index of the chunk about to be consolidated.
+/// A large consolidation pass is many calls long, so `cancel` is polled before
+/// each chunk too; stopping there returns `ProfileError::Cancelled`.
 fn consolidate_section(
     section: ProfileSection,
     chunks: &[String],
     tool_call: &ToolCallFn,
     warnings: &mut Vec<String>,
+    cancel: &AtomicBool,
     on_chunk: &mut dyn FnMut(usize),
-) -> String {
-    chunks
-        .iter()
-        .enumerate()
-        .map(|(idx, chunk)| {
-            on_chunk(idx + 1);
+) -> Result<String, ProfileError> {
+    let mut out: Vec<String> = Vec::with_capacity(chunks.len());
+    for (idx, chunk) in chunks.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(ProfileError::Cancelled);
+        }
+        on_chunk(idx + 1);
+        out.push(
             consolidate_chunk(section, chunk, tool_call).unwrap_or_else(|error| {
                 warnings.push(format!(
                     "consolidate {} chunk {}: {error} (kept raw facts)",
@@ -212,10 +228,10 @@ fn consolidate_section(
                     idx + 1
                 ));
                 chunk.clone()
-            })
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+            }),
+        );
+    }
+    Ok(out.join("\n"))
 }
 
 fn consolidate_chunk(

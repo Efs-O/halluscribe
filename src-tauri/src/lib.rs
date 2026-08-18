@@ -36,7 +36,9 @@ pub mod search;
 pub mod settings;
 pub mod workspace;
 
-use app_state::{BriefingCancel, CaptureCancel, CaptureStatusState, ChatCancel, SweepCancel};
+use app_state::{
+    BriefingCancel, CaptureCancel, CaptureStatusState, ChatCancel, ProfileCancel, SweepCancel,
+};
 use app_support::{archive_dir, default_archive_dir, mark_sweep_success, sweep_config};
 use chrono::{Datelike, Local, Timelike};
 use commands::{
@@ -49,8 +51,8 @@ use commands::{
 };
 use commands_capture::{cancel_capture, get_capture_status};
 use commands_profile::{
-    backfill_raw, count_available_raw, export_persona_pack, get_latest_digest, get_profile,
-    get_profile_refresh_status, run_profile_refresh,
+    backfill_raw, cancel_profile_refresh, count_available_raw, export_persona_pack,
+    get_latest_digest, get_profile, get_profile_refresh_status, run_profile_refresh,
 };
 use commands_tts::{tts_list_voices, tts_speak, tts_status};
 use commands_workspace::{
@@ -116,6 +118,7 @@ pub fn run() {
         .manage(BriefingCancel(Arc::new(AtomicBool::new(false))))
         .manage(ChatCancel(Arc::new(AtomicBool::new(false))))
         .manage(SweepCancel(Arc::new(AtomicBool::new(false))))
+        .manage(ProfileCancel(Arc::new(AtomicBool::new(false))))
         .manage(CaptureCancel(Arc::new(AtomicBool::new(false))))
         .manage(CaptureStatusState(Arc::new(std::sync::Mutex::new(
             archive::CaptureStatus::default(),
@@ -380,6 +383,7 @@ pub fn run() {
             preview_redaction,
             apply_redaction,
             run_profile_refresh,
+            cancel_profile_refresh,
             get_profile,
             get_latest_digest,
             get_profile_refresh_status,

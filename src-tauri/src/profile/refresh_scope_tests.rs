@@ -5,6 +5,7 @@
 use super::*;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 
 fn tmp_dir(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("halluscribe_profile_refresh_scope_{name}"));
@@ -83,6 +84,7 @@ fn pending_session_count_respects_watermark_and_consent() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -119,6 +121,7 @@ fn personal_scope_includes_chat_exports_even_when_not_in_settings() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -155,6 +158,7 @@ fn personal_scope_pending_count_and_watermark_are_independent_of_work() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();

@@ -28,6 +28,7 @@ use crate::gemma::GemmaError;
 use chrono::Utc;
 use std::fmt;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug)]
 pub enum ProfileError {
@@ -35,6 +36,9 @@ pub enum ProfileError {
     Json(serde_json::Error),
     Gemma(GemmaError),
     BadToolCall(String),
+    /// The user pressed stop. Never a failure: the caller unwinds to the
+    /// nearest safe boundary and reports the run as cancelled, not errored.
+    Cancelled,
 }
 
 impl fmt::Display for ProfileError {
@@ -44,6 +48,7 @@ impl fmt::Display for ProfileError {
             Self::Json(error) => write!(f, "JSON error: {error}"),
             Self::Gemma(error) => write!(f, "inference error: {error}"),
             Self::BadToolCall(msg) => write!(f, "tool-call response invalid: {msg}"),
+            Self::Cancelled => write!(f, "stopped by the user"),
         }
     }
 }
@@ -99,6 +104,10 @@ pub struct RefreshOutcome {
     /// Zero means every session was covered: the profile was written and the
     /// watermark advanced, whatever warnings `errors` carries.
     pub failed_batches: usize,
+    /// The user stopped the run at a safe boundary. Nothing was written, the
+    /// watermark did not advance, and `pending_facts.json` was kept so the
+    /// next run resumes from it.
+    pub cancelled: bool,
 }
 
 /// Run one profile refresh for `scope`: select consented (and, if
@@ -115,12 +124,18 @@ pub struct RefreshOutcome {
 /// `gemma::ToolSession` in production, a canned closure in tests) so this
 /// function never touches the model lifecycle itself. `on_progress` is called
 /// at each map batch and once per reduce/write stage.
+///
+/// `cancel` is polled at every safe boundary (mirrors `archive::run_capture`):
+/// between map batches and between reduce calls, never mid-model-call. A
+/// cancelled run writes nothing, leaves the watermark alone, and keeps the
+/// pending-facts snapshot, so re-running resumes from where it stopped.
 pub fn run_refresh(
     archive_dir: &Path,
     scope: ProfileScope,
     profile_sources: &[String],
     full: bool,
     tool_call: &ToolCallFn,
+    cancel: &AtomicBool,
     mut on_progress: impl FnMut(usize, usize, Stage),
 ) -> Result<RefreshOutcome, ProfileError> {
     let effective_sources = scope::sources_for_scope(profile_sources, scope);
@@ -186,7 +201,14 @@ pub fn run_refresh(
     // pushed into `errors` (skipped facts, fallbacks) must not be confused
     // with it, or a benign warning would hold the watermark back forever.
     let mut failed_batches = 0usize;
+    let mut cancelled = false;
     for (idx, batch) in batches.iter().enumerate() {
+        // Safe boundary: every finished batch is already in the snapshot on
+        // disk, so stopping here costs nothing beyond the unstarted batches.
+        if cancel.load(Ordering::Relaxed) {
+            cancelled = true;
+            break;
+        }
         on_progress(resumed_batches + idx + 1, total_batches, Stage::Mapping);
         match distill::distill_batch(archive_dir, batch, scope, tool_call) {
             Ok((mut facts, warnings)) => {
@@ -215,6 +237,19 @@ pub fn run_refresh(
     }
     let all_facts = snapshot.facts;
 
+    // Stopped during mapping: skip the reduce entirely. The snapshot is on
+    // disk (saved after every batch), the watermark is untouched, and nothing
+    // was written - so the next run resumes rather than restarts.
+    if cancelled {
+        return Ok(RefreshOutcome {
+            session_count: covered_count,
+            facts_count: all_facts.len(),
+            errors,
+            failed_batches,
+            cancelled: true,
+        });
+    }
+
     // Entering the stage: `run_reduce` re-reports with the real call total as
     // soon as it has planned its calls, but a reduce that makes no calls at all
     // (no section had new facts) would otherwise never announce the stage.
@@ -237,9 +272,22 @@ pub fn run_refresh(
         &all_facts,
         tool_call,
         &mut errors,
+        cancel,
         &mut |current, total| on_progress(current, total, Stage::Merging),
     ) {
         Ok(sections) => sections,
+        // Stopped between reduce calls: a partially merged profile must never
+        // reach disk, so return before `write_profile` with everything else
+        // (watermark, snapshot) left exactly as it was.
+        Err(ProfileError::Cancelled) => {
+            return Ok(RefreshOutcome {
+                session_count: covered_count,
+                facts_count: all_facts.len(),
+                errors,
+                failed_batches,
+                cancelled: true,
+            });
+        }
         Err(error) => {
             errors.push(format!("final merge failed: {error}"));
             return Ok(RefreshOutcome {
@@ -249,6 +297,7 @@ pub fn run_refresh(
                 // Nothing was written: report this as a failed run even when
                 // every map batch succeeded.
                 failed_batches: failed_batches.max(1),
+                cancelled: false,
             });
         }
     };
@@ -312,6 +361,7 @@ pub fn run_refresh(
         facts_count: all_facts.len(),
         errors,
         failed_batches,
+        cancelled: false,
     })
 }
 
@@ -361,3 +411,7 @@ mod refresh_scope_tests;
 #[cfg(test)]
 #[path = "refresh_pending_tests.rs"]
 mod refresh_pending_tests;
+
+#[cfg(test)]
+#[path = "refresh_cancel_tests.rs"]
+mod refresh_cancel_tests;

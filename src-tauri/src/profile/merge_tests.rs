@@ -3,7 +3,7 @@
 // two-pass consolidation path lives in merge_progress_tests.rs.
 
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 fn fact(section: ProfileSection, text: &str, date: &str) -> ProfileFact {
@@ -45,6 +45,7 @@ fn run_reduce_merges_each_section_with_facts_via_one_call_each() {
         &facts,
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();
@@ -85,6 +86,7 @@ fn section_with_previous_text_but_no_new_facts_is_kept_without_a_call() {
         &facts,
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();
@@ -111,6 +113,7 @@ fn merge_call_receives_previous_section_content_not_whole_profile() {
         &facts,
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();
@@ -140,6 +143,7 @@ fn projects_section_call_appends_stale_projects_note_others_do_not() {
         &facts,
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();
@@ -169,6 +173,7 @@ fn failed_section_call_falls_back_to_previous_plus_raw_bullets_with_warning() {
         &facts,
         tool_call,
         &mut warnings,
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();
@@ -198,6 +203,7 @@ fn failed_section_call_without_previous_keeps_raw_bullets_only() {
         &facts,
         tool_call,
         &mut warnings,
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();
@@ -229,6 +235,7 @@ fn no_facts_and_no_previous_yields_empty_sections_and_zero_calls() {
         &[],
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();
@@ -265,6 +272,7 @@ fn personal_scope_merges_personal_context_section() {
         &facts,
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();
@@ -290,6 +298,7 @@ fn work_scope_never_merges_personal_context() {
         &facts,
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();
@@ -318,6 +327,7 @@ fn identity_merge_input_carries_the_conflicting_attribute_warning() {
         &facts,
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();

@@ -2,13 +2,15 @@
 // Protocol Phase 2): trigger a refresh, read the profile, read the latest
 // weekly digest.
 
+use crate::app_state::ProfileCancel;
 use crate::app_support::archive_dir;
 use crate::profile::ProfileScope;
 use crate::{archive, gemma, pack, profile, settings};
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 /// Scope key ("work" | "personal") of the refresh currently running in its
 /// detached thread, or None when idle. Lets a remounting ProfilePanel (the
@@ -61,6 +63,9 @@ struct ProfileDonePayload {
     /// Map batches that failed outright. 0 = the profile was written.
     failed_batches: usize,
     scope: String,
+    /// The user stopped the run. Not an error: partial work was saved and the
+    /// next run resumes from it.
+    cancelled: bool,
 }
 
 /// Parse the `scope` command argument ("work" | "personal").
@@ -73,7 +78,7 @@ fn parse_scope(scope: &str) -> Result<ProfileScope, String> {
 /// distills only sessions newer than that scope's `profile_meta.json`
 /// watermark. Emits `profile-progress` events `{ current, total, stage,
 /// scope }` while running and one `profile-done` event `{ busy,
-/// session_count, facts_count, errors, scope }` when finished — the `scope`
+/// session_count, facts_count, errors, scope, cancelled }` when finished — the `scope`
 /// field lets the UI ignore events for a scope other than the one displayed.
 #[tauri::command]
 pub(crate) fn run_profile_refresh(
@@ -90,6 +95,10 @@ pub(crate) fn run_profile_refresh(
         .ok_or_else(|| "backend not configured (check Settings)".to_string())?;
     let (ctx_size, max_tokens) = settings.generation_limits()?;
     let profile_sources = settings.profile_sources.clone();
+    // Reset before the thread starts, exactly like `trigger_sweep`, so a stop
+    // pressed during a previous run can never abort this one immediately.
+    let cancel = app.state::<ProfileCancel>().0.clone();
+    cancel.store(false, Ordering::Relaxed);
 
     std::thread::spawn(move || {
         // Top-level inference lock, exactly like the sweep: the profile code
@@ -173,6 +182,7 @@ pub(crate) fn run_profile_refresh(
             &profile_sources,
             full,
             &tool_call,
+            &cancel,
             move |current, total, stage| {
                 let _ = app_progress.emit(
                     "profile-progress",
@@ -195,6 +205,7 @@ pub(crate) fn run_profile_refresh(
                 errors: outcome.errors,
                 failed_batches: outcome.failed_batches,
                 scope: scope.clone(),
+                cancelled: outcome.cancelled,
             },
             // The refresh aborted before producing an outcome: nothing was
             // written, so this is unambiguously a failed run.
@@ -208,6 +219,16 @@ pub(crate) fn run_profile_refresh(
         let _ = app.emit("profile-done", payload);
     });
     Ok(())
+}
+
+/// Signal the running profile refresh to stop at the next safe boundary: the
+/// end of the current map batch, or the end of the current reduce call. One
+/// flag covers both scopes - only one profile job can run at a time.
+#[tauri::command]
+pub(crate) fn cancel_profile_refresh(app: tauri::AppHandle) {
+    app.state::<ProfileCancel>()
+        .0
+        .store(true, Ordering::Relaxed);
 }
 
 /// The scope key ("work" | "personal") of a profile refresh currently

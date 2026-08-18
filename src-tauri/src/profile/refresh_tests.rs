@@ -4,7 +4,7 @@
 use super::*;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 fn tmp_dir(name: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("halluscribe_profile_refresh_{name}"));
@@ -81,6 +81,7 @@ fn full_refresh_writes_profile_meta_and_digest_and_advances_watermark() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |cur, total, stage| {
             stages.push((cur, total, stage.as_str()));
         },
@@ -136,6 +137,7 @@ fn incremental_refresh_only_maps_sessions_newer_than_watermark() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -149,6 +151,7 @@ fn incremental_refresh_only_maps_sessions_newer_than_watermark() {
         &sources,
         false,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -174,6 +177,7 @@ fn incremental_refresh_only_maps_sessions_newer_than_watermark() {
         &sources,
         false,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -211,6 +215,7 @@ fn failed_map_batch_is_collected_as_error_not_fatal() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -249,6 +254,7 @@ fn failed_section_merge_falls_back_and_still_writes_profile() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -294,6 +300,7 @@ fn empty_selection_returns_early_without_touching_profile() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -312,6 +319,7 @@ fn empty_selection_returns_early_without_touching_profile() {
         &sources,
         false,
         counting,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -371,6 +379,7 @@ fn full_refresh_does_not_feed_the_previous_profile_back_into_the_merge() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -386,6 +395,7 @@ fn full_refresh_does_not_feed_the_previous_profile_back_into_the_merge() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -426,6 +436,7 @@ fn incremental_refresh_still_merges_against_the_previous_profile() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -445,6 +456,7 @@ fn incremental_refresh_still_merges_against_the_previous_profile() {
         &sources,
         false,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();

@@ -4,7 +4,7 @@
 // Split out of merge_tests.rs to keep both files under the repo's 350-LOC cap.
 
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 fn fact(section: ProfileSection, text: &str, date: &str) -> ProfileFact {
@@ -50,6 +50,7 @@ fn progress_reports_one_step_per_model_call_numbered_to_a_stable_total() {
         &facts,
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |current, total| seen.lock().unwrap().push((current, total)),
     )
     .unwrap();
@@ -88,6 +89,7 @@ fn sections_without_facts_cost_no_steps() {
         &facts,
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |current, total| seen.lock().unwrap().push((current, total)),
     )
     .unwrap();
@@ -117,6 +119,7 @@ fn oversized_facts_trigger_chunked_consolidation_before_section_merge() {
         &facts,
         tool_call,
         &mut Vec::new(),
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();
@@ -155,6 +158,7 @@ fn failed_consolidate_chunk_keeps_raw_facts_and_warns() {
         &facts,
         tool_call,
         &mut warnings,
+        &AtomicBool::new(false),
         &mut |_, _| {},
     )
     .unwrap();

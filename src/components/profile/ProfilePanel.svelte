@@ -32,6 +32,9 @@
   // alone must never render as a failure.
   let resultIsError = $state(false);
   let confirmingFullRebuild = $state(false);
+  // A stop has been signalled and the run has not reported back yet — keeps
+  // the stop button from being pressed twice.
+  let stopping = $state(false);
   let digestOpen = $state(false);
   // Profile bodies (Work and Personal both) stay behind an explicit reveal so
   // they never just sit on screen. Re-hidden every time the user enters a scope
@@ -121,6 +124,7 @@
     resultNote = null;
     resultDetail = [];
     resultIsError = false;
+    stopping = false;
     try {
       await invoke("run_profile_refresh", { full, scope });
     } catch (e) {
@@ -128,6 +132,23 @@
       resultNote = String(e);
       resultDetail = [];
       resultIsError = true;
+    }
+  }
+
+  // Stop at the next safe boundary — the end of the current map batch or
+  // reduce call. Mirrors the sweep's stop button; never kills a model call.
+  async function stopRefresh() {
+    if (!running) return;
+    stopping = true;
+    resultNote = "Stopping — finishing the current step…";
+    resultDetail = [];
+    resultIsError = false;
+    try {
+      await invoke("cancel_profile_refresh");
+    } catch (e) {
+      resultNote = String(e);
+      resultIsError = true;
+      stopping = false;
     }
   }
 
@@ -153,6 +174,7 @@
         const payload = ev.payload;
         // The lock is released regardless of which scope is being viewed.
         busyScope = null;
+        stopping = false;
         if (payload.scope !== scope) return;
         progress = null;
         resultDetail = payload.errors;
@@ -160,6 +182,16 @@
           resultNote = "Another model job is running — try again later.";
           resultDetail = [];
           resultIsError = true;
+          return;
+        }
+        if (payload.cancelled) {
+          // Stopping is a user action, not a failure: partial mapping work is
+          // on disk and the next run picks up from it.
+          resultIsError = false;
+          resultNote =
+            "Stopped — partial work was saved, and the next run resumes from it.";
+          profileRevealed = false;
+          void loadProfile();
           return;
         }
         resultIsError = payload.failed_batches > 0;
@@ -266,6 +298,14 @@
         ></div>
       </div>
       <span class="progress-label">{progress ? stageLabel(progress) : progressPlaceholder}</span>
+      <button
+        class="btn-stop"
+        onclick={stopRefresh}
+        disabled={stopping}
+        title="Stop after the current step — partial work is kept and the next run resumes from it"
+      >
+        {stopping ? "stopping…" : "stop"}
+      </button>
     </div>
   {/if}
 
@@ -421,6 +461,26 @@
     font-size: 12px;
     color: var(--amber);
   }
+
+  /* Copied verbatim from RunNowButton.svelte so the sweep's stop button and
+     this one are visually identical. Promote to a shared component if a third
+     stop button ever appears. */
+  .btn-stop {
+    white-space: nowrap;
+    background: transparent;
+    border: 1px solid var(--amber, #f59e0b);
+    border-radius: 4px;
+    color: var(--amber, #f59e0b);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 6px 14px;
+    transition: background 0.1s, color 0.1s;
+    -webkit-app-region: no-drag;
+  }
+  .btn-stop:hover { background: var(--amber, #f59e0b); color: #000; }
+  .btn-stop:disabled { cursor: default; opacity: 0.6; }
+  .btn-stop:disabled:hover { background: transparent; color: var(--amber, #f59e0b); }
 
   .progress-row {
     display: flex;

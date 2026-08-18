@@ -282,6 +282,12 @@ export interface ProfileDonePayload {
   /** Map batches that failed outright. 0 = the profile was written. */
   failed_batches: number;
   scope: ProfileScope;
+  /**
+   * The user stopped the run at a safe boundary. Not an error: nothing was
+   * written, the watermark did not move, and the partial mapping work was
+   * saved so the next run resumes from it.
+   */
+  cancelled: boolean;
 }
 
 /** One registered person/workspace (Persona Parity Phase E). */

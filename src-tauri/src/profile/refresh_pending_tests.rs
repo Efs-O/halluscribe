@@ -7,7 +7,7 @@ use super::pending::{load_pending, save_pending, PendingFacts};
 use super::*;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 fn tmp_dir(name: &str) -> PathBuf {
@@ -126,6 +126,7 @@ fn pending_file_resume_excludes_already_mapped_ids_and_seeds_facts() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |current, total, stage| {
             if stage == Stage::Mapping {
                 mapping.lock().unwrap().push((current, total));
@@ -184,6 +185,7 @@ fn pending_file_is_deleted_after_successful_run() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -219,6 +221,7 @@ fn failed_reduce_path_leaves_pending_file_for_next_run() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, stage| {
             if stage == Stage::Merging && load_pending(&dir, ProfileScope::Work).unwrap().is_some()
             {
@@ -280,6 +283,7 @@ fn skipped_fact_warning_still_advances_watermark_and_clears_pending() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -321,6 +325,7 @@ fn corrupt_pending_file_is_ignored_with_warning() {
         &sources,
         true,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
@@ -360,6 +365,7 @@ fn recovery_run_with_zero_new_sessions_still_reduces_pending_facts() {
         &sources,
         false,
         tool_call,
+        &AtomicBool::new(false),
         |_, _, _| {},
     )
     .unwrap();
