@@ -51,6 +51,11 @@ pub struct SweepResult {
     /// Number of sessions written this sweep whose archived markdown matched
     /// at least one high-confidence secret shape (Phase 0b scan).
     pub flagged: u32,
+    /// Number of chat-import sessions whose previous raw copy held different
+    /// content and was moved to `raw/superseded/` rather than overwritten.
+    /// Non-zero means a re-imported export changed conversations you had
+    /// already archived — the earlier copies are still on disk.
+    pub superseded: u32,
     pub errors: Vec<String>,
 }
 

@@ -119,7 +119,11 @@ pub(crate) fn backfill_raw_with(
                         result.already_had += 1;
                         continue;
                     }
+                    // `repaired` below is exactly the count of raws replaced,
+                    // and every replacement parks the previous copy under
+                    // `raw/superseded/` — nothing is discarded here.
                     super::preserve_raw_bytes(archive_dir, &entry.id, slice.as_bytes())
+                        .map(|preserved| preserved.rel)
                 }
                 None => {
                     if has_raw {

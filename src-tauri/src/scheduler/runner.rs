@@ -164,9 +164,20 @@ pub fn run_sweep(
         // `source_path` for those would store the whole export once per
         // conversation. Everything else is one file per session, where the
         // file copy is the correct raw.
+        //
+        // A chat slice that replaces DIFFERENT stored bytes parks the previous
+        // copy under `raw/superseded/` instead of destroying it, and reports
+        // that it did — a later export can hand back a trimmed conversation.
         let preserved = match &session.raw_slice {
             Some(slice) => {
-                archive::preserve_raw_bytes(&config.archive_dir, &session.id, slice.as_bytes())
+                archive::preserve_raw_bytes(&config.archive_dir, &session.id, slice.as_bytes()).map(
+                    |preserved| {
+                        if preserved.superseded.is_some() {
+                            result.superseded += 1;
+                        }
+                        preserved.rel
+                    },
+                )
             }
             None => archive::preserve_raw(&config.archive_dir, &session.id, &session.source_path),
         };

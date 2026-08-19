@@ -11,12 +11,25 @@
 // to the shareable `.md` summaries, never to these files. Persona Pack exports
 // exclude the `raw/` directory unless the user opts in per-export, so raw secrets
 // never leave the machine implicitly.
+//
+// A raw sliced out of a chat export is never destroyed by a re-import: a write
+// that would replace one with DIFFERENT content moves the old copy into
+// `raw/superseded/` first. A provider that hands back a trimmed or partially
+// exported conversation therefore costs nothing - see `preserve_raw_bytes`.
 
 use super::ArchiveError;
+use chrono::Utc;
 use std::path::{Component, Path};
 
 /// Archive-relative directory holding preserved raw transcripts.
 pub const RAW_DIR: &str = "raw";
+
+/// Archive-relative directory holding raw copies that a later write replaced.
+/// Nothing enumerates `raw/` - every reader (search, Persona Pack, the MCP
+/// server, `read_raw_session`) reaches a raw through the index entry's
+/// `raw_path` or through the capture manifest - so copies parked here are inert
+/// until someone goes looking for them by hand.
+pub const SUPERSEDED_DIR: &str = "raw/superseded";
 
 /// zstd compression level. Level 3 (the library default) gives near-10:1 on
 /// agent JSONL while staying fast enough to run inline during the sweep.
@@ -27,21 +40,34 @@ pub fn raw_rel_path(session_id: &str) -> String {
     format!("{RAW_DIR}/{session_id}.jsonl.zst")
 }
 
+/// Outcome of preserving one session's raw slice.
+#[derive(Debug, Clone)]
+pub struct PreservedRaw {
+    /// Archive-relative path to the current raw, to record in the index entry.
+    pub rel: String,
+    /// Archive-relative path the previous raw was moved to, set only when this
+    /// write replaced DIFFERENT content. `None` when there was no previous
+    /// copy, or when the stored bytes already matched.
+    pub superseded: Option<String>,
+}
+
 /// Compress `source` into `<archive_dir>/raw/<session_id>.jsonl.zst`, overwriting
 /// any existing copy (a re-swept, changed session replaces its raw copy — the
 /// transcript hash already detected the change). Returns the archive-relative
 /// path to record in the index entry.
 ///
-/// Written atomically (`.zst.tmp` then rename) so a startup capture pass and a
-/// concurrent sweep preserving the same session never race onto a torn file —
-/// whichever rename lands last wins, and the content is identical either way.
+/// This is the one-file-per-session path: coding-tool transcripts, which their
+/// tool only ever appends to. A later copy is a superset of the earlier one, so
+/// a plain overwrite cannot lose anything and no version is kept. The
+/// multi-session path ([`preserve_raw_bytes`]) does keep versions, because a
+/// chat export is a snapshot of state the provider owns and can shrink.
 pub fn preserve_raw(
     archive_dir: &Path,
     session_id: &str,
     source: &Path,
 ) -> Result<String, ArchiveError> {
     let bytes = std::fs::read(source)?;
-    preserve_raw_bytes(archive_dir, session_id, &bytes)
+    write_raw(archive_dir, session_id, &bytes)
 }
 
 /// Same as [`preserve_raw`] but for content already in memory, used when the
@@ -49,11 +75,91 @@ pub fn preserve_raw(
 /// preserved (chat exports, the Ollama DB). Copying the file there would store
 /// one copy of the entire export per conversation and make
 /// `read_raw_session` return every other conversation alongside the wanted one.
+///
+/// **Never destroys the previous raw.** A chat export is a snapshot of a
+/// conversation the PROVIDER owns, so a later export can hand back less than an
+/// earlier one did — a conversation trimmed upstream, individual messages
+/// deleted, or a partial/failed export. A plain overwrite would drop the
+/// difference silently, with no way back. Instead, when the stored bytes differ
+/// from `bytes`, the old copy is renamed into [`SUPERSEDED_DIR`] before the new
+/// one is written.
+///
+/// Identical content is left alone, so re-running an import churns nothing.
 pub fn preserve_raw_bytes(
     archive_dir: &Path,
     session_id: &str,
     bytes: &[u8],
-) -> Result<String, ArchiveError> {
+) -> Result<PreservedRaw, ArchiveError> {
+    // Order matters: park the old copy FIRST, and propagate a failure to do so
+    // rather than writing anyway. Callers treat a preserve error as non-fatal
+    // (the summary still archives, just without a raw pointer), so the worst
+    // case leaves the previous raw intact on disk instead of losing it.
+    let superseded = supersede_existing(archive_dir, session_id, bytes)?;
+    let rel = write_raw(archive_dir, session_id, bytes)?;
+    Ok(PreservedRaw { rel, superseded })
+}
+
+/// Move the stored raw for `session_id` aside when it holds content other than
+/// `bytes`. Returns the archive-relative path it was moved to, or `None` when
+/// nothing was stored or the stored bytes already matched.
+fn supersede_existing(
+    archive_dir: &Path,
+    session_id: &str,
+    bytes: &[u8],
+) -> Result<Option<String>, ArchiveError> {
+    let current = archive_dir.join(raw_rel_path(session_id));
+    if !current.is_file() {
+        return Ok(None);
+    }
+    let stored = std::fs::read(&current)?;
+    // An unreadable or corrupt stored copy counts as different, so it is kept
+    // rather than quietly overwritten — it is the only evidence of whatever
+    // truncated it.
+    let unchanged = zstd::decode_all(stored.as_slice())
+        .map(|decoded| decoded == bytes)
+        .unwrap_or(false);
+    if unchanged {
+        return Ok(None);
+    }
+
+    let rel = superseded_rel_path(archive_dir, session_id)?;
+    let dest = archive_dir.join(&rel);
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::rename(&current, &dest)?;
+    Ok(Some(rel))
+}
+
+/// An unused archive-relative path under [`SUPERSEDED_DIR`] for this session,
+/// stamped with the UTC time of the replacement so the copies read as a history.
+fn superseded_rel_path(archive_dir: &Path, session_id: &str) -> Result<String, ArchiveError> {
+    let stamp = Utc::now().format("%Y%m%dT%H%M%S%.3fZ");
+    let base = format!("{SUPERSEDED_DIR}/{session_id}.{stamp}");
+    for attempt in 0..100 {
+        let rel = if attempt == 0 {
+            format!("{base}.jsonl.zst")
+        } else {
+            format!("{base}-{attempt}.jsonl.zst")
+        };
+        if !archive_dir.join(&rel).exists() {
+            return Ok(rel);
+        }
+    }
+    // 100 replacements of one session inside the same millisecond is not a real
+    // condition; refusing beats picking a path that would overwrite a version.
+    Err(ArchiveError::Invalid(format!(
+        "no free superseded raw path for session {session_id}"
+    )))
+}
+
+/// Compress `bytes` to `raw/<session_id>.jsonl.zst`, replacing whatever is
+/// there. The single write point for every raw in the archive.
+///
+/// Written atomically (`.zst.tmp` then rename) so a startup capture pass and a
+/// concurrent sweep preserving the same session never race onto a torn file —
+/// whichever rename lands last wins, and the content is identical either way.
+fn write_raw(archive_dir: &Path, session_id: &str, bytes: &[u8]) -> Result<String, ArchiveError> {
     let rel = raw_rel_path(session_id);
     let dest = archive_dir.join(&rel);
     if let Some(parent) = dest.parent() {
@@ -100,88 +206,4 @@ pub fn read_raw_at(archive_dir: &Path, rel_path: &str) -> Result<String, Archive
     let bytes = std::fs::read(archive_dir.join(rel))?;
     let decoded = zstd::decode_all(bytes.as_slice())?;
     String::from_utf8(decoded).map_err(|error| ArchiveError::Invalid(error.to_string()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn tmp_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("halluscribe_raw_test_{name}"));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    #[test]
-    fn raw_rel_path_is_stable() {
-        assert_eq!(raw_rel_path("abc-123"), "raw/abc-123.jsonl.zst");
-    }
-
-    #[test]
-    fn preserve_then_read_round_trips_the_source() {
-        let dir = tmp_dir("round_trip");
-        let source = dir.join("session.jsonl");
-        let contents = "{\"role\":\"user\"}\n{\"role\":\"assistant\"}\n".repeat(200);
-        std::fs::write(&source, &contents).unwrap();
-
-        let rel = preserve_raw(&dir, "abc-123", &source).unwrap();
-        assert_eq!(rel, "raw/abc-123.jsonl.zst");
-        assert!(dir.join(&rel).exists());
-        assert_eq!(read_raw(&dir, "abc-123").unwrap(), contents);
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn compressed_copy_is_smaller_than_source() {
-        let dir = tmp_dir("ratio");
-        let source = dir.join("session.jsonl");
-        // Repetitive JSONL compresses well; assert we actually shrank it.
-        let contents = "{\"type\":\"message\",\"text\":\"hello world\"}\n".repeat(500);
-        std::fs::write(&source, &contents).unwrap();
-
-        preserve_raw(&dir, "id", &source).unwrap();
-        let compressed_len = std::fs::metadata(dir.join(raw_rel_path("id")))
-            .unwrap()
-            .len();
-        assert!((compressed_len as usize) < contents.len());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn preserve_overwrites_existing_copy() {
-        let dir = tmp_dir("overwrite");
-        let source = dir.join("session.jsonl");
-
-        std::fs::write(&source, "first\n").unwrap();
-        preserve_raw(&dir, "id", &source).unwrap();
-        std::fs::write(&source, "second version\n").unwrap();
-        preserve_raw(&dir, "id", &source).unwrap();
-
-        assert_eq!(read_raw(&dir, "id").unwrap(), "second version\n");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn preserve_errors_when_source_missing() {
-        let dir = tmp_dir("missing");
-        let result = preserve_raw(&dir, "id", &dir.join("does-not-exist.jsonl"));
-        assert!(result.is_err());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn preserve_leaves_no_tmp_file_behind() {
-        let dir = tmp_dir("atomic");
-        let source = dir.join("session.jsonl");
-        std::fs::write(&source, "{\"role\":\"user\"}\n").unwrap();
-
-        let rel = preserve_raw(&dir, "abc-123", &source).unwrap();
-        assert!(dir.join(&rel).exists());
-        assert!(!dir.join("raw/abc-123.jsonl.zst.tmp").exists());
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }

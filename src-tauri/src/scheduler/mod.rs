@@ -9,5 +9,6 @@ mod runner;
 mod tests;
 mod types;
 
+pub use helpers::sweep_done_message;
 pub use runner::run_sweep;
 pub use types::{SweepConfig, SweepProgress, SweepResult};

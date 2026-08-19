@@ -7,6 +7,8 @@ mod capture;
 mod captured_manifest;
 mod index;
 mod raw;
+#[cfg(test)]
+mod raw_tests;
 mod read_raw_session;
 mod redact;
 mod types;
@@ -52,7 +54,10 @@ pub use index::{
     archived_source_size, delete_sessions, ensure_index_readable, find_session, is_archived,
     read_sessions, session_id, set_raw_path, set_secret_flags,
 };
-pub use raw::{preserve_raw, preserve_raw_bytes, raw_rel_path, read_raw, read_raw_at, RAW_DIR};
+pub use raw::{
+    preserve_raw, preserve_raw_bytes, raw_rel_path, read_raw, read_raw_at, PreservedRaw, RAW_DIR,
+    SUPERSEDED_DIR,
+};
 pub use read_raw_session::{read_raw_session, RawSessionPage};
 pub use redact::{
     apply_redaction, load_rules, preview_redaction, rules_for_session, RedactionOutcome,

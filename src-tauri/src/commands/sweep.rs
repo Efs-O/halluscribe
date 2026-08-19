@@ -38,33 +38,7 @@ pub(crate) fn trigger_sweep(app: tauri::AppHandle) -> Result<(), String> {
         } else {
             Vec::new()
         };
-        let mut message = format!(
-            "Sweep {} - processed: {}, skipped: {}, deferred: {}",
-            if result.completed_successfully() {
-                "complete"
-            } else {
-                "incomplete"
-            },
-            result.processed,
-            result.skipped,
-            result.deferred,
-        );
-        if result.cancelled {
-            message.push_str(", cancelled");
-        }
-        if !result.errors.is_empty() {
-            message.push_str(&format!(", errors: {}", result.errors.len()));
-        }
-        if !marker_errors.is_empty() {
-            message.push_str(&format!(", settings errors: {}", marker_errors.len()));
-            eprintln!(
-                "[sweep] failed to persist completion state: {}",
-                marker_errors.join("; ")
-            );
-        }
-        if result.flagged > 0 {
-            message.push_str(&format!(", possible secrets flagged: {}", result.flagged));
-        }
+        let message = scheduler::sweep_done_message(&result, &marker_errors);
         let _ = app.emit("sweep-done", message);
     });
     Ok(())
