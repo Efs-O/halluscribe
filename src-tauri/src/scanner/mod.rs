@@ -74,11 +74,23 @@ const CLAUDEAI_CANDIDATES: &[&str] = &["conversations.json"];
 const GEMINI_CANDIDATES: &[&str] = &["My Activity.json"];
 const GROK_CANDIDATES: &[&str] = &["prod-grok-backend.json"];
 
-/// How far below a configured import folder the search looks. Grok's real
-/// layout needs all four levels (`ttl`/`30d`/`export_data`/`<user_id>`/file),
-/// and that comfortably covers one wrapper folder around a ChatGPT, Claude.ai
-/// or Gemini export.
-const MAX_IMPORT_DEPTH: usize = 4;
+/// How far below a configured import folder the search looks.
+///
+/// The rule is **the deepest provider nesting, plus one folder the user names
+/// themselves**. Unzipping an export always produces a wrapper folder (named
+/// after the zip, so usually a UUID or a date, or renamed to something the user
+/// can recognise later), and dropping that folder in as-is is the normal
+/// workflow rather than an edge case. Grok is the worst case and therefore sets
+/// the bound: its own layout is already four levels
+/// (`ttl`/`30d`/`export_data`/`<user_id>`/file), so a wrapper around it puts the
+/// export at five. Gemini's Takeout nesting is three; ChatGPT's and
+/// Claude.ai's are zero.
+///
+/// Raising this is cheap - the walk stops at the first depth that matches, and
+/// the levels in between hold one directory each - but it is not free of
+/// judgement: every extra level is another chance to pick up a copy the user
+/// forgot about. Shallowest-wins is what keeps that safe, not this number.
+const MAX_IMPORT_DEPTH: usize = 5;
 
 /// Hard cap on directories opened during one search, so pointing an import
 /// path at something enormous (a whole Desktop) still returns promptly.

@@ -148,12 +148,77 @@ mod tests {
         assert_eq!(swept(&settings), vec![takeout.join("my activity.json")]);
     }
 
-    /// The depth cap: an export buried deeper than `MAX_IMPORT_DEPTH` is not
-    /// found, which is deliberate - the alternative is walking a whole drive.
+    /// The case the depth cap exists to serve, and the one that set its value:
+    /// Grok's own four-level nesting PLUS the wrapper folder an unzip always
+    /// produces. Whatever that folder is named - a UUID from the zip, or
+    /// something legible the user renamed it to - dropping it in as-is must
+    /// work, because that is the normal workflow rather than an edge case.
+    #[test]
+    fn grok_export_inside_a_wrapper_folder_is_found() {
+        let dir = tempdir().unwrap();
+        let nested = dir
+            .path()
+            .join("GROK")
+            .join("ttl")
+            .join("30d")
+            .join("export_data")
+            .join("5134baa3-7e58-487e-a6bf-68bcd8d71450");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(nested.join("prod-grok-backend.json"), "{}").unwrap();
+        // The junk that ships beside it must still not be mistaken for it.
+        fs::write(nested.join("prod-mc-billing.json"), "{}").unwrap();
+        fs::write(nested.join("prod-mc-auth-mgmt-api.json"), "{}").unwrap();
+
+        let settings = HalluScribeSettings {
+            grok_import_path: dir.path().display().to_string(),
+            ..HalluScribeSettings::default()
+        };
+        assert_eq!(
+            swept(&settings),
+            vec![nested.join("prod-grok-backend.json")]
+        );
+        assert_eq!(
+            chat_import_sources(&settings, "grok"),
+            vec![nested.join("prod-grok-backend.json")]
+        );
+    }
+
+    /// Gemini's Takeout nesting plus a wrapper folder - three levels and one,
+    /// so comfortably inside the cap.
+    #[test]
+    fn gemini_takeout_inside_a_wrapper_folder_is_found() {
+        let dir = tempdir().unwrap();
+        let takeout = dir
+            .path()
+            .join("takeout-20260819T084512Z-001")
+            .join("Takeout")
+            .join("My Activity")
+            .join("Gemini Apps");
+        fs::create_dir_all(&takeout).unwrap();
+        fs::write(takeout.join("My Activity.json"), "[]").unwrap();
+
+        let settings = HalluScribeSettings {
+            gemini_import_path: dir.path().display().to_string(),
+            ..HalluScribeSettings::default()
+        };
+        assert_eq!(swept(&settings), vec![takeout.join("My Activity.json")]);
+    }
+
+    /// The depth cap still bites one level past the worst legitimate layout
+    /// (Grok's four plus a wrapper). That is deliberate - the alternative is
+    /// walking a whole drive - and it is why the "no export found" diagnostic
+    /// matters more than the exact number here.
     #[test]
     fn an_export_below_the_depth_cap_is_not_searched_for() {
         let dir = tempdir().unwrap();
-        let deep = dir.path().join("a").join("b").join("c").join("d").join("e");
+        let deep = dir
+            .path()
+            .join("a")
+            .join("b")
+            .join("c")
+            .join("d")
+            .join("e")
+            .join("f");
         fs::create_dir_all(&deep).unwrap();
         fs::write(deep.join("conversations.json"), "[]").unwrap();
 

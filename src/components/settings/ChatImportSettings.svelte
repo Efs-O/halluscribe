@@ -15,10 +15,11 @@
       <section class="settings-section">
         <h2 class="section-title">CHAT IMPORTS</h2>
         <p class="field-note">
-          Point each of these at the folder you unpack that provider's export into. The export can
-          be dropped in exactly as downloaded — a wrapper folder or the provider's own nesting
-          (Google Takeout, Grok's ttl/30d/export_data/…) is searched a few levels down. When the
-          same export file exists at two depths, only the shallower one is imported.
+          Point each of these at the folder you unpack that provider's export into. The extracted
+          folder can be dropped in exactly as it comes, under any name — the provider's own
+          nesting (Google Takeout, Grok's ttl/30d/export_data/…) plus one folder of your own is
+          searched. When the same export file exists at two depths, only the shallower one is
+          imported.
         </p>
 
         <PathPickerField
