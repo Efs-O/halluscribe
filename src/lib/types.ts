@@ -312,3 +312,23 @@ export interface WorkspaceListDto {
   active: string | null;
   workspaces: WorkspaceInfo[];
 }
+
+/** Whether a configured chat-import path actually has an export in it.
+ *  Mirrors `scanner::import_status::ImportPathState`. `no_export_found` is the
+ *  case the diagnostic exists for: a path that is set, real, and still empty. */
+export type ImportPathState =
+  | "unset"
+  | "missing_folder"
+  | "no_export_found"
+  | "found";
+
+/** One provider's import-path health, as reported by `chat_import_status`. */
+export interface ImportPathStatus {
+  provider: string;
+  label: string;
+  path: string;
+  state: ImportPathState;
+  file_count: number;
+  total_bytes: number;
+  files: string[];
+}

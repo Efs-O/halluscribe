@@ -8,6 +8,9 @@ mod codex;
 mod continue_scan;
 mod forge;
 mod import_discovery_tests;
+pub mod import_status;
+#[cfg(test)]
+mod import_status_tests;
 pub mod secrets;
 mod shared;
 mod tests;

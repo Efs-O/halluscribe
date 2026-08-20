@@ -1,7 +1,7 @@
 // HalluScribe - settings and credential-validation Tauri command handlers.
 
 use crate::app_support::archive_dir;
-use crate::{briefing, settings};
+use crate::{briefing, scanner, settings};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -17,6 +17,26 @@ pub(crate) struct ApiKeyValidationResult {
 pub(crate) fn get_settings(app: tauri::AppHandle) -> Result<settings::HalluScribeSettings, String> {
     let dir = archive_dir(&app)?;
     settings::load_with_import_paths(&dir).map_err(|error| error.to_string())
+}
+
+/// Report, per chat-import provider, whether an export is actually reachable
+/// at the configured path (GROK_IMPORT_PLAN § 12.4.4).
+///
+/// Answers from `scanner::chat_import_sources` - the same authority the sweep
+/// uses - so Settings can never claim an export the sweep would miss, or miss
+/// one it would find. Runs the bounded discovery walk for up to four providers,
+/// so it is async and off the main thread like the other walking commands.
+#[tauri::command]
+pub(crate) async fn chat_import_status(
+    app: tauri::AppHandle,
+) -> Result<Vec<scanner::import_status::ImportPathStatus>, String> {
+    let dir = archive_dir(&app)?;
+    let current = settings::load_with_import_paths(&dir).map_err(|error| error.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        scanner::import_status::all_import_statuses(&current)
+    })
+    .await
+    .map_err(|error| format!("import status check failed: {error}"))
 }
 
 /// Persist updated settings to disk.

@@ -22,5 +22,7 @@ pub(crate) use search::{
     rebuild_session_embeddings, search_raw_transcripts, search_sessions, search_sessions_fulltext,
     search_sessions_semantic,
 };
-pub(crate) use settings::{get_settings, save_settings, validate_ollama_api_key};
+pub(crate) use settings::{
+    chat_import_status, get_settings, save_settings, validate_ollama_api_key,
+};
 pub(crate) use sweep::{cancel_sweep, trigger_sweep};

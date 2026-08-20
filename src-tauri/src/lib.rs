@@ -42,12 +42,12 @@ use app_state::{
 use app_support::{archive_dir, default_archive_dir, mark_sweep_success, sweep_config};
 use chrono::{Datelike, Local, Timelike};
 use commands::{
-    apply_redaction, cancel_briefing, cancel_chat, cancel_sweep, delete_sessions,
-    get_raw_session_total, get_recent_sessions, get_settings, get_stats, preview_redaction,
-    read_image_attachment, read_session, rebuild_session_embeddings, run_briefing,
-    save_recorded_chat_session, save_settings, search_raw_transcripts, search_sessions,
-    search_sessions_fulltext, search_sessions_semantic, send_chat_message, trigger_sweep,
-    validate_ollama_api_key,
+    apply_redaction, cancel_briefing, cancel_chat, cancel_sweep, chat_import_status,
+    delete_sessions, get_raw_session_total, get_recent_sessions, get_settings, get_stats,
+    preview_redaction, read_image_attachment, read_session, rebuild_session_embeddings,
+    run_briefing, save_recorded_chat_session, save_settings, search_raw_transcripts,
+    search_sessions, search_sessions_fulltext, search_sessions_semantic, send_chat_message,
+    trigger_sweep, validate_ollama_api_key,
 };
 use commands_capture::{cancel_capture, get_capture_status};
 use commands_profile::{
@@ -334,6 +334,7 @@ pub fn run() {
             trigger_sweep,
             get_settings,
             save_settings,
+            chat_import_status,
             validate_ollama_api_key,
             search_sessions,
             read_session,

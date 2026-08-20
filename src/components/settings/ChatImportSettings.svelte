@@ -1,6 +1,17 @@
-<!-- HalluScribe - external chat import path settings. -->
+<!-- HalluScribe - external chat import path settings, with the per-path
+     "is there actually an export in there?" diagnostic (GROK_IMPORT_PLAN
+     § 12.4.4). Before this, a path pointing at an empty or too-deeply-nested
+     folder was completely silent: the sweep imported nothing and said nothing,
+     which cost a whole sweep cycle to notice. -->
 <script lang="ts">
-  import type { HalluScribeSettings } from "../../lib/types";
+  import { invoke } from "@tauri-apps/api/core";
+  import type { HalluScribeSettings, ImportPathStatus } from "../../lib/types";
+  import {
+    importStatusTone,
+    importStatusMessage,
+    importStatusDetail,
+    importStatusSummary,
+  } from "../../lib/importStatus";
   import PathPickerField from "./PathPickerField.svelte";
 
   interface Props {
@@ -9,7 +20,44 @@
   }
 
   let { settings = $bindable(), onSave }: Props = $props();
-  function onBlur() { void onSave(); }
+
+  let statuses = $state<ImportPathStatus[]>([]);
+  let checking = $state(false);
+
+  // Generation counter so a slow check never overwrites a newer one - the
+  // walk is bounded but four providers on a cold disk still take a moment.
+  let checkGen = 0;
+
+  async function refreshStatus() {
+    const gen = ++checkGen;
+    checking = true;
+    try {
+      const result = await invoke<ImportPathStatus[]>("chat_import_status");
+      if (gen === checkGen) statuses = result;
+    } catch {
+      // A failed check must not masquerade as "no export found" - showing
+      // nothing is honest, showing a warning we did not earn is not.
+      if (gen === checkGen) statuses = [];
+    } finally {
+      if (gen === checkGen) checking = false;
+    }
+  }
+
+  // Check once when Settings opens, then again after each path edit is saved.
+  $effect(() => {
+    void refreshStatus();
+  });
+
+  async function onBlur() {
+    await onSave();
+    await refreshStatus();
+  }
+
+  function statusFor(provider: string): ImportPathStatus | undefined {
+    return statuses.find((status) => status.provider === provider);
+  }
+
+  let summary = $derived(importStatusSummary(statuses));
 </script>
 
       <section class="settings-section">
@@ -21,6 +69,21 @@
           searched. When the same export file exists at two depths, only the shallower one is
           imported.
         </p>
+        {#if summary}
+          <p class="field-note field-note-warn">{summary}</p>
+        {/if}
+
+        {#snippet importStatus(provider: string)}
+          {@const status = statusFor(provider)}
+          {#if status && !checking}
+            <p class="import-status import-status-{importStatusTone(status)}">
+              {importStatusMessage(status)}
+            </p>
+            {#if importStatusDetail(status)}
+              <p class="import-status-detail">{importStatusDetail(status)}</p>
+            {/if}
+          {/if}
+        {/snippet}
 
         <PathPickerField
           label="ChatGPT import path"
@@ -29,6 +92,7 @@
           placeholder=".../chat_sessions/chatgpt"
           onchange={onBlur}
         />
+        {@render importStatus("chatgpt")}
 
         <PathPickerField
           label="Claude.ai import path"
@@ -37,6 +101,7 @@
           placeholder=".../chat_sessions/claude"
           onchange={onBlur}
         />
+        {@render importStatus("claude_ai")}
 
         <PathPickerField
           label="Gemini import path"
@@ -45,6 +110,7 @@
           placeholder=".../chat_sessions/gemini"
           onchange={onBlur}
         />
+        {@render importStatus("gemini")}
 
         <PathPickerField
           label="Grok import path"
@@ -54,6 +120,7 @@
           note="Folder holding prod-grok-backend.json."
           onchange={onBlur}
         />
+        {@render importStatus("grok")}
 
         <PathPickerField
           label="Ollama Chat database path"

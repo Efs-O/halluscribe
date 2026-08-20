@@ -98,3 +98,22 @@
 }
 .settings-form .action-btn:hover:not(:disabled) { border-color: var(--amber); color: var(--amber); }
 .settings-form .action-btn:disabled { cursor: default; opacity: 0.6; }
+
+/* Chat-import path diagnostic (GROK_IMPORT_PLAN § 12.4.4). Sits directly under
+   its path field, so tone alone tells the user which row needs attention. */
+.settings-form .import-status {
+  font-size: 12px;
+  margin: -4px 0 0;
+  padding-left: 2px;
+}
+.settings-form .import-status-quiet { color: var(--dim); }
+.settings-form .import-status-ok { color: var(--green); }
+.settings-form .import-status-warn { color: var(--amber); }
+.settings-form .import-status-detail {
+  color: var(--dim);
+  font-size: 11px;
+  margin: 2px 0 0;
+  padding-left: 2px;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
