@@ -3,12 +3,14 @@
 // archive.rs owns all index read/write; this module owns query/filter only.
 // Used both by Tauri commands and by the Gemma chat tool-call loop.
 
+mod body_cache;
 mod content;
 mod filtering;
 mod params;
 mod raw;
 mod tokenize;
 
+pub use body_cache::invalidate as invalidate_body_cache;
 pub(crate) use content::{body_contains, body_find};
 pub use params::SearchParams;
 pub use raw::{search_raw, RawExcerpt, RawSearchError, RawSearchResult, RawSessionMatches};

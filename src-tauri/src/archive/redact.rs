@@ -205,6 +205,8 @@ pub fn apply_redaction(
 
     let updated = original.replace(find, replace);
     fs::write(&md_path, &updated)?;
+    // The redacted text must disappear from search results immediately.
+    crate::search::invalidate_body_cache();
 
     let mut ledger = load_ledger(archive_dir);
     let rule = RedactionRule {

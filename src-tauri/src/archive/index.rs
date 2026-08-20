@@ -32,6 +32,26 @@ pub fn find_session(archive_dir: &Path, id: &str) -> Option<IndexEntry> {
         .find(|entry| entry.id == id)
 }
 
+/// Size and modification-time of the archive's `index.json`, as a cheap
+/// "has this archive changed" stamp. Used by the search body cache to notice a
+/// sweep run by another process without stat-ing every session file. A missing
+/// or unreadable index stamps as `(0, 0)`, which simply never matches a real
+/// one and so errs towards rebuilding.
+pub type IndexStamp = (u64, u64);
+
+pub fn index_stamp(archive_dir: &Path) -> IndexStamp {
+    let Ok(meta) = std::fs::metadata(archive_dir.join("index.json")) else {
+        return (0, 0);
+    };
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|since| since.as_secs())
+        .unwrap_or(0);
+    (meta.len(), modified)
+}
+
 pub fn read_sessions(archive_dir: &Path) -> Vec<IndexEntry> {
     load_index(archive_dir)
         .map(|idx| idx.sessions)

@@ -45,14 +45,22 @@ pub(crate) fn search_sessions(
 }
 
 /// Full-text session search for the SESSION SUMMARY tab.
+///
+/// Async and off the main thread on purpose: a sync command runs on the thread
+/// pumping the window's event loop, so a multi-second scan froze the whole UI
+/// ("Not Responding") rather than merely delaying the results. The scan itself
+/// is fast once the search body cache is warm, but the first call after a
+/// sweep still reads the corpus, and that must not block painting.
 #[tauri::command]
-pub(crate) fn search_sessions_fulltext(
+pub(crate) async fn search_sessions_fulltext(
     app: tauri::AppHandle,
     query: String,
 ) -> Result<Vec<archive::IndexEntry>, String> {
     let dir = archive_dir(&app)?;
     archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
-    Ok(search::search_fulltext(&dir, &query))
+    tauri::async_runtime::spawn_blocking(move || search::search_fulltext(&dir, &query))
+        .await
+        .map_err(|error| format!("search failed: {error}"))
 }
 
 /// Brute-force scan of preserved raw transcripts (SESSION SUMMARY raw scope).

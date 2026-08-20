@@ -51,8 +51,8 @@ pub use backfill::{backfill_raw, BackfillResult};
 pub use capture::{run_capture, CaptureStatus};
 pub use captured_manifest::{load_captured, save_captured, CapturedManifest, CapturedRecord};
 pub use index::{
-    archived_source_size, delete_sessions, ensure_index_readable, find_session, is_archived,
-    read_sessions, session_id, set_raw_path, set_secret_flags,
+    archived_source_size, delete_sessions, ensure_index_readable, find_session, index_stamp,
+    is_archived, read_sessions, session_id, set_raw_path, set_secret_flags, IndexStamp,
 };
 pub use raw::{
     preserve_raw, preserve_raw_bytes, raw_rel_path, read_raw, read_raw_at, PreservedRaw, RAW_DIR,

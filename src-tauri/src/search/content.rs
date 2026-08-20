@@ -1,27 +1,25 @@
 // HalluScribe - session content search: shared .md body read + full-text matcher.
 
+use super::body_cache;
 use super::tokenize::{parse_query, ParsedQuery};
 use crate::archive::{read_sessions, IndexEntry};
 use std::{fs, path::Path};
 
-/// Read a session's `.md` body **once**, lowercased, and test each of
-/// `needles` against it in a single pass. Returns a vec parallel to
-/// `needles` (`true` = substring found). An absent/unreadable body counts as
-/// "not found" for every needle rather than erroring - this is the single
-/// disk-read point shared by every keyword search path (chat tool, session
-/// list, briefing), so the file-read logic lives in exactly one place.
+/// Test each of `needles` against a session's lowercased `.md` body in a
+/// single pass. Returns a vec parallel to `needles` (`true` = substring
+/// found). An absent/unreadable body counts as "not found" for every needle
+/// rather than erroring - this is the single body-read point shared by every
+/// keyword search path (chat tool, session list, briefing), so the read logic
+/// lives in exactly one place. The body comes from `body_cache`, which holds
+/// the whole corpus in memory; see that module for how staleness is caught.
 pub(crate) fn body_find(archive_dir: &Path, entry: &IndexEntry, needles: &[&str]) -> Vec<bool> {
-    let md_path = archive_dir.join(&entry.archive_path);
-    match fs::read_to_string(&md_path) {
-        Ok(markdown) => {
-            let lower = markdown.to_lowercase();
-            needles
-                .iter()
-                .map(|needle| lower.contains(needle))
-                .collect()
-        }
-        Err(_) => vec![false; needles.len()],
-    }
+    body_cache::with_body(archive_dir, &entry.archive_path, |lower| {
+        needles
+            .iter()
+            .map(|needle| lower.contains(needle))
+            .collect()
+    })
+    .unwrap_or_else(|| vec![false; needles.len()])
 }
 
 /// Single-needle convenience wrapper over `body_find`, kept for callers that
