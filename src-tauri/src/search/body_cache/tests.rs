@@ -5,9 +5,9 @@
 use super::*;
 use std::fs;
 
-/// The cache is one process-global slot holding one archive, and `invalidate`
-/// bumps a process-global counter, so these tests would evict each other if
-/// cargo ran them concurrently. Every test takes this lock first.
+/// The cache is one process-global slot holding one archive, so its tests
+/// serialise their cache transitions. Production invalidation is archive-scoped,
+/// so unrelated archive writes do not evict this test's corpus.
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn serialised() -> std::sync::MutexGuard<'static, ()> {
@@ -86,7 +86,7 @@ fn a_missing_body_is_absent_rather_than_empty() {
 }
 
 /// The failure this cache could plausibly introduce: a redaction rewrites a
-/// body and the removed text keeps matching. `invalidate()` is what the two
+/// body and the removed text keeps matching. `invalidate(&dir)` is what the two
 /// in-process body writers call to prevent it.
 #[test]
 fn invalidate_drops_a_rewritten_body() {
@@ -96,7 +96,7 @@ fn invalidate_drops_a_rewritten_body() {
     assert_eq!(contains(&dir, "sessions/a.md", "secret token"), Some(true));
 
     fs::write(dir.join("sessions/a.md"), "the [REDACTED] lives here").unwrap();
-    invalidate();
+    invalidate(&dir);
 
     assert_eq!(contains(&dir, "sessions/a.md", "secret token"), Some(false));
     assert_eq!(contains(&dir, "sessions/a.md", "[redacted]"), Some(true));

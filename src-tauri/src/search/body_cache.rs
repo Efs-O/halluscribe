@@ -7,7 +7,7 @@
 // virus scanner. So the corpus is read once and held lowercased in memory.
 //
 // Staleness is caught two ways, because there are two ways bodies change:
-//   - `invalidate()`, called by the two places in this process that write a
+//   - `invalidate(archive_dir)`, called by the two places in this process that write a
 //     session body (`archive::writer` on sweep, `archive::redact` on redact);
 //   - the `index.json` size+mtime stamp, which catches a sweep run by another
 //     process (the MCP server, a second window) without a per-file `stat`.
@@ -16,23 +16,27 @@
 use crate::archive::{index_stamp, read_sessions, IndexStamp};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-/// Bumped by every in-process write of a session body. Part of the cache key,
-/// so a write during a search can never be papered over by a same-second
-/// mtime: the generation differs regardless of the clock.
-static GENERATION: AtomicU64 = AtomicU64::new(0);
-
-/// Drop the cached bodies. Call after writing or rewriting any session `.md`.
-pub fn invalidate() {
-    GENERATION.fetch_add(1, Ordering::SeqCst);
+/// Drop cached bodies for `archive_dir`. A write in another workspace cannot
+/// affect this cache's contents, so it must not evict them. The mutex makes an
+/// in-flight lookup and its writer atomic with respect to one another: either
+/// the lookup finishes before the write, or the next lookup rebuilds.
+pub fn invalidate(archive_dir: &Path) {
+    let mut guard = cache()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard
+        .as_ref()
+        .is_some_and(|cached| cached.archive_dir == archive_dir)
+    {
+        *guard = None;
+    }
 }
 
 struct Cached {
     archive_dir: PathBuf,
     stamp: IndexStamp,
-    generation: u64,
     /// Keyed by `IndexEntry::archive_path` (index-relative, forward slashes),
     /// holding the body already lowercased so a search never re-lowercases.
     bodies: HashMap<String, String>,
@@ -69,21 +73,17 @@ pub(super) fn with_body<R>(
     test: impl FnOnce(&str) -> R,
 ) -> Option<R> {
     let stamp = index_stamp(archive_dir);
-    let generation = GENERATION.load(Ordering::SeqCst);
     let mut guard = cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let fresh = guard.as_ref().is_some_and(|cached| {
-        cached.archive_dir == archive_dir
-            && cached.stamp == stamp
-            && cached.generation == generation
-    });
+    let fresh = guard
+        .as_ref()
+        .is_some_and(|cached| cached.archive_dir == archive_dir && cached.stamp == stamp);
     if !fresh {
         *guard = Some(Cached {
             archive_dir: archive_dir.to_path_buf(),
             stamp,
-            generation,
             bodies: load(archive_dir),
         });
     }

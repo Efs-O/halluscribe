@@ -51,7 +51,7 @@ pub fn write_session(
     };
     fs::write(&abs, &markdown)?;
     // A new body on disk must not be answered for out of the search cache.
-    crate::search::invalidate_body_cache();
+    crate::search::invalidate_body_cache(archive_dir);
 
     let secret_flags = scan_for_secrets(&markdown);
 
