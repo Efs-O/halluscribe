@@ -39,6 +39,26 @@ fn chat_tools_always_include_raw_transcript_search() {
 }
 
 #[test]
+fn search_sessions_tool_requires_metadata_filters_for_provider_counts() {
+    let search_tool = chat_tools(&runtime(false, None))
+        .into_iter()
+        .find(|tool| tool["function"]["name"] == "search_sessions")
+        .expect("search_sessions tool should be present");
+    let description = search_tool["function"]["description"]
+        .as_str()
+        .expect("search_sessions description should be a string");
+    let tool_description = search_tool["function"]["parameters"]["properties"]["tool"]
+        ["description"]
+        .as_str()
+        .expect("tool parameter description should be a string");
+
+    assert!(description.contains("COUNTING RULE"));
+    assert!(description.contains("OMIT 'query'"));
+    assert!(description.contains("never use search_raw_transcripts"));
+    assert!(tool_description.contains("provider/date counts"));
+}
+
+#[test]
 fn execute_raw_search_returns_grouped_hits_and_honors_scope_gate() {
     use std::fs;
     let dir = tempfile::tempdir().unwrap();
