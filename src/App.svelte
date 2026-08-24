@@ -133,6 +133,7 @@
           toast={sweep.toast}
           onRunNow={() => sweep.runNow()}
           onStop={() => sweep.cancel()}
+          onDismissToast={() => sweep.dismissToast()}
         />
       {/if}
       <div class="window-controls">

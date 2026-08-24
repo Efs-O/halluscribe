@@ -9,8 +9,6 @@ export class SweepController {
   progress = $state<SweepProgress | null>(null);
   toast = $state<{ msg: string; ok: boolean } | null>(null);
 
-  private toastTimer: ReturnType<typeof setTimeout> | undefined;
-
   async registerListeners(): Promise<UnlistenFn[]> {
     return Promise.all([
       listen<SweepProgress>("sweep-progress", (event) => {
@@ -24,8 +22,6 @@ export class SweepController {
         this.progress = null;
         this.toast = { msg: event.payload, ok: true };
         this.running = false;
-        clearTimeout(this.toastTimer);
-        this.toastTimer = setTimeout(() => { this.toast = null; }, 5000);
       }),
     ]);
   }
@@ -34,7 +30,6 @@ export class SweepController {
     if (this.running) return;
     this.running = true;
     this.progress = null;
-    clearTimeout(this.toastTimer);
     this.toast = null;
     try {
       await invoke("trigger_sweep");
@@ -42,7 +37,6 @@ export class SweepController {
     } catch (error) {
       this.toast = { msg: String(error), ok: false };
       this.running = false;
-      this.toastTimer = setTimeout(() => { this.toast = null; }, 5000);
     }
   }
 
@@ -51,7 +45,7 @@ export class SweepController {
     this.toast = { msg: "Stopping - waiting for current session to finish...", ok: true };
   }
 
-  dispose(): void {
-    clearTimeout(this.toastTimer);
-  }
+  dismissToast(): void { this.toast = null; }
+
+  dispose(): void {}
 }

@@ -9,8 +9,9 @@
     toast: { msg: string; ok: boolean } | null;
     onRunNow: () => void;
     onStop: () => void;
+    onDismissToast: () => void;
   }
-  let { running, progress, toast, onRunNow, onStop }: Props = $props();
+  let { running, progress, toast, onRunNow, onStop, onDismissToast }: Props = $props();
 </script>
 
 {#if running}
@@ -36,7 +37,8 @@
 
 {#if toast}
   <div class="toast {toast.ok ? 'success' : 'error'}">
-    {toast.msg}
+    <span>{toast.msg}</span>
+    <button class="toast-dismiss" onclick={onDismissToast} aria-label="Dismiss sweep result">×</button>
   </div>
 {/if}
 
@@ -59,6 +61,18 @@
     -webkit-app-region: no-drag;
   }
   .btn-stop:hover { background: var(--amber, #f59e0b); color: #000; }
+
+  .toast-dismiss {
+    align-self: flex-start;
+    background: transparent;
+    border: 0;
+    color: currentColor;
+    cursor: pointer;
+    font: inherit;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 0 0 10px;
+  }
 
   .progress-bar-wrap {
     position: relative;
