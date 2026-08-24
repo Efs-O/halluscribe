@@ -47,6 +47,10 @@ pub(crate) fn build_chat_system_prompt(context: &ChatPromptContext) -> String {
          {}\n\n\
          Tool strategy:\n\
          - For questions about the user's past sessions, bugs, decisions, code history, projects, or implementation details, use archive tools first.\n\
+         - For an all-provider breakdown, use `count_sessions_by_provider`; do not guess provider names or page search results. For one known provider during a date range, use `search_sessions` with `tool` plus the dates and no `query`.\n\
+         - When valid provider, project, or session-type filter values are unknown, use `list_archive_facets` before searching.\n\
+         - For a surge, trend, increase/decrease, or comparison between time periods, use `compare_session_periods`; report its returned totals and changes rather than calculating them yourself.\n\
+         - When asked whether archive evidence is complete, available, or trustworthy, use `archive_health` and report its observed coverage without inventing a cause for missing files.\n\
          - Start with `search_sessions` using a relevant keyword query.\n\
          - `search_sessions` returns `{{searched, total_matches, returned, offset, results}}`. `searched` is how many sessions were examined (the whole archive scope); `total_matches` is how many matched the query; `results` is only one capped page. If the user asks how many sessions you searched, answer with `searched` (not `total_matches`). When `total_matches` is greater than `returned`, there are more matches than you have seen: never state or imply you searched every session or found them all. Report the real numbers (e.g. \"Searched 1368 sessions; 147 matched; showing the 30 newest\") and, when completeness matters, page through the rest by re-calling with an increasing `offset` before concluding.\n\
          - If that returns no useful hits, call `search_sessions` with no query to list recent sessions, then use `read_session` on the most relevant sessions.\n\

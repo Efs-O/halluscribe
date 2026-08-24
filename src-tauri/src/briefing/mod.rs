@@ -2,6 +2,7 @@
 // Keeps the public briefing API thin while backend/runtime details live in
 // focused sibling modules.
 
+mod archive_analysis;
 mod chat;
 mod filters;
 mod idle;

@@ -29,6 +29,16 @@ fn archive_prompt_warns_against_false_completeness() {
 }
 
 #[test]
+fn archive_prompt_routes_deterministic_analysis_questions_to_their_tools() {
+    let prompt = build_chat_system_prompt(&base_context());
+
+    assert!(prompt.contains("count_sessions_by_provider"));
+    assert!(prompt.contains("list_archive_facets"));
+    assert!(prompt.contains("compare_session_periods"));
+    assert!(prompt.contains("archive_health"));
+}
+
+#[test]
 fn semantic_prompt_preserves_precision_rule() {
     let prompt = build_chat_system_prompt(&ChatPromptContext {
         web_search_available: true,

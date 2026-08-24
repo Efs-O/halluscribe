@@ -1,6 +1,6 @@
 // HalluScribe - briefing/chat tool schemas and tool-call helpers.
 
-use super::ChatRuntimeOptions;
+use super::{archive_analysis, ChatRuntimeOptions};
 use crate::search;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -38,13 +38,13 @@ pub(crate) enum ChatScope {
 }
 
 pub(crate) fn chat_tools(runtime: &ChatRuntimeOptions) -> Vec<Value> {
-    let mut tools = vec![
-        provider_counts_tool(),
+    let mut tools = archive_analysis::tool_schemas();
+    tools.extend([
         search_sessions_tool(),
         read_session_tool(),
         raw_search_tool(),
         read_raw_session_tool(),
-    ];
+    ]);
     if runtime.web_search_enabled && super::web_search::web_search_available(runtime) {
         tools.push(web_search_tool());
     }
@@ -60,8 +60,10 @@ pub(crate) fn execute_tool(
     name: &str,
     args: &Value,
 ) -> String {
+    if let Some(result) = archive_analysis::execute(archive_dir, &runtime.chat_scope, name, args) {
+        return result;
+    }
     match name {
-        "count_sessions_by_provider" => execute_provider_counts(archive_dir, runtime, args),
         "search_sessions" => {
             let params = search::SearchParams {
                 query: args["query"].as_str().map(str::to_string),
@@ -123,23 +125,6 @@ fn search_sessions_tool() -> Value {
                     "tool":      { "type": "string", "description": "Source provider/tool filter, e.g. 'forge'. For provider/date counts use this field, not 'query'." },
                     "limit":     { "type": "integer", "description": "Max rows per page (default 20, capped at 30)" },
                     "offset":    { "type": "integer", "description": "Number of leading matches to skip; use with limit to page through all matches when total_matches exceeds returned" }
-                }
-            }
-        }
-    })
-}
-
-fn provider_counts_tool() -> Value {
-    serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": "count_sessions_by_provider",
-            "description": "Return the exhaustive session count for EVERY source provider/tool in a date range. ALWAYS use this for 'all providers', provider breakdowns, or provider distributions. Do not guess provider names, page search_sessions results, or infer counts from excerpts. Returns {searched, total_sessions, providers}, where providers is every matching provider with its exact session_count and total_sessions is their exact sum.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "date_from": { "type": "string", "description": "ISO date lower bound, format YYYY-MM-DD e.g. 2026-07-01" },
-                    "date_to": { "type": "string", "description": "ISO date upper bound, format YYYY-MM-DD e.g. 2026-07-31" }
                 }
             }
         }
@@ -256,24 +241,6 @@ fn execute_raw_search(archive_dir: &Path, runtime: &ChatRuntimeOptions, args: &V
         }
         Err(error) => error.to_string(),
     }
-}
-
-fn execute_provider_counts(
-    archive_dir: &Path,
-    runtime: &ChatRuntimeOptions,
-    args: &Value,
-) -> String {
-    let allowed_ids = match &runtime.chat_scope {
-        ChatScope::ArchiveWide => None,
-        ChatScope::AllowedSessionIds(ids) => Some(ids),
-    };
-    let result = search::count_sessions_by_provider_in_scope(
-        archive_dir,
-        args["date_from"].as_str(),
-        args["date_to"].as_str(),
-        allowed_ids,
-    );
-    serde_json::to_string_pretty(&result).unwrap_or_default()
 }
 
 fn execute_read_raw_session(archive_dir: &Path, args: &Value) -> String {

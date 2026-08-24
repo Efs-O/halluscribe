@@ -15,7 +15,7 @@ const WEIGHT_TOPIC_TAG: u32 = 4;
 const WEIGHT_ERROR_TAG: u32 = 3;
 const WEIGHT_BODY: u32 = 1;
 
-pub(super) fn matches_params(
+pub(crate) fn matches_params(
     archive_dir: &Path,
     entry: &IndexEntry,
     params: &SearchParams,

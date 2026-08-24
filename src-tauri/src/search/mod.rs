@@ -3,6 +3,7 @@
 // archive.rs owns all index read/write; this module owns query/filter only.
 // Used both by Tauri commands and by the Gemma chat tool-call loop.
 
+mod analytics;
 mod body_cache;
 mod content;
 mod filtering;
@@ -10,13 +11,20 @@ mod params;
 mod raw;
 mod tokenize;
 
+pub use analytics::{
+    archive_facets_in_scope, archive_health_in_scope, compare_session_periods_in_scope,
+    count_sessions_by_provider_in_scope, ArchiveFacets, ArchiveHealth, FacetCount, PeriodBreakdown,
+    PeriodComparison, PeriodGroupChange, PeriodSummary, ProviderSessionCount,
+    ProviderSessionCounts,
+};
 pub use body_cache::invalidate as invalidate_body_cache;
 pub(crate) use content::{body_contains, body_find};
+pub(crate) use filtering::matches_params;
 pub use params::SearchParams;
 pub use raw::{search_raw, RawExcerpt, RawSearchError, RawSearchResult, RawSessionMatches};
 
 use crate::archive::{read_sessions, IndexEntry};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// One page of search results plus the counts needed to describe coverage
@@ -31,79 +39,6 @@ pub struct SearchPage {
     pub returned: usize,
     pub offset: usize,
     pub results: Vec<IndexEntry>,
-}
-
-/// One exact session total for a source provider/tool.
-#[derive(Debug, serde::Serialize, PartialEq, Eq)]
-pub struct ProviderSessionCount {
-    pub provider: String,
-    pub session_count: usize,
-}
-
-/// Exhaustive provider breakdown for one date-filtered archive scope.
-#[derive(Debug, serde::Serialize, PartialEq, Eq)]
-pub struct ProviderSessionCounts {
-    /// Sessions examined before applying the date filter.
-    pub searched: usize,
-    /// Exact number of sessions within the requested date range.
-    pub total_sessions: usize,
-    /// Every provider/tool represented in the matching sessions.
-    pub providers: Vec<ProviderSessionCount>,
-}
-
-/// Count every source provider in one date-filtered archive scope. This avoids
-/// requiring an agent to guess provider names or page through search results.
-pub fn count_sessions_by_provider_in_scope(
-    archive_dir: &Path,
-    date_from: Option<&str>,
-    date_to: Option<&str>,
-    allowed_ids: Option<&HashSet<String>>,
-) -> ProviderSessionCounts {
-    let params = SearchParams {
-        date_from: date_from.map(str::to_string),
-        date_to: date_to.map(str::to_string),
-        ..SearchParams::default()
-    };
-    let sessions = read_sessions(archive_dir);
-    let searched = sessions
-        .iter()
-        .filter(|entry| {
-            allowed_ids
-                .map(|ids| ids.contains(&entry.id))
-                .unwrap_or(true)
-        })
-        .count();
-    let mut counts = HashMap::<String, usize>::new();
-
-    for entry in sessions.into_iter().filter(|entry| {
-        allowed_ids
-            .map(|ids| ids.contains(&entry.id))
-            .unwrap_or(true)
-            && filtering::matches_params(archive_dir, entry, &params)
-    }) {
-        *counts.entry(entry.tool).or_default() += 1;
-    }
-
-    let total_sessions = counts.values().sum();
-    let mut providers: Vec<ProviderSessionCount> = counts
-        .into_iter()
-        .map(|(provider, session_count)| ProviderSessionCount {
-            provider,
-            session_count,
-        })
-        .collect();
-    providers.sort_by(|left, right| {
-        right
-            .session_count
-            .cmp(&left.session_count)
-            .then_with(|| left.provider.cmp(&right.provider))
-    });
-
-    ProviderSessionCounts {
-        searched,
-        total_sessions,
-        providers,
-    }
 }
 
 /// Return sessions matching `params`, sorted newest-first, up to `limit`.

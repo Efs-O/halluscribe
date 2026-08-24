@@ -17,15 +17,16 @@ fn runtime(web_search_enabled: bool, api_key: Option<&str>) -> ChatRuntimeOption
 
 #[test]
 fn chat_tools_only_include_web_tools_when_enabled_and_configured() {
-    // Base archive tools: provider counts, search/read session, and raw search/read.
+    // Base archive tools: four deterministic analytics tools, search/read session,
+    // and raw search/read.
     let disabled = chat_tools(&runtime(false, Some("key")));
-    assert_eq!(disabled.len(), 5);
+    assert_eq!(disabled.len(), 8);
 
     let missing_key = chat_tools(&runtime(true, None));
-    assert_eq!(missing_key.len(), 5);
+    assert_eq!(missing_key.len(), 8);
 
     let enabled = chat_tools(&runtime(true, Some("key")));
-    assert_eq!(enabled.len(), 7);
+    assert_eq!(enabled.len(), 10);
 }
 
 #[test]
