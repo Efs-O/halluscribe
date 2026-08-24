@@ -245,6 +245,12 @@
       <span class="zone-label">CHAT</span>
       <div class="chat-controls">
         <div class="search-mode-group">
+          {#if chatStreaming}
+            <div class="model-processing-tab" role="status" aria-live="polite">
+              <span class="model-processing-spinner" aria-hidden="true"></span>
+              <span>Agent is processing…</span>
+            </div>
+          {/if}
           <button
             class="scope-btn"
             class:active={chatSearchMode === "archive"}
