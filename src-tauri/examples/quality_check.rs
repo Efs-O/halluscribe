@@ -23,6 +23,7 @@
 use app_lib::{
     gemma::{run_inference, InferenceBackend},
     llama_gpu::GpuConfig,
+    llama_tuning,
     preprocessor::{preprocess_session, PreprocessError},
     readers::ChatProvider,
     scanner::{scan_sessions, ToolSource},
@@ -32,6 +33,7 @@ use std::{env, path::PathBuf};
 
 fn main() {
     let archive_dir = archive_dir();
+    llama_tuning::set_host_root(archive_dir.clone());
     // Generation limits MUST come from the real settings file: `HalluScribeSettings::default()`
     // sets ctx_size and max_tokens to 0 ("must be set before generation can run"), and passing
     // those zeros to llama.cpp makes every tool call come back as bare `<|tool_call>` content
