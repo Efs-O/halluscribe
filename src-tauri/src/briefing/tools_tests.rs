@@ -17,16 +17,15 @@ fn runtime(web_search_enabled: bool, api_key: Option<&str>) -> ChatRuntimeOption
 
 #[test]
 fn chat_tools_only_include_web_tools_when_enabled_and_configured() {
-    // Base archive tools: search_sessions, read_session, search_raw_transcripts,
-    // read_raw_session.
+    // Base archive tools: provider counts, search/read session, and raw search/read.
     let disabled = chat_tools(&runtime(false, Some("key")));
-    assert_eq!(disabled.len(), 4);
+    assert_eq!(disabled.len(), 5);
 
     let missing_key = chat_tools(&runtime(true, None));
-    assert_eq!(missing_key.len(), 4);
+    assert_eq!(missing_key.len(), 5);
 
     let enabled = chat_tools(&runtime(true, Some("key")));
-    assert_eq!(enabled.len(), 6);
+    assert_eq!(enabled.len(), 7);
 }
 
 #[test]
@@ -55,7 +54,43 @@ fn search_sessions_tool_requires_metadata_filters_for_provider_counts() {
     assert!(description.contains("COUNTING RULE"));
     assert!(description.contains("OMIT 'query'"));
     assert!(description.contains("never use search_raw_transcripts"));
+    assert!(description.contains("count_sessions_by_provider"));
     assert!(tool_description.contains("provider/date counts"));
+}
+
+#[test]
+fn count_sessions_by_provider_returns_every_date_filtered_provider() {
+    use std::fs;
+    let dir = tempfile::tempdir().unwrap();
+    let sessions = json!({ "sessions": [
+        { "id": "forge-1", "project": "Forge", "date": "2026-07-02", "title": "One", "tool": "Forge", "fill_pct": 1.0, "session_type": "building", "error_tags": [], "topic_tags": [], "archive_path": "sessions/forge-1.md", "source_jsonl": "sources/forge-1.jsonl" },
+        { "id": "forge-2", "project": "Forge", "date": "2026-07-03", "title": "Two", "tool": "Forge", "fill_pct": 1.0, "session_type": "building", "error_tags": [], "topic_tags": [], "archive_path": "sessions/forge-2.md", "source_jsonl": "sources/forge-2.jsonl" },
+        { "id": "codex-1", "project": "App", "date": "2026-07-04", "title": "Three", "tool": "Codex", "fill_pct": 1.0, "session_type": "building", "error_tags": [], "topic_tags": [], "archive_path": "sessions/codex-1.md", "source_jsonl": "sources/codex-1.jsonl" },
+        { "id": "gemini-1", "project": "App", "date": "2026-08-01", "title": "Four", "tool": "Gemini", "fill_pct": 1.0, "session_type": "building", "error_tags": [], "topic_tags": [], "archive_path": "sessions/gemini-1.md", "source_jsonl": "sources/gemini-1.jsonl" }
+    ]});
+    fs::write(
+        dir.path().join("index.json"),
+        serde_json::to_string(&sessions).unwrap(),
+    )
+    .unwrap();
+
+    let out = execute_tool(
+        dir.path(),
+        &runtime(false, None),
+        "count_sessions_by_provider",
+        &json!({ "date_from": "2026-07-01", "date_to": "2026-07-31" }),
+    );
+    let result: Value = serde_json::from_str(&out).unwrap();
+
+    assert_eq!(result["searched"], 4);
+    assert_eq!(result["total_sessions"], 3);
+    assert_eq!(
+        result["providers"],
+        json!([
+            { "provider": "Forge", "session_count": 2 },
+            { "provider": "Codex", "session_count": 1 }
+        ])
+    );
 }
 
 #[test]

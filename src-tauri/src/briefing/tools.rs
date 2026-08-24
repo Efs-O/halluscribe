@@ -39,6 +39,7 @@ pub(crate) enum ChatScope {
 
 pub(crate) fn chat_tools(runtime: &ChatRuntimeOptions) -> Vec<Value> {
     let mut tools = vec![
+        provider_counts_tool(),
         search_sessions_tool(),
         read_session_tool(),
         raw_search_tool(),
@@ -60,6 +61,7 @@ pub(crate) fn execute_tool(
     args: &Value,
 ) -> String {
     match name {
+        "count_sessions_by_provider" => execute_provider_counts(archive_dir, runtime, args),
         "search_sessions" => {
             let params = search::SearchParams {
                 query: args["query"].as_str().map(str::to_string),
@@ -109,7 +111,7 @@ fn search_sessions_tool() -> Value {
         "type": "function",
         "function": {
             "name": "search_sessions",
-            "description": "Search the session archive (matches title, tags, and summary body). Multi-word queries are AND-of-words: every word must appear somewhere in the session, in any order; wrap the query in double quotes to force exact-phrase matching instead. This makes it the right tool for 'which sessions mention X and Y' questions - total_matches covers the whole archive scope. COUNTING RULE: for 'how many sessions came from provider/tool X during a date range', set 'tool' plus 'date_from'/'date_to', OMIT 'query', and report 'total_matches' as the exact count. A query such as 'Forge' counts textual mentions, not Forge-provided sessions; never use search_raw_transcripts for a provider/date count. Returns a JSON object: {searched, total_matches, returned, offset, results}. 'searched' is how many sessions were examined (the whole archive scope for this chat); 'total_matches' is how many of them matched the query; 'results' is only one page of metadata rows (at most 'limit', default 20, max 30). When asked how many sessions you searched, report 'searched' (not 'total_matches'). When total_matches is greater than returned there are more matches than shown - do not claim you have seen them all; page through them by re-calling with an increasing 'offset'.",
+            "description": "Search the session archive (matches title, tags, and summary body). Multi-word queries are AND-of-words: every word must appear somewhere in the session, in any order; wrap the query in double quotes to force exact-phrase matching instead. This makes it the right tool for 'which sessions mention X and Y' questions - total_matches covers the whole archive scope. COUNTING RULE: for 'how many sessions came from provider/tool X during a date range', set 'tool' plus 'date_from'/'date_to', OMIT 'query', and report 'total_matches' as the exact count. For an all-provider breakdown, use count_sessions_by_provider instead. A query such as 'Forge' counts textual mentions, not Forge-provided sessions; never use search_raw_transcripts for a provider/date count. Returns a JSON object: {searched, total_matches, returned, offset, results}. 'searched' is how many sessions were examined (the whole archive scope for this chat); 'total_matches' is how many of them matched the query; 'results' is only one page of metadata rows (at most 'limit', default 20, max 30). When asked how many sessions you searched, report 'searched' (not 'total_matches'). When total_matches is greater than returned there are more matches than shown - do not claim you have seen them all; page through them by re-calling with an increasing 'offset'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -121,6 +123,23 @@ fn search_sessions_tool() -> Value {
                     "tool":      { "type": "string", "description": "Source provider/tool filter, e.g. 'forge'. For provider/date counts use this field, not 'query'." },
                     "limit":     { "type": "integer", "description": "Max rows per page (default 20, capped at 30)" },
                     "offset":    { "type": "integer", "description": "Number of leading matches to skip; use with limit to page through all matches when total_matches exceeds returned" }
+                }
+            }
+        }
+    })
+}
+
+fn provider_counts_tool() -> Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "count_sessions_by_provider",
+            "description": "Return the exhaustive session count for EVERY source provider/tool in a date range. ALWAYS use this for 'all providers', provider breakdowns, or provider distributions. Do not guess provider names, page search_sessions results, or infer counts from excerpts. Returns {searched, total_sessions, providers}, where providers is every matching provider with its exact session_count and total_sessions is their exact sum.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date_from": { "type": "string", "description": "ISO date lower bound, format YYYY-MM-DD e.g. 2026-07-01" },
+                    "date_to": { "type": "string", "description": "ISO date upper bound, format YYYY-MM-DD e.g. 2026-07-31" }
                 }
             }
         }
@@ -237,6 +256,24 @@ fn execute_raw_search(archive_dir: &Path, runtime: &ChatRuntimeOptions, args: &V
         }
         Err(error) => error.to_string(),
     }
+}
+
+fn execute_provider_counts(
+    archive_dir: &Path,
+    runtime: &ChatRuntimeOptions,
+    args: &Value,
+) -> String {
+    let allowed_ids = match &runtime.chat_scope {
+        ChatScope::ArchiveWide => None,
+        ChatScope::AllowedSessionIds(ids) => Some(ids),
+    };
+    let result = search::count_sessions_by_provider_in_scope(
+        archive_dir,
+        args["date_from"].as_str(),
+        args["date_to"].as_str(),
+        allowed_ids,
+    );
+    serde_json::to_string_pretty(&result).unwrap_or_default()
 }
 
 fn execute_read_raw_session(archive_dir: &Path, args: &Value) -> String {
