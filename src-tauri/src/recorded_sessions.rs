@@ -1,4 +1,4 @@
-// HalluScribe - persisted Gemma chat recording artifacts for save-on-clear chat sessions.
+// HalluScribe - persisted agent chat recording artifacts for save-on-clear chat sessions.
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -8,8 +8,8 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 const RECORDED_PROJECT: &str = "HalluScribe";
-const RECORDED_TOOL: &str = "Gemma 4";
-const RECORDED_PROVIDER: &str = "halluscribe_gemma_chat";
+const RECORDED_TOOL: &str = "HalluScribe Agent";
+const RECORDED_PROVIDER: &str = "halluscribe_agent_chat";
 const RECORDED_ORIGIN: &str = "recorded_chat";
 const RECORDED_VERSION: u32 = 1;
 
@@ -233,9 +233,9 @@ fn build_new_recorded_path(
     );
     let rel = PathBuf::from("recorded_sessions")
         .join(RECORDED_PROJECT)
-        .join("gemma4")
+        .join("agent-chat")
         .join(&date)
-        .join(format!("{time}-{millis:03}-{fingerprint}-gemma4-chat.json"));
+        .join(format!("{time}-{millis:03}-{fingerprint}-agent-chat.json"));
     let abs = archive_dir.join(&rel);
     (rel, abs)
 }
@@ -244,8 +244,8 @@ fn build_session_id(relative_path: &Path, now: chrono::DateTime<Utc>) -> String 
     let stem = relative_path
         .file_stem()
         .and_then(|stem| stem.to_str())
-        .unwrap_or("gemma4-chat");
-    format!("gemma4-{}-{stem}", now.format("%Y-%m-%d"))
+        .unwrap_or("agent-chat");
+    format!("agent-chat-{}-{stem}", now.format("%Y-%m-%d"))
 }
 
 #[cfg(test)]
@@ -303,9 +303,9 @@ mod tests {
         let text = fs::read_to_string(&result.absolute_path).unwrap();
         assert!(result.absolute_path.contains("recorded_sessions"));
         assert!(result.absolute_path.contains("HalluScribe"));
-        assert!(result.absolute_path.contains("gemma4"));
-        assert!(text.contains("\"tool\": \"Gemma 4\""));
-        assert!(text.contains("\"provider\": \"halluscribe_gemma_chat\""));
+        assert!(result.absolute_path.contains("agent-chat"));
+        assert!(text.contains("\"tool\": \"HalluScribe Agent\""));
+        assert!(text.contains("\"provider\": \"halluscribe_agent_chat\""));
         assert!(text.contains("\"boundary_reason\": \"clear\""));
         assert!(text.contains("\"search_mode\": \"archive\""));
     }

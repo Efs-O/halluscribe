@@ -61,6 +61,7 @@ export interface HalluScribeSettings {
   grok_import_path: string;
   ollama_chat_db_path: string;
   continue_data_path: string;
+  forge_sessions_path: string;
   scheduled_processing_enabled: boolean;
   schedule_time: string;
   idle_threshold_mins: number;

@@ -4,7 +4,8 @@ mod chatgpt_content;
 mod claudeai;
 mod gemini;
 mod grok;
-mod halluscribe_gemma_chat;
+#[path = "halluscribe_gemma_chat.rs"]
+mod halluscribe_agent_chat;
 mod ollama_chat;
 #[cfg(test)]
 mod raw_slice_tests;
@@ -33,7 +34,7 @@ pub enum ChatProvider {
     ClaudeAI,
     Gemini,
     Grok,
-    HalluScribeGemmaChat,
+    HalluScribeAgentChat,
     OllamaChat,
 }
 
@@ -121,7 +122,7 @@ impl ChatProvider {
             Self::ClaudeAI => "Claude.ai",
             Self::Gemini => "Gemini",
             Self::Grok => "Grok",
-            Self::HalluScribeGemmaChat => "Gemma 4",
+            Self::HalluScribeAgentChat => "HalluScribe Agent",
             Self::OllamaChat => "Ollama Chat",
         }
     }
@@ -134,7 +135,7 @@ impl ChatProvider {
             Self::ClaudeAI => "Claude".to_string(),
             Self::Gemini => "Gemini Apps".to_string(),
             Self::Grok => "Grok".to_string(),
-            Self::HalluScribeGemmaChat => "HalluScribe".to_string(),
+            Self::HalluScribeAgentChat => "HalluScribe".to_string(),
             Self::OllamaChat => "Ollama".to_string(),
         }
     }
@@ -156,7 +157,7 @@ impl ChatProvider {
             Self::ClaudeAI => "claude_ai",
             Self::Gemini => "gemini",
             Self::Grok => "grok",
-            Self::HalluScribeGemmaChat => "halluscribe_gemma_chat",
+            Self::HalluScribeAgentChat => "halluscribe_agent_chat",
             Self::OllamaChat => "ollama_chat",
         }
     }
@@ -204,7 +205,7 @@ pub fn read_target(target: &ScanTarget) -> Result<Vec<ParsedSession>, ReaderErro
             ChatProvider::ClaudeAI => claudeai::read(&target.path),
             ChatProvider::Gemini => gemini::read(&target.path),
             ChatProvider::Grok => grok::read(&target.path),
-            ChatProvider::HalluScribeGemmaChat => halluscribe_gemma_chat::read(&target.path),
+            ChatProvider::HalluScribeAgentChat => halluscribe_agent_chat::read(&target.path),
             ChatProvider::OllamaChat => ollama_chat::read(&target.path),
             ChatProvider::ClaudeCode
             | ChatProvider::Codex

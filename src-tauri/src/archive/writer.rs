@@ -5,7 +5,7 @@ use super::redact::{apply_rules, rules_for_session};
 use super::{ArchiveError, IndexEntry, SessionMeta, WrittenSession};
 use crate::gemma::{GemmaOutput, SessionType};
 use crate::scanner::secrets::scan_for_secrets;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -19,9 +19,14 @@ pub fn write_session(
     // cannot be read. Otherwise a corrupt index leaves an unindexed markdown
     // orphan even though `append_index` correctly declines to overwrite it.
     ensure_index_readable(archive_dir)?;
-    let sweep_date_str = now.format("%Y-%m-%d").to_string();
-    let time_str = now.format("%H-%M-%S").to_string();
-    let session_date_str = meta.session_timestamp.format("%Y-%m-%d").to_string();
+    // Archive names and user-facing dates follow the computer's local clock.
+    // The index retains UTC RFC 3339 timestamps as canonical metadata, so
+    // sessions remain unambiguous across time zones and daylight-saving shifts.
+    let local_now = now.with_timezone(&Local);
+    let local_session_timestamp = meta.session_timestamp.with_timezone(&Local);
+    let sweep_date_str = local_now.format("%Y-%m-%d").to_string();
+    let time_str = local_now.format("%H-%M-%S").to_string();
+    let session_date_str = local_session_timestamp.format("%Y-%m-%d").to_string();
     let slug = tool_slug(&meta.tool);
 
     let rel = PathBuf::from("sessions")
@@ -36,13 +41,13 @@ pub fn write_session(
         format!(
             "{} - {session_date_str} {}",
             meta.project,
-            meta.session_timestamp.format("%H:%M")
+            local_session_timestamp.format("%H:%M")
         )
     } else {
         output.title.clone()
     };
 
-    let markdown = build_markdown(&title, meta, output, now);
+    let markdown = build_markdown(&title, meta, output, local_now);
     let rules = rules_for_session(archive_dir, &meta.id);
     let markdown = if rules.is_empty() {
         markdown
@@ -93,8 +98,9 @@ fn build_markdown(
     title: &str,
     meta: &SessionMeta,
     output: &GemmaOutput,
-    now: DateTime<Utc>,
+    now: DateTime<Local>,
 ) -> String {
+    let session_dt = meta.session_timestamp.with_timezone(&Local);
     format!(
         "# {title}\n\n\
          **Tool:** {tool}  \n\
@@ -111,15 +117,17 @@ fn build_markdown(
          *Archived by HalluScribe - Gemma 4 26B via {backend}*\n",
         tool = meta.tool,
         provider = meta.provider,
-        session_dt = meta.session_timestamp.format("%Y-%m-%d %H:%M UTC"),
+        session_dt = session_dt.format("%Y-%m-%d %H:%M %:z"),
         updated_line = meta
             .updated_at
-            .map(|date| format!(
-                "**Last modified:** {}  \n",
-                date.format("%Y-%m-%d %H:%M UTC")
-            ))
+            .map(|date| {
+                format!(
+                    "**Last modified:** {}  \n",
+                    date.with_timezone(&Local).format("%Y-%m-%d %H:%M %:z")
+                )
+            })
             .unwrap_or_default(),
-        archived_dt = now.format("%Y-%m-%d %H:%M UTC"),
+        archived_dt = now.format("%Y-%m-%d %H:%M %:z"),
         fill_label = if meta.fill_estimated {
             format!("~{:.1}%", meta.fill_pct)
         } else {

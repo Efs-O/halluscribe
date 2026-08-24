@@ -9,10 +9,17 @@
 
   let expanded = $state(false);
   let bodyEl = $state<HTMLDivElement | undefined>(undefined);
+  let stickToBottom = $state(true);
+
+  function onReasoningScroll() {
+    if (!bodyEl) return;
+    const distanceFromBottom = bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight;
+    stickToBottom = distanceFromBottom <= 24;
+  }
 
   $effect(() => {
     const _text = text;
-    if (!expanded || !streaming || !bodyEl) return;
+    if (!expanded || !streaming || !bodyEl || !stickToBottom) return;
     bodyEl.scrollTop = bodyEl.scrollHeight;
   });
 </script>
@@ -27,7 +34,7 @@
       <span class="chars">{text.length} chars</span>
     </button>
     {#if expanded}
-      <div class="bubble-body selectable" bind:this={bodyEl}>
+      <div class="bubble-body selectable" bind:this={bodyEl} onscroll={onReasoningScroll}>
         <pre class="think-text">{text}</pre>
       </div>
     {/if}

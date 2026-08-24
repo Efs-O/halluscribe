@@ -117,7 +117,7 @@ fn default_profile_sources() -> Vec<String> {
         "codex",
         "forge",
         "continue",
-        "halluscribe_gemma_chat",
+        "halluscribe_agent_chat",
         "ollama_chat",
     ]
     .into_iter()

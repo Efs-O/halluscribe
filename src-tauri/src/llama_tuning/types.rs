@@ -18,6 +18,9 @@ use std::process::Command;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SpeculativeTuning {
+    /// `--spec-type`: usually `draft-mtp`; Qwen can combine it with
+    /// `ngram-mod` as `draft-mtp,ngram-mod`.
+    pub spec_type: String,
     /// `--spec-draft-n-max`: tokens drafted per step.
     pub n_max: u32,
     /// `--spec-draft-ngl`: how much of the DRAFT model goes on the GPU, as
@@ -36,6 +39,7 @@ pub struct SpeculativeTuning {
 impl Default for SpeculativeTuning {
     fn default() -> Self {
         Self {
+            spec_type: "draft-mtp".to_string(),
             // llama.cpp's own default is 3; 4 is what HalluScribe hardcoded
             // before this file existed, so it stays the built-in default.
             n_max: 4,
@@ -54,7 +58,7 @@ impl SpeculativeTuning {
         if let Some(drafter) = drafter {
             command.args(["--model-draft", &drafter.to_string_lossy()]);
         }
-        command.args(["--spec-type", "draft-mtp"]);
+        command.args(["--spec-type", &self.spec_type]);
         command.args(["--spec-draft-n-max", &self.n_max.to_string()]);
         if !self.gpu_layers.is_empty() {
             command.args(["--spec-draft-ngl", &self.gpu_layers]);
@@ -156,6 +160,11 @@ impl ArchTuning {
         if self.cache_type_k.trim().is_empty() || self.cache_type_v.trim().is_empty() {
             return Err(format!(
                 "llama-tuning.yaml: {key}.cache_type_k and {key}.cache_type_v must name a type"
+            ));
+        }
+        if self.speculative.spec_type.trim().is_empty() {
+            return Err(format!(
+                "llama-tuning.yaml: {key}.speculative.spec_type must not be empty"
             ));
         }
         self.sampling.validate(key)

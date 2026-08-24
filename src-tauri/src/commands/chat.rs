@@ -24,7 +24,7 @@ pub(crate) fn cancel_chat(app: tauri::AppHandle) {
     app.state::<ChatCancel>().0.store(true, Ordering::Relaxed);
 }
 
-/// Persist one HalluScribe-owned recorded Gemma chat session for later sweep ingestion.
+/// Persist one HalluScribe-owned recorded agent chat session for later sweep ingestion.
 #[tauri::command]
 pub(crate) fn save_recorded_chat_session(
     app: tauri::AppHandle,

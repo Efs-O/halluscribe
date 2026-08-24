@@ -57,21 +57,39 @@
 
   function closeCtx() { ctxVisible = false; }
 
-  onMount(async () => {
-    isMaximized = await appWindow.isMaximized();
-    const unlistenResize = await appWindow.onResized(async () => {
-      isMaximized = await appWindow.isMaximized();
-    });
+  onMount(() => {
+    let disposed = false;
+    let unlistenResize: (() => void) | undefined;
+    let listeners: Array<() => void> = [];
 
-    void refreshSettingsSnapshot();
-    const listeners = (await Promise.all([
-      briefing.registerListeners(),
-      chat.registerListeners(),
-      sweep.registerListeners(),
-    ])).flat();
+    void (async () => {
+      isMaximized = await appWindow.isMaximized();
+      const resizeListener = await appWindow.onResized(async () => {
+        isMaximized = await appWindow.isMaximized();
+      });
+      if (disposed) {
+        resizeListener();
+        return;
+      }
+      unlistenResize = resizeListener;
+
+      void refreshSettingsSnapshot();
+      const registeredListeners = (await Promise.all([
+        briefing.registerListeners(),
+        chat.registerListeners(),
+        sweep.registerListeners(),
+      ])).flat();
+
+      if (disposed) {
+        registeredListeners.forEach((unlisten) => unlisten());
+        return;
+      }
+      listeners = registeredListeners;
+    })();
 
     return () => {
-      unlistenResize();
+      disposed = true;
+      unlistenResize?.();
       listeners.forEach((unlisten) => unlisten());
       sweep.dispose();
     };

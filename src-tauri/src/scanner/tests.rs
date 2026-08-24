@@ -321,7 +321,7 @@ mod tests {
             target.path.ends_with("10-00-00-000-abc-gemma4-chat.json")
                 && matches!(
                     target.kind,
-                    super::super::ScanTargetKind::Import(ChatProvider::HalluScribeGemmaChat)
+                    super::super::ScanTargetKind::Import(ChatProvider::HalluScribeAgentChat)
                 )
         }));
     }
@@ -363,7 +363,7 @@ mod tests {
                 target.path.ends_with("10-00-00-000-abc-gemma4-chat.json")
                     && matches!(
                         target.kind,
-                        super::super::ScanTargetKind::Import(ChatProvider::HalluScribeGemmaChat)
+                        super::super::ScanTargetKind::Import(ChatProvider::HalluScribeAgentChat)
                     )
             })
         };

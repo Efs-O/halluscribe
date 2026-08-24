@@ -345,7 +345,7 @@ mod tests {
             "codex",
             "forge",
             "continue",
-            "halluscribe_gemma_chat",
+            "halluscribe_agent_chat",
             "ollama_chat",
         ] {
             assert!(

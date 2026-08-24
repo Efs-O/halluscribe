@@ -12,6 +12,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    "types": ["vitest/importMeta"],
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "skipLibCheck": true
   },

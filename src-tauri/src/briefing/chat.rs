@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tauri::Emitter;
 use tools::ToolCallResult;
 
+const MAX_TOOL_ROUNDS: usize = 100;
+
 #[derive(Clone)]
 pub(crate) struct ChatRuntimeOptions {
     pub chat_scope: tools::ChatScope,
@@ -64,7 +66,7 @@ pub(crate) fn run_chat_turn(
     // on the following turn.
     let mut turn_base_prompt_tokens: Option<u32> = None;
 
-    for _ in 0..20 {
+    for _ in 0..MAX_TOOL_ROUNDS {
         if cancel.load(Ordering::Relaxed) {
             replied = true;
             break;

@@ -219,6 +219,7 @@ mod tests {
     fn a_sidecar_drafter_gets_model_draft_and_its_own_cache_types() {
         let tuning = ArchTuning {
             speculative: SpeculativeTuning {
+                spec_type: "draft-mtp".to_string(),
                 n_max: 1,
                 gpu_layers: "all".to_string(),
                 cache_type_k: "q8_0".to_string(),
@@ -268,6 +269,34 @@ mod tests {
             args_of(&command),
             vec!["--spec-type", "draft-mtp", "--spec-draft-n-max", "2"]
         );
+    }
+
+    #[test]
+    fn qwen_can_combine_its_mtp_head_with_ngram_speculation() {
+        let tuning = ArchTuning {
+            speculative: SpeculativeTuning {
+                spec_type: "draft-mtp,ngram-mod".to_string(),
+                n_max: 2,
+                ..SpeculativeTuning::default()
+            },
+            extra_args: vec![
+                "--spec-ngram-mod-n-match".into(),
+                "24".into(),
+                "--spec-ngram-mod-n-min".into(),
+                "24".into(),
+                "--spec-ngram-mod-n-max".into(),
+                "86".into(),
+            ],
+            ..ArchTuning::default()
+        };
+        let mut command = Command::new("llama-server");
+        tuning.apply(&mut command);
+        tuning.apply_speculative(&mut command, None);
+        let args = args_of(&command);
+        let spec_type = args.iter().position(|arg| arg == "--spec-type").unwrap();
+        assert_eq!(args[spec_type + 1], "draft-mtp,ngram-mod");
+        assert!(args.contains(&"--spec-ngram-mod-n-match".to_string()));
+        assert!(args.contains(&"86".to_string()));
     }
 
     #[test]

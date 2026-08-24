@@ -1,4 +1,4 @@
-// HalluScribe - reader for internally recorded Gemma chat session JSON files.
+// HalluScribe - reader for internally recorded agent chat session JSON files.
 
 use super::{
     build_session, file_stem_or_hash, parse_rfc3339, read_json, ChatProvider, MessageRole,
@@ -79,7 +79,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
     let title = path
         .file_stem()
         .and_then(|stem| stem.to_str())
-        .unwrap_or("Gemma Chat")
+        .unwrap_or("Agent Chat")
         .replace('-', " ");
 
     Ok(build_session(
@@ -88,7 +88,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
         created_at,
         updated_at,
         path.to_path_buf(),
-        ChatProvider::HalluScribeGemmaChat,
+        ChatProvider::HalluScribeAgentChat,
         0.0,
         false,
         messages,
@@ -103,7 +103,7 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn reads_recorded_gemma_chat() {
+    fn reads_recorded_agent_chat() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("gemma-chat.json");
         fs::write(
@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         let session = &sessions[0];
         assert_eq!(session.id, "gemma4-abc");
-        assert_eq!(session.provider, ChatProvider::HalluScribeGemmaChat);
+        assert_eq!(session.provider, ChatProvider::HalluScribeAgentChat);
         assert_eq!(session.source_path, path);
         assert!(session
             .transcript()

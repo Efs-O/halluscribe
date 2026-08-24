@@ -4,7 +4,7 @@ use super::*;
 use crate::archive::{
     archived_source_size, delete_sessions, is_archived, read_sessions, session_id,
 };
-use chrono::TimeZone;
+use chrono::{Local, TimeZone};
 
 fn fixed_now() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 4, 15, 14, 30, 0).unwrap()
@@ -82,8 +82,9 @@ fn write_session_path_uses_date_and_tool_slug() {
     let meta = sample_meta(src);
     let written = write_session(&dir, &meta, &sample_output(), fixed_now()).unwrap();
     let s = written.path.to_string_lossy();
-    assert!(s.contains("2026-04-15"));
-    assert!(s.contains("14-30-00"));
+    let local_now = fixed_now().with_timezone(&Local);
+    assert!(s.contains(&local_now.format("%Y-%m-%d").to_string()));
+    assert!(s.contains(&local_now.format("%H-%M-%S").to_string()));
     assert!(s.contains("claudecode"));
     assert!(s.contains("sweep"));
 }
@@ -156,7 +157,31 @@ fn fallback_title_when_output_title_empty() {
     let written = write_session(&dir, &meta, &out, fixed_now()).unwrap();
     let content = fs::read_to_string(written.path).unwrap();
     assert!(content.contains("my-project"));
-    assert!(content.contains("2026-04-15"));
+    assert!(content.contains(
+        &fixed_now()
+            .with_timezone(&Local)
+            .format("%Y-%m-%d")
+            .to_string()
+    ));
+}
+
+#[test]
+fn markdown_displays_local_dates_and_utc_index_timestamp() {
+    let dir = tmp_dir("local_dates");
+    let meta = sample_meta(Path::new("/fake/local-dates.jsonl"));
+    let written = write_session(&dir, &meta, &sample_output(), fixed_now()).unwrap();
+    let content = fs::read_to_string(written.path).unwrap();
+    let expected = fixed_now()
+        .with_timezone(&Local)
+        .format("%Y-%m-%d %H:%M %:z")
+        .to_string();
+
+    assert!(content.contains(&format!("**Date created:** {expected}")));
+    assert!(content.contains(&format!("**Archived:** {expected}")));
+    assert!(!content.contains("UTC"));
+
+    let sessions = read_sessions(&dir);
+    assert_eq!(sessions[0].session_timestamp, "2026-04-15T14:30:00+00:00");
 }
 
 #[test]
@@ -293,7 +318,12 @@ fn written_markdown_carries_highlights_for_body_search() {
     let mut output = sample_output();
     output.verbatim_highlights = vec!["| task | who wins | confidence |".to_string()];
     let meta = sample_meta(Path::new("/tmp/abc-123.jsonl"));
-    let markdown = build_markdown("T", &meta, &output, chrono::Utc::now());
+    let markdown = build_markdown(
+        "T",
+        &meta,
+        &output,
+        chrono::Utc::now().with_timezone(&Local),
+    );
     assert!(markdown.contains("## Highlights"));
     assert!(markdown.contains("who wins"));
 }

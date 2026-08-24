@@ -319,7 +319,7 @@ fn collect_recorded_chat_files(dir: &Path, out: &mut Vec<ScanTarget>) {
         };
         out.push(ScanTarget {
             path,
-            kind: ScanTargetKind::Import(ChatProvider::HalluScribeGemmaChat),
+            kind: ScanTargetKind::Import(ChatProvider::HalluScribeAgentChat),
             fill_pct: Some(0.0),
             mtime_secs: shared::mtime_secs(modified),
         });
