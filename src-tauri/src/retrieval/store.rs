@@ -8,6 +8,11 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// EmbeddingGemma's GGUF advertises a 2,048-token training context. A byte
+/// cap stays safely below it even for text that tokenizes poorly, while leaving
+/// enough space for the semantic metadata and a substantial summary prefix.
+pub(crate) const MAX_EMBEDDING_INPUT_BYTES: usize = 1_800;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct EmbeddingStore {
     records: Vec<EmbeddingRecord>,
@@ -90,6 +95,20 @@ pub fn build_embedding_input(archive_dir: &Path, entry: &IndexEntry) -> Result<S
     ))
 }
 
+/// Keep an embedding request inside the model's actual context limit without
+/// splitting a UTF-8 character. The caller applies this after adding its query
+/// or document prefix, so this is the final byte budget sent to llama.cpp.
+pub(crate) fn limit_embedding_input(text: String) -> String {
+    if text.len() <= MAX_EMBEDDING_INPUT_BYTES {
+        return text;
+    }
+    let mut end = MAX_EMBEDDING_INPUT_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].trim_end().to_string()
+}
+
 pub fn summary_hash(text: &str) -> String {
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in text.as_bytes() {
@@ -147,6 +166,16 @@ mod tests {
     fn summary_hash_is_stable() {
         assert_eq!(summary_hash("abc"), summary_hash("abc"));
         assert_ne!(summary_hash("abc"), summary_hash("abd"));
+    }
+
+    #[test]
+    fn embedding_input_limit_is_byte_bounded_and_utf8_safe() {
+        let text = format!("prefix {}", "α".repeat(MAX_EMBEDDING_INPUT_BYTES));
+        let limited = limit_embedding_input(text);
+
+        assert!(limited.len() <= MAX_EMBEDDING_INPUT_BYTES);
+        assert!(limited.is_char_boundary(limited.len()));
+        assert!(limited.starts_with("prefix "));
     }
 
     #[test]

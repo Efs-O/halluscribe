@@ -120,6 +120,19 @@ mod tests {
     }
 
     #[test]
+    fn done_message_explains_low_signal_skips() {
+        let result = SweepResult {
+            low_signal_skipped: 9,
+            ..completed_result()
+        };
+        assert_eq!(
+            sweep_done_message(&result, &[]),
+            "Sweep complete - processed: 12, skipped: 3, deferred: 0, \
+             low-signal skipped: 9 (greetings or unsupported capability probes)"
+        );
+    }
+
+    #[test]
     fn done_message_appends_cancelled_errors_and_marker_errors_in_order() {
         let result = SweepResult {
             cancelled: true,

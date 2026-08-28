@@ -91,8 +91,8 @@ fn main() {
     let transcript = match preprocess_session(&jsonl_path, &tool) {
         Ok(t) => t,
         Err(PreprocessError::UnsupportedTool) => {
-            eprintln!("ERROR: Continue tool not yet supported for preprocessing.");
-            eprintln!("Set JSONL_PATH to a Claude Code or Codex session.");
+            eprintln!("ERROR: this tool is not supported for preprocessing.");
+            eprintln!("Set JSONL_PATH to a Claude Code, Codex, or Forge session.");
             std::process::exit(1);
         }
         Err(e) => {
@@ -211,7 +211,6 @@ fn provider_for_tool(tool: &ToolSource) -> ChatProvider {
     match tool {
         ToolSource::ClaudeCode => ChatProvider::ClaudeCode,
         ToolSource::Codex => ChatProvider::Codex,
-        ToolSource::Continue => ChatProvider::Continue,
         ToolSource::Forge => ChatProvider::Forge,
     }
 }

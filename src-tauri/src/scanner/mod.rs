@@ -1,11 +1,10 @@
 // HalluScribe - JSONL session file scanner.
-// Discovers session files for Claude Code, Codex, Continue, and Forge,
+// Discovers session files for Claude Code, Codex, and Forge,
 // computes fill_pct from the last usage line, and filters by threshold.
 // No inference dependency - pure filesystem + JSON/YAML parsing.
 
 mod claude;
 mod codex;
-mod continue_scan;
 mod forge;
 mod import_discovery_tests;
 pub mod import_status;
@@ -44,15 +43,6 @@ pub fn scan_sessions(
     if !import_only {
         sessions.extend(claude::scan_claude(lookback_secs, min_fill_pct));
         sessions.extend(codex::scan_codex(lookback_secs, min_fill_pct));
-        let continue_override = {
-            let p = settings.continue_data_path.trim();
-            (!p.is_empty()).then(|| std::path::Path::new(p))
-        };
-        sessions.extend(continue_scan::scan_continue(
-            lookback_secs,
-            min_fill_pct,
-            continue_override,
-        ));
         let forge_override = {
             let p = settings.forge_sessions_path.trim();
             (!p.is_empty()).then(|| std::path::Path::new(p))

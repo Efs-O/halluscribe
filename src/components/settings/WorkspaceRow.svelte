@@ -127,8 +127,8 @@
         <div class="ws-warn">
           <p class="ws-warn-text">
             Turning this off lets the next sweep read <strong>this machine's</strong> Claude Code /
-            Codex / Continue / Forge logs and file them into "{workspace.name}"'s profile. Only do
-            this if this workspace is meant to track your own coding activity.
+            Codex / Forge logs and file them into "{workspace.name}"'s profile. Only do this if this
+            workspace is meant to track your own coding activity.
           </p>
           <div class="ws-warn-actions">
             <button

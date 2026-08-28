@@ -40,9 +40,11 @@
   const STORAGE_KEY = "hs-col-widths";
   const DIV_W = 10;
 
-  const DEFAULTS = { date: 110, title: -1, project: 100, tool: 90, fill: 44, tags: -1 };
+  // A width stored before TOKENS existed simply lacks the key; loadWidths
+  // spreads over DEFAULTS, so it picks up the default rather than collapsing.
+  const DEFAULTS = { date: 110, title: -1, project: 100, tool: 90, fill: 44, tokens: 60, tags: -1 };
   type ColKey = keyof typeof DEFAULTS;
-  const COL_KEYS: ColKey[] = ["date", "title", "project", "tool", "fill", "tags"];
+  const COL_KEYS: ColKey[] = ["date", "title", "project", "tool", "fill", "tokens", "tags"];
 
   function loadWidths(): typeof DEFAULTS {
     try {
@@ -68,7 +70,8 @@
       tracks[2], `${DIV_W}px`,
       tracks[3], `${DIV_W}px`,
       tracks[4], `${DIV_W}px`,
-      tracks[5],
+      tracks[5], `${DIV_W}px`,
+      tracks[6],
     ].join(" ");
   }
 
@@ -261,7 +264,7 @@
   function toggleSort(key: SessionSortKey) {
     sortDirection = sortKey === key
       ? (sortDirection === "asc" ? "desc" : "asc")
-      : (key === "date" || key === "fill" ? "desc" : "asc");
+      : (key === "date" || key === "fill" || key === "tokens" ? "desc" : "asc");
     sortKey = key;
     page = 0;
   }

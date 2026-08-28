@@ -50,12 +50,11 @@ pub(crate) fn save_settings(
     // while we can still name the offending field. Past this point the mistake
     // only shows up as a raw OS spawn error at the next inference.
     settings::validate_paths(&new_settings)?;
-    // `last_sweep_date` is managed by the scheduler, not the UI. Preserve the
-    // on-disk value so saving settings never resets the catch-up state (audit
-    // A-2) - otherwise a save would let the nightly sweep re-run the same day.
-    new_settings.last_sweep_date = settings::load_settings(&dir)
-        .map_err(|error| error.to_string())?
-        .last_sweep_date;
+    // Sweep dates are scheduler-owned. Preserve them so a Settings save cannot
+    // reset either the successful-run state or the automatic-attempt guard.
+    let saved = settings::load_settings(&dir).map_err(|error| error.to_string())?;
+    new_settings.last_sweep_date = saved.last_sweep_date;
+    new_settings.last_auto_sweep_attempt_date = saved.last_auto_sweep_attempt_date;
     settings::save_settings(&dir, &new_settings).map_err(|error| error.to_string())
 }
 

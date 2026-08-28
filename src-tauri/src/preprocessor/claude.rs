@@ -1,11 +1,17 @@
 // HalluScribe - Claude Code session preprocessing.
 
 use super::shared::{extract_content_text, head_tail_5, truncate_text};
+use crate::tokens::TokenCount;
 use serde_json::Value;
 use std::collections::HashMap;
 
+#[cfg(test)]
 pub(super) fn preprocess(content: &str) -> String {
-    let mut out = String::with_capacity(64 * 1024);
+    preprocess_units(content).join("\n")
+}
+
+pub(super) fn preprocess_units(content: &str) -> Vec<String> {
+    let mut out = Vec::new();
     let mut registry: HashMap<String, (String, Value)> = HashMap::new();
 
     for line in content.lines() {
@@ -36,15 +42,71 @@ pub(super) fn preprocess(content: &str) -> String {
         };
         let turn = build_turn(items, &registry);
         if !turn.is_empty() {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(label);
-            out.push('\n');
-            out.push_str(&turn);
+            out.push(format!("{label}\n{turn}"));
         }
     }
     out
+}
+
+/// Every assistant turn carries `message.usage.output_tokens`, which already
+/// includes thinking tokens — the sampled session showed 572 of 884 hidden. The
+/// sum covers subagent turns too, since those land in the same file.
+pub(super) fn token_count(content: &str) -> TokenCount {
+    let mut reported: Option<u64> = None;
+    let mut generated_chars = 0usize;
+
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(msg) = v.get("message") else {
+            continue;
+        };
+        if msg.get("role").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        if let Some(output) = msg
+            .get("usage")
+            .and_then(|usage| usage.get("output_tokens"))
+            .and_then(Value::as_u64)
+        {
+            *reported.get_or_insert(0) += output;
+        }
+        generated_chars += assistant_chars(msg);
+    }
+
+    TokenCount::from_usage_or_chars(reported, generated_chars)
+}
+
+/// Only what the model emitted. Tool *inputs* count — for a coding agent the
+/// file bodies and shell scripts it writes are the bulk of its output, and
+/// omitting them understated a measured session by roughly 28x against 6x with
+/// them. Tool *results* do not count: those arrive on user-role lines, which
+/// never reach here.
+fn assistant_chars(msg: &Value) -> usize {
+    let Some(items) = msg.get("content").and_then(Value::as_array) else {
+        return 0;
+    };
+    items
+        .iter()
+        .map(|item| {
+            let text: usize = ["text", "thinking"]
+                .iter()
+                .filter_map(|key| item.get(key).and_then(Value::as_str))
+                .map(str::len)
+                .sum();
+            text + emitted_json_len(item.get("input"))
+        })
+        .sum()
+}
+
+/// Serialized length of a tool-call argument object, as the model emitted it.
+pub(super) fn emitted_json_len(input: Option<&Value>) -> usize {
+    match input {
+        None | Some(Value::Null) => 0,
+        Some(Value::String(s)) => s.len(),
+        Some(value) => serde_json::to_string(value).map_or(0, |json| json.len()),
+    }
 }
 
 fn register_tool_use(item: &Value, registry: &mut HashMap<String, (String, Value)>) {

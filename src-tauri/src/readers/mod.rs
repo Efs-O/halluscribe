@@ -7,6 +7,7 @@ mod grok;
 #[path = "halluscribe_gemma_chat.rs"]
 mod halluscribe_agent_chat;
 mod ollama_chat;
+mod project_label;
 #[cfg(test)]
 mod raw_slice_tests;
 mod raw_slices;
@@ -16,6 +17,7 @@ pub use raw_slices::{is_multi_session_provider, raw_slices_for_source};
 use crate::archive;
 use crate::preprocessor::{self, PreprocessError};
 use crate::scanner::{ScanTarget, ScanTargetKind, ToolSource};
+use crate::tokens::TokenCount;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
@@ -28,7 +30,6 @@ use std::path::{Path, PathBuf};
 pub enum ChatProvider {
     ClaudeCode,
     Codex,
-    Continue,
     Forge,
     ChatGPT,
     ClaudeAI,
@@ -63,6 +64,10 @@ pub struct ParsedSession {
     pub provider: ChatProvider,
     pub fill_pct: f64,
     pub fill_estimated: bool,
+    /// Tokens the model generated across the whole session, and whether that
+    /// came from the server or from a character estimate. Orthogonal to
+    /// `fill_pct`, which is peak context occupancy rather than work produced.
+    pub tokens: TokenCount,
     pub transcript_hash: String,
     /// Verbatim source for THIS session alone, set only by readers whose
     /// `source_path` holds many sessions (chat exports, the Ollama DB). The
@@ -72,6 +77,9 @@ pub struct ParsedSession {
     /// coding tool writes one file per session), where copying the file is
     /// correct.
     pub raw_slice: Option<String>,
+    /// Coding preprocessors retain these whole-turn fragments before rendering
+    /// the transcript. Imports use their already-structured messages instead.
+    preprocessed_units: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -116,7 +124,6 @@ impl ChatProvider {
         match self {
             Self::ClaudeCode => "Claude Code",
             Self::Codex => "Codex",
-            Self::Continue => "Continue",
             Self::Forge => "Forge",
             Self::ChatGPT => "ChatGPT",
             Self::ClaudeAI => "Claude.ai",
@@ -127,10 +134,22 @@ impl ChatProvider {
         }
     }
 
+    /// The project a session belongs to. Every coding tool stores sessions
+    /// under a different layout, so each resolver recovers this differently and
+    /// falls back to the tool's display name rather than emitting a label it
+    /// cannot stand behind — see `readers::project_label`. Two of them read the
+    /// session's header line, which is why this takes a path and not just the
+    /// provider; it is called once per session at write time.
     pub fn project_label(&self, source_path: &Path) -> String {
         match self {
-            Self::ClaudeCode | Self::Codex | Self::Continue => project_from_parent(source_path),
-            Self::Forge => "Forge".to_string(),
+            Self::ClaudeCode => project_label::claude_code(source_path)
+                .unwrap_or_else(|| self.display_name().to_string()),
+            Self::Codex => {
+                project_label::codex(source_path).unwrap_or_else(|| self.display_name().to_string())
+            }
+            Self::Forge => {
+                project_label::forge(source_path).unwrap_or_else(|| self.display_name().to_string())
+            }
             Self::ChatGPT => "ChatGPT".to_string(),
             Self::ClaudeAI => "Claude".to_string(),
             Self::Gemini => "Gemini Apps".to_string(),
@@ -141,17 +160,13 @@ impl ChatProvider {
     }
 
     pub fn is_coding(&self) -> bool {
-        matches!(
-            self,
-            Self::ClaudeCode | Self::Codex | Self::Continue | Self::Forge
-        )
+        matches!(self, Self::ClaudeCode | Self::Codex | Self::Forge)
     }
 
     pub fn provider_key(&self) -> &'static str {
         match self {
             Self::ClaudeCode => "claude_code",
             Self::Codex => "codex",
-            Self::Continue => "continue",
             Self::Forge => "forge",
             Self::ChatGPT => "chatgpt",
             Self::ClaudeAI => "claude_ai",
@@ -182,6 +197,9 @@ impl ParsedSession {
     }
 
     pub fn transcript(&self) -> String {
+        if let Some(units) = &self.preprocessed_units {
+            return units.join("\n");
+        }
         self.messages
             .iter()
             .filter_map(|message| {
@@ -195,6 +213,21 @@ impl ParsedSession {
             .collect::<Vec<_>>()
             .join("\n\n")
     }
+
+    /// Whole chronological units used by large-session chunk planning. These
+    /// are produced at parse time, never recovered from formatted transcript.
+    pub fn transcript_units(&self) -> Vec<String> {
+        if let Some(units) = &self.preprocessed_units {
+            return units.clone();
+        }
+        self.messages
+            .iter()
+            .filter_map(|message| {
+                let text = message.text.trim();
+                (!text.is_empty()).then(|| format!("[{}]\n{}", message.role.label(), text))
+            })
+            .collect()
+    }
 }
 
 pub fn read_target(target: &ScanTarget) -> Result<Vec<ParsedSession>, ReaderError> {
@@ -207,10 +240,7 @@ pub fn read_target(target: &ScanTarget) -> Result<Vec<ParsedSession>, ReaderErro
             ChatProvider::Grok => grok::read(&target.path),
             ChatProvider::HalluScribeAgentChat => halluscribe_agent_chat::read(&target.path),
             ChatProvider::OllamaChat => ollama_chat::read(&target.path),
-            ChatProvider::ClaudeCode
-            | ChatProvider::Codex
-            | ChatProvider::Continue
-            | ChatProvider::Forge => Ok(Vec::new()),
+            ChatProvider::ClaudeCode | ChatProvider::Codex | ChatProvider::Forge => Ok(Vec::new()),
         },
     }
 }
@@ -219,7 +249,8 @@ fn read_coding_target(
     target: &ScanTarget,
     tool: &ToolSource,
 ) -> Result<Vec<ParsedSession>, ReaderError> {
-    let transcript = preprocessor::preprocess_session(&target.path, tool)?;
+    let preprocessed = preprocessor::preprocess_session_units(&target.path, tool)?;
+    let transcript = preprocessed.render();
     let transcript = transcript.trim().to_string();
     if transcript.is_empty() {
         return Ok(Vec::new());
@@ -228,7 +259,6 @@ fn read_coding_target(
     let provider = match tool {
         ToolSource::ClaudeCode => ChatProvider::ClaudeCode,
         ToolSource::Codex => ChatProvider::Codex,
-        ToolSource::Continue => ChatProvider::Continue,
         ToolSource::Forge => ChatProvider::Forge,
     };
 
@@ -251,20 +281,30 @@ fn read_coding_target(
         provider,
         fill_pct,
         fill_estimated,
+        // Taken from the preprocessor, never from `messages` below: a coding
+        // session is collapsed into one blob labelled `Assistant`, so estimating
+        // from it would count the user's own prompts and every tool result as
+        // model output.
+        tokens: preprocessed.tokens,
         transcript_hash: stable_hash(&transcript),
         // One JSONL file == one coding session, so the whole-file copy the
         // sweep falls back to is already the correct raw for this session.
         raw_slice: None,
+        preprocessed_units: Some(preprocessed.units),
     }])
 }
 
-fn project_from_parent(source_path: &Path) -> String {
-    source_path
-        .parent()
-        .and_then(|parent| parent.file_name())
-        .and_then(|name| name.to_str())
-        .unwrap_or("unknown")
-        .to_string()
+/// Chat exports carry no usage data, so this is the only number available for
+/// them. It is also blind to thinking tokens: providers strip reasoning traces
+/// before export, so a thinking-model session is undercounted several-fold and
+/// the estimated flag is what keeps that from being mistaken for a real total.
+fn estimate_message_tokens(messages: &[ParsedMessage]) -> TokenCount {
+    let chars = messages
+        .iter()
+        .filter(|message| message.role == MessageRole::Assistant)
+        .map(|message| message.text.len())
+        .sum();
+    TokenCount::estimated(crate::tokens::estimate_from_chars(chars))
 }
 
 fn estimate_fill_pct(transcript: &str) -> f64 {
@@ -304,9 +344,11 @@ pub(super) fn build_session(
         provider,
         fill_pct,
         fill_estimated,
+        tokens: estimate_message_tokens(&messages),
         transcript_hash: stable_hash(&transcript),
         messages,
         raw_slice: None,
+        preprocessed_units: None,
     })
 }
 

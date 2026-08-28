@@ -11,7 +11,7 @@ pub struct SearchParams {
     pub tags: Option<Vec<String>>,
     /// Substring match (case-insensitive) against the project field.
     pub project: Option<String>,
-    /// Tool filter: "claude_code", "codex", "continue", "forge", or any substring.
+    /// Tool filter: "claude_code", "codex", "forge", or any substring.
     pub tool: Option<String>,
     /// Max results returned (default 20, hard-capped at 30).
     pub limit: Option<usize>,

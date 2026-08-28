@@ -1,7 +1,13 @@
 <!-- HalluScribe - one session row in the session list. -->
 <script lang="ts">
   import type { IndexEntry } from "../../lib/types";
-  import { displayFillPct, fillClass, shortDate, timeFromSession } from "../../lib/format";
+  import {
+    displayFillPct,
+    displayTokens,
+    fillClass,
+    shortDate,
+    timeFromSession,
+  } from "../../lib/format";
 
   interface Props {
     session: IndexEntry;
@@ -18,6 +24,9 @@
 
   let fillCls = $derived(fillClass(session.fill_pct));
   let fillText = $derived(displayFillPct(session.fill_pct, session.fill_estimated ?? false));
+  // Defaults to estimated: an entry written before the column existed carries
+  // no flag, and its absent value must not read as a measured zero.
+  let tokensText = $derived(displayTokens(session.output_tokens, session.tokens_estimated ?? true));
   let allTags = $derived([...session.error_tags, ...session.topic_tags].slice(0, 5));
   let time = $derived(timeFromSession(session.session_timestamp, session.archive_path));
 </script>
@@ -65,6 +74,8 @@
   <span class="gap"></span>
   <span class="fill {fillCls}">{fillText}</span>
   <span class="gap"></span>
+  <span class="tokens" class:muted={session.tokens_estimated ?? true}>{tokensText}</span>
+  <span class="gap"></span>
   <span class="tags muted">
     {#each allTags as tag, i}
       {tag}{#if i < allTags.length - 1} | {/if}
@@ -75,7 +86,8 @@
 <style>
   .row {
     display: grid;
-    grid-template-columns: 28px var(--full-cols, 110px 10px 1fr 10px 100px 10px 90px 10px 44px 10px 1fr);
+    grid-template-columns: 28px
+      var(--full-cols, 110px 10px 1fr 10px 100px 10px 90px 10px 44px 10px 60px 10px 1fr);
     align-items: center;
     padding: 9px 16px;
     font-size: 13px;
@@ -171,6 +183,12 @@
   .fill {
     white-space: nowrap;
     font-weight: 700;
+  }
+
+  .tokens {
+    white-space: nowrap;
+    font-weight: 700;
+    text-align: right;
   }
 
   .tags {

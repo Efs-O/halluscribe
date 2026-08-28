@@ -29,6 +29,7 @@
     <span class="progress-label">
       {progress.current} / {progress.total}
       {#if progress.status === "processing"}· generating...{/if}
+      {#if progress.status.startsWith("chunk ")}· {progress.status}{/if}
       {#if progress.status === "skipped"}· skip{/if}
       {#if progress.status === "error"}· err{/if}
     </span>

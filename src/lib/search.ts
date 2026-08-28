@@ -5,7 +5,7 @@
 
 import type { IndexEntry, RawSearchResult, RawSessionMatches } from "./types";
 
-export type SessionSortKey = "date" | "title" | "project" | "tool" | "fill" | "tags";
+export type SessionSortKey = "date" | "title" | "project" | "tool" | "fill" | "tokens" | "tags";
 export type SessionSortDirection = "asc" | "desc";
 
 /**
@@ -76,6 +76,8 @@ function compareSessions(a: IndexEntry, b: IndexEntry, key: SessionSortKey): num
       return compareText(a.tool, b.tool);
     case "fill":
       return a.fill_pct - b.fill_pct || compareText(a.title, b.title);
+    case "tokens":
+      return (a.output_tokens ?? 0) - (b.output_tokens ?? 0) || compareText(a.title, b.title);
     case "tags":
       return compareText(joinTags(a), joinTags(b));
   }
@@ -200,6 +202,22 @@ if (import.meta.vitest) {
       const sessions = [{ ...s("A"), fill_pct: 10 }, { ...s("B"), fill_pct: 80 }];
       expect(sortSessions(sessions, "fill", "desc").map((session) => session.title))
         .toEqual(["B", "A"]);
+    });
+
+    it("sorts by tokens descending", () => {
+      const sessions = [
+        { ...s("A"), output_tokens: 1_200 },
+        { ...s("B"), output_tokens: 209_440 },
+      ];
+      expect(sortSessions(sessions, "tokens", "desc").map((session) => session.title))
+        .toEqual(["B", "A"]);
+    });
+
+    it("sorts sessions with no token count as zero", () => {
+      // Entries archived before the column existed must not float to the top.
+      const sessions = [{ ...s("Missing") }, { ...s("Counted"), output_tokens: 50 }];
+      expect(sortSessions(sessions, "tokens", "desc").map((session) => session.title))
+        .toEqual(["Counted", "Missing"]);
     });
 
     it("sorts by updated/session date descending", () => {

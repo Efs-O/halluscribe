@@ -82,6 +82,8 @@ pub fn write_session(
             source_size_bytes: fs::metadata(&meta.source).map(|m| m.len()).unwrap_or(0),
             provider: meta.provider.clone(),
             fill_estimated: meta.fill_estimated,
+            output_tokens: meta.output_tokens,
+            tokens_estimated: meta.tokens_estimated,
             transcript_hash: meta.transcript_hash.clone(),
             secret_flags: secret_flags.clone(),
             raw_path: meta.raw_path.clone().unwrap_or_default(),

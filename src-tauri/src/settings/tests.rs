@@ -344,7 +344,6 @@ mod tests {
             "claude_code",
             "codex",
             "forge",
-            "continue",
             "halluscribe_agent_chat",
             "ollama_chat",
         ] {

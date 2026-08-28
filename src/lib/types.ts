@@ -16,6 +16,10 @@ export interface IndexEntry {
   source_jsonl: string;
   provider?: string;
   fill_estimated?: boolean;
+  /** Tokens the model generated in this session. 0 on entries archived before the column existed. */
+  output_tokens?: number;
+  /** True when output_tokens was inferred from character counts rather than reported by the server. */
+  tokens_estimated?: boolean;
   transcript_hash?: string;
   secret_flags?: string[];
 }
@@ -60,10 +64,10 @@ export interface HalluScribeSettings {
   gemini_import_path: string;
   grok_import_path: string;
   ollama_chat_db_path: string;
-  continue_data_path: string;
   forge_sessions_path: string;
   scheduled_processing_enabled: boolean;
   schedule_time: string;
+  last_auto_sweep_attempt_date: string;
   idle_threshold_mins: number;
   first_run: boolean;
   ctx_size: number;

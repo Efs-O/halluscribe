@@ -12,6 +12,8 @@ pub struct SessionMeta {
     pub provider: String,
     pub fill_pct: f64,
     pub fill_estimated: bool,
+    pub output_tokens: u64,
+    pub tokens_estimated: bool,
     pub backend: String,
     pub session_timestamp: DateTime<Utc>,
     pub updated_at: Option<DateTime<Utc>>,
@@ -45,6 +47,15 @@ pub struct IndexEntry {
     pub provider: String,
     #[serde(default)]
     pub fill_estimated: bool,
+    /// Tokens the model generated in this session. Zero on entries written
+    /// before the column existed; they report a real value once re-swept.
+    #[serde(default)]
+    pub output_tokens: u64,
+    /// True when `output_tokens` was inferred from character counts rather than
+    /// reported by the server. Defaults to true so a pre-existing entry's zero
+    /// is never mistaken for a measured zero.
+    #[serde(default = "default_true")]
+    pub tokens_estimated: bool,
     #[serde(default)]
     pub transcript_hash: String,
     #[serde(default)]
@@ -53,6 +64,10 @@ pub struct IndexEntry {
     /// empty when raw preservation is off/failed for this session.
     #[serde(default)]
     pub raw_path: String,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Result of writing one session's markdown + index entry to the archive.

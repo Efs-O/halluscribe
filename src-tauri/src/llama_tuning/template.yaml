@@ -196,10 +196,11 @@ architectures:
   # used before this file existed.
   # ---------------------------------------------------------------------------
   gemma-embedding:
-    # Four times the generation batch: indexing feeds it thousands of chunks,
-    # and the whole 4096-token context fits in one micro-batch.
-    batch_size: 2048
-    ubatch_size: 2048
+    # Indexing can submit a complete 4096-token embedding input. Keep both
+    # physical batch limits at that context size so an input just above 2048
+    # cannot fail before the embedding request begins.
+    batch_size: 4096
+    ubatch_size: 4096
     # f16 - llama.cpp's own default. The context is small enough that
     # quantising this cache saves little and costs recall precision.
     cache_type_k: f16

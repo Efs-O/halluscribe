@@ -29,6 +29,22 @@ export function displayFillPct(pct: number, estimated = false): string {
   return estimated ? `~${rounded}` : rounded;
 }
 
+/**
+ * Output tokens for the session table: compact, and marked when inferred.
+ *
+ * The tilde is not cosmetic. A measured count includes hidden thinking tokens
+ * and tool arguments the server counted; an estimate derived from characters
+ * runs several-fold low, and a chat-export estimate cannot see thinking at all.
+ * An em dash means the session predates the column and has no value yet.
+ */
+export function displayTokens(tokens: number | undefined, estimated = true): string {
+  if (!tokens) return "—";
+  const prefix = estimated ? "~" : "";
+  if (tokens >= 1_000_000) return `${prefix}${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${prefix}${(tokens / 1_000).toFixed(1)}K`;
+  return `${prefix}${tokens}`;
+}
+
 /** Extract HH:MM from an archive_path filename like "13-47-56-claudecode-sweep.md". */
 export function timeFromPath(archivePath: string): string {
   const file = archivePath.split("/").pop() ?? "";
@@ -73,6 +89,17 @@ if (import.meta.vitest) {
     it("formats megabytes",        () => expect(formatBytes(191_150_161)).toBe("182.3 MB"));
     it("formats gigabytes",        () => expect(formatBytes(2_545_341_726)).toBe("2.4 GB"));
     it("clamps negatives to zero", () => expect(formatBytes(-5)).toBe("0 B"));
+  });
+
+  describe("displayTokens", () => {
+    it("marks a measured count plainly",  () => expect(displayTokens(884, false)).toBe("884"));
+    it("marks an estimate with a tilde",  () => expect(displayTokens(884, true)).toBe("~884"));
+    it("compacts thousands",              () => expect(displayTokens(209_440, false)).toBe("209.4K"));
+    it("compacts millions",               () => expect(displayTokens(2_450_000, false)).toBe("2.5M"));
+    it("dashes a session with no value",  () => expect(displayTokens(undefined)).toBe("—"));
+    // Archived before the column existed: zero is absence, not a measured zero.
+    it("dashes a zero rather than showing 0", () => expect(displayTokens(0, false)).toBe("—"));
+    it("defaults to estimated",           () => expect(displayTokens(100)).toBe("~100"));
   });
 
   describe("fillClass", () => {

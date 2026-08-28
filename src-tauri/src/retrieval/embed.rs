@@ -1,5 +1,6 @@
 // HalluScribe - EmbeddingGemma bridge via a local llama.cpp embedding runtime.
 
+use super::store::limit_embedding_input;
 use crate::llama_gpu::GpuConfig;
 use crate::llama_runtime::{self, ServerWaitError};
 use crate::settings::HalluScribeSettings;
@@ -121,12 +122,12 @@ pub fn embedding_model_name(settings: &HalluScribeSettings) -> Result<String, St
 }
 
 fn prepare_query(text: &str) -> String {
-    format!("{QUERY_PREFIX}{}", text.trim())
+    limit_embedding_input(format!("{QUERY_PREFIX}{}", text.trim()))
 }
 
 fn prepare_document(text: &str) -> String {
     let title = extract_title(text).unwrap_or(DEFAULT_DOCUMENT_TITLE);
-    format!("title: {title} | text: {}", text.trim())
+    limit_embedding_input(format!("title: {title} | text: {}", text.trim()))
 }
 
 fn extract_title(text: &str) -> Option<&str> {

@@ -34,6 +34,8 @@ fn entry(id: &str, provider: &str, archive_path: &str, raw_path: &str) -> IndexE
         source_size_bytes: 0,
         provider: provider.to_string(),
         fill_estimated: false,
+        output_tokens: 0,
+        tokens_estimated: true,
         transcript_hash: String::new(),
         secret_flags: Vec::new(),
         raw_path: raw_path.to_string(),

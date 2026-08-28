@@ -32,6 +32,12 @@ pub fn sweep_done_message(result: &SweepResult, marker_errors: &[String]) -> Str
     if result.cancelled {
         message.push_str(", cancelled");
     }
+    if result.low_signal_skipped > 0 {
+        message.push_str(&format!(
+            ", low-signal skipped: {} (greetings or unsupported capability probes)",
+            result.low_signal_skipped
+        ));
+    }
     if !result.errors.is_empty() {
         message.push_str(&format!(", errors: {}", result.errors.len()));
     }
@@ -54,12 +60,11 @@ pub fn sweep_done_message(result: &SweepResult, marker_errors: &[String]) -> Str
     message
 }
 
-/// Returns true when a sweep is due: it has not already run today and the
-/// current local time is at or after the scheduled time. This is a catch-up
-/// model - if the app was closed, asleep, or busy during the scheduled minute,
-/// the sweep still runs the next time the loop ticks that day, instead of being
-/// missed until tomorrow (audit A-2). `today` and `last_sweep_date` are
-/// `YYYY-MM-DD` local dates. Extracted for unit-testability (no real clock).
+/// Returns true when a sweep has not completed today and the current local time
+/// is at or after the scheduled time. The application-level scheduler adds the
+/// separate persisted one-attempt-per-day guard before calling this runner.
+/// `today` and `last_sweep_date` are `YYYY-MM-DD` local dates. Extracted for
+/// unit-testability (no real clock).
 pub(crate) fn is_sweep_due(
     current_hour: u32,
     current_minute: u32,

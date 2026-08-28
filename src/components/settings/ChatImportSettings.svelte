@@ -133,15 +133,6 @@
         />
 
         <PathPickerField
-          label="Continue data directory"
-          bind:value={settings.continue_data_path}
-          mode="folder"
-          placeholder="Auto-detected — leave blank to use default"
-          note="Root .continue directory. Leave blank to auto-detect (Windows: %APPDATA%\.continue; Linux/macOS: ~/.continue)."
-          onchange={onBlur}
-        />
-
-        <PathPickerField
           label="Forge sessions directory"
           bind:value={settings.forge_sessions_path}
           mode="folder"

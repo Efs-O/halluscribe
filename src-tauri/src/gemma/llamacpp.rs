@@ -1,6 +1,9 @@
 // HalluScribe - llama.cpp subprocess lifecycle and request handling for Gemma.
 
-use super::schema::{extract_openai_tool_args, parse_openai_tool_args, save_session_summary_tool};
+use super::schema::{
+    extract_openai_tool_args, parse_openai_tool_args, required_summary_tool_choice,
+    save_session_summary_tool,
+};
 use super::{GemmaError, GemmaOutput, INFER_TIMEOUT, STARTUP_TIMEOUT_SECS, TEMPERATURE};
 use crate::llama_gpu::GpuConfig;
 use crate::llama_runtime::{self, ServerWaitError};
@@ -184,6 +187,7 @@ fn call(
             {"role": "user",   "content": transcript}
         ],
         "tools": [save_session_summary_tool()],
+        "tool_choice": required_summary_tool_choice(),
         "temperature": TEMPERATURE,
         "max_tokens": max_tokens,
         "stream": false

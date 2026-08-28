@@ -83,7 +83,6 @@ pub struct HalluScribeSettings {
     pub gemini_import_path: String,
     pub grok_import_path: String,
     pub ollama_chat_db_path: String,
-    pub continue_data_path: String,
     pub forge_sessions_path: String,
     pub scheduled_processing_enabled: bool,
     #[serde(deserialize_with = "deserialize_schedule_time")]
@@ -93,6 +92,10 @@ pub struct HalluScribeSettings {
     /// per day, any time at or after `schedule_time`, rather than in a single
     /// 60-second window (audit A-2).
     pub last_sweep_date: String,
+    /// Date (`YYYY-MM-DD`, local) when the scheduled runner most recently made
+    /// its one automatic attempt. This remains separate from `last_sweep_date`:
+    /// a failed or busy automatic run is still an attempt, not a success.
+    pub last_auto_sweep_attempt_date: String,
     pub idle_threshold_mins: u32,
     pub first_run: bool,
     pub ctx_size: u32,
@@ -116,7 +119,6 @@ fn default_profile_sources() -> Vec<String> {
         "claude_code",
         "codex",
         "forge",
-        "continue",
         "halluscribe_agent_chat",
         "ollama_chat",
     ]
@@ -155,7 +157,6 @@ impl Default for HalluScribeSettings {
             gemini_import_path: String::new(),
             grok_import_path: String::new(),
             ollama_chat_db_path: String::new(),
-            continue_data_path: String::new(),
             forge_sessions_path: String::new(),
             // Off by default: sweeps are manual ("Run Now") unless the user opts
             // in. An unattended auto-sweep runs against whatever workspace is
@@ -165,6 +166,7 @@ impl Default for HalluScribeSettings {
             scheduled_processing_enabled: false,
             schedule_time: "02:00".to_string(),
             last_sweep_date: String::new(),
+            last_auto_sweep_attempt_date: String::new(),
             idle_threshold_mins: 30,
             first_run: true,
             ctx_size: 0,

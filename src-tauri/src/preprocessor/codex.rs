@@ -1,10 +1,16 @@
 // HalluScribe - Codex session preprocessing.
 
 use super::shared::{head_tail, truncate_text};
+use crate::tokens::TokenCount;
 use serde_json::Value;
 
+#[cfg(test)]
 pub(super) fn preprocess(content: &str) -> String {
-    let mut out = String::with_capacity(32 * 1024);
+    preprocess_units(content).join("\n")
+}
+
+pub(super) fn preprocess_units(content: &str) -> Vec<String> {
+    let mut out = Vec::new();
     for line in content.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -24,13 +30,67 @@ pub(super) fn preprocess(content: &str) -> String {
             _ => None,
         };
         if let Some(fragment) = frag {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&fragment);
+            out.push(fragment);
         }
     }
     out
+}
+
+/// Codex reports usage on `token_count` events. `total_token_usage` is already
+/// cumulative, so the last one wins; where a session only carries per-turn
+/// `last_token_usage` the turns are summed instead.
+pub(super) fn token_count(content: &str) -> TokenCount {
+    let mut cumulative: Option<u64> = None;
+    let mut per_turn_total = 0u64;
+    let mut saw_per_turn = false;
+    let mut generated_chars = 0usize;
+
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(Value::as_str) != Some("event_msg") {
+            continue;
+        }
+        let Some(payload) = v.get("payload") else {
+            continue;
+        };
+        match payload.get("type").and_then(Value::as_str).unwrap_or("") {
+            "token_count" => {
+                let Some(info) = payload.get("info").filter(|info| !info.is_null()) else {
+                    continue;
+                };
+                if let Some(total) = output_tokens(info.get("total_token_usage")) {
+                    cumulative = Some(total);
+                } else if let Some(turn) = output_tokens(info.get("last_token_usage")) {
+                    per_turn_total += turn;
+                    saw_per_turn = true;
+                }
+            }
+            "assistant_message" | "response_output_text" => {
+                generated_chars += payload
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| payload.get("message").and_then(Value::as_str))
+                    .map_or(0, str::len);
+            }
+            // The model wrote these arguments; for a coding agent they dwarf
+            // the prose it emits alongside them.
+            "tool_call" | "function_call" => {
+                generated_chars += super::claude::emitted_json_len(
+                    payload.get("arguments").or_else(|| payload.get("input")),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let reported = cumulative.or_else(|| saw_per_turn.then_some(per_turn_total));
+    TokenCount::from_usage_or_chars(reported, generated_chars)
+}
+
+fn output_tokens(usage: Option<&Value>) -> Option<u64> {
+    usage?.get("output_tokens")?.as_u64()
 }
 
 fn format_user_message(payload: &Value) -> Option<String> {

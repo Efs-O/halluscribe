@@ -5,7 +5,10 @@
   interface Props {
     sortLabel: (key: SessionSortKey, label: string) => string;
     toggleSort: (key: SessionSortKey) => void;
-    onDividerMouseDown: (e: MouseEvent, col: "date" | "title" | "project" | "tool" | "fill") => void;
+    onDividerMouseDown: (
+      e: MouseEvent,
+      col: "date" | "title" | "project" | "tool" | "fill" | "tokens",
+    ) => void;
   }
 
   let { sortLabel, toggleSort, onDividerMouseDown }: Props = $props();
@@ -24,6 +27,11 @@
   <span class="divider" role="separator" onmousedown={(e) => onDividerMouseDown(e, "tool")}></span>
   <button class="header-btn" onclick={() => toggleSort("fill")}>{sortLabel("fill", "FILL")}</button>
   <span class="divider" role="separator" onmousedown={(e) => onDividerMouseDown(e, "fill")}></span>
+  <button class="header-btn" onclick={() => toggleSort("tokens")}>
+    {sortLabel("tokens", "TOKENS")}
+  </button>
+  <span class="divider" role="separator" onmousedown={(e) => onDividerMouseDown(e, "tokens")}
+  ></span>
   <button class="header-btn" onclick={() => toggleSort("tags")}>{sortLabel("tags", "TAGS")}</button>
 </div>
 

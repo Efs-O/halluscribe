@@ -26,6 +26,8 @@ fn sample_meta(source: &Path, id: &str) -> SessionMeta {
         provider: "claude_code".into(),
         fill_pct: 78.5,
         fill_estimated: false,
+        output_tokens: 0,
+        tokens_estimated: true,
         backend: "llama.cpp".into(),
         session_timestamp: fixed_now(),
         updated_at: None,

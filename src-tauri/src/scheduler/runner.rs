@@ -1,5 +1,6 @@
 // HalluScribe - scheduled sweep execution and completion reporting.
 
+use super::eligibility::is_low_signal_codex_session;
 use super::helpers::{backend_display_name, is_sweep_due, provider_display_name};
 use super::{SweepConfig, SweepProgress, SweepResult};
 use crate::archive::{self, ArchiveError, SessionMeta};
@@ -60,6 +61,7 @@ pub fn run_sweep(
     };
     if let Err(error) = archive::ensure_index_readable(&config.archive_dir) {
         result.errors.push(format!("archive index: {error}"));
+        record_sweep_errors(&result);
         return result;
     }
     let sources = scan_sessions(
@@ -85,9 +87,10 @@ pub fn run_sweep(
         let parsed_sessions = match readers::read_target(source) {
             Ok(parsed_sessions) => parsed_sessions,
             Err(error) => {
-                result
-                    .errors
-                    .push(format!("{source_label}: parse: {error}"));
+                result.errors.push(format!(
+                    "{source_label} ({}): parse: {error}",
+                    source.path.display()
+                ));
                 continue;
             }
         };
@@ -102,12 +105,24 @@ pub fn run_sweep(
                 result.skipped += 1;
                 continue;
             }
+            if is_low_signal_codex_session(&session) {
+                result.skipped += 1;
+                result.low_signal_skipped += 1;
+                continue;
+            }
             worklist.push(session);
         }
     }
 
     if cancel.load(Ordering::Relaxed) {
         result.cancelled = true;
+        record_sweep_errors(&result);
+        return result;
+    }
+
+    // Avoid a cold Qwen load when every discovered source was unchanged or
+    // deliberately classified as low-signal during worklist construction.
+    if worklist.is_empty() {
         return result;
     }
 
@@ -121,6 +136,7 @@ pub fn run_sweep(
             result
                 .errors
                 .push(format!("inference: failed to start model: {error}"));
+            record_sweep_errors(&result);
             return result;
         }
     };
@@ -138,17 +154,49 @@ pub fn run_sweep(
 
         emit_progress(app, current, total, &session.id, "processing");
         let transcript = session.transcript();
-        let output = match sweep_session.infer(config.max_tokens, &session.provider, &transcript) {
+        let output = if crate::gemma::large_session::needs_chunking(
+            &transcript,
+            config.ctx_size,
+            config.max_tokens,
+        ) {
+            let units = session.transcript_units();
+            crate::gemma::large_session::summarize(
+                &sweep_session,
+                &session.provider,
+                &units,
+                config.ctx_size,
+                config.max_tokens,
+                &|| cancel.load(Ordering::Relaxed),
+                &mut |chunk, chunks| {
+                    emit_progress(
+                        app,
+                        current,
+                        total,
+                        &session.id,
+                        &format!("chunk {chunk} of {chunks}"),
+                    );
+                },
+            )
+        } else {
+            sweep_session.infer(config.max_tokens, &session.provider, &transcript)
+        };
+        let output = match output {
             Ok(output) => output,
+            Err(GemmaError::Cancelled) => {
+                result.cancelled = true;
+                break;
+            }
             Err(GemmaError::Conflict(_)) => {
                 result.deferred += 1;
                 emit_progress(app, current, total, &session.id, "deferred");
                 continue;
             }
             Err(error) => {
-                result
-                    .errors
-                    .push(format!("{}: inference: {error}", session.id));
+                result.errors.push(format!(
+                    "{} ({}): inference: {error}",
+                    session.id,
+                    session.source_path.display()
+                ));
                 emit_progress(app, current, total, &session.id, "error");
                 continue;
             }
@@ -184,9 +232,11 @@ pub fn run_sweep(
         let raw_path = match preserved {
             Ok(rel) => Some(rel),
             Err(error) => {
-                result
-                    .errors
-                    .push(format!("{}: raw preserve: {error}", session.id));
+                result.errors.push(format!(
+                    "{} ({}): raw preserve: {error}",
+                    session.id,
+                    session.source_path.display()
+                ));
                 None
             }
         };
@@ -199,6 +249,8 @@ pub fn run_sweep(
             provider: session.provider.provider_key().to_string(),
             fill_pct: session.fill_pct,
             fill_estimated: session.fill_estimated,
+            output_tokens: session.tokens.output,
+            tokens_estimated: session.tokens.estimated,
             backend: backend_display_name(&config.backend),
             session_timestamp: session.created_at,
             updated_at: session.updated_at,
@@ -216,15 +268,19 @@ pub fn run_sweep(
                 emit_progress(app, current, total, &session.id, "done");
             }
             Err(ArchiveError::Io(error)) => {
-                result
-                    .errors
-                    .push(format!("{}: archive I/O: {error}", session.id));
+                result.errors.push(format!(
+                    "{} ({}): archive I/O: {error}",
+                    session.id,
+                    session.source_path.display()
+                ));
                 emit_progress(app, current, total, &session.id, "error");
             }
             Err(error) => {
-                result
-                    .errors
-                    .push(format!("{}: archive: {error}", session.id));
+                result.errors.push(format!(
+                    "{} ({}): archive: {error}",
+                    session.id,
+                    session.source_path.display()
+                ));
                 emit_progress(app, current, total, &session.id, "error");
             }
         }
@@ -242,7 +298,16 @@ pub fn run_sweep(
             .push(format!("{session_id}: embedding: {error}"));
     }
 
+    record_sweep_errors(&result);
     result
+}
+
+/// Persist all per-session errors because the UI completion toast deliberately
+/// stays compact and would otherwise discard the actionable session details.
+fn record_sweep_errors(result: &SweepResult) {
+    for error in &result.errors {
+        crate::llama_runtime::record_diagnostic("sweep", error);
+    }
 }
 
 fn is_unchanged_session(archive_dir: &std::path::Path, session: &ParsedSession) -> bool {

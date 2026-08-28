@@ -74,14 +74,14 @@ mod tests {
     }
 
     #[test]
-    fn the_embedding_block_preserves_the_flags_that_runtime_had_hardcoded() {
+    fn embedding_block_accepts_a_full_context_in_one_physical_batch() {
         // The embedding runtime never shared the generation flag block - it runs
         // a 4x batch and an unquantised cache. Falling to `default` here would
         // quietly quarter its indexing batch, so it needs an entry of its own.
         let tuning: TuningFile = serde_yaml::from_str(TEMPLATE).expect("template must parse");
         let embedding = &tuning.architectures["gemma-embedding"];
-        assert_eq!(embedding.batch_size, 2048);
-        assert_eq!(embedding.ubatch_size, Some(2048));
+        assert_eq!(embedding.batch_size, 4096);
+        assert_eq!(embedding.ubatch_size, Some(4096));
         assert_eq!(embedding.cache_type_k, "f16");
         assert_eq!(embedding.cache_type_v, "f16");
         assert!(embedding.flash_attn);

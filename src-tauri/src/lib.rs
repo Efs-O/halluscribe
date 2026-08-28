@@ -17,6 +17,7 @@ mod llama_pids;
 mod llama_runtime;
 pub mod llama_tuning;
 mod recorded_sessions;
+mod scheduled_sweep;
 mod tts;
 mod window_size;
 
@@ -34,13 +35,13 @@ pub mod scanner;
 pub mod scheduler;
 pub mod search;
 pub mod settings;
+pub mod tokens;
 pub mod workspace;
 
 use app_state::{
     BriefingCancel, CaptureCancel, CaptureStatusState, ChatCancel, ProfileCancel, SweepCancel,
 };
-use app_support::{archive_dir, default_archive_dir, mark_sweep_success, sweep_config};
-use chrono::{Datelike, Local, Timelike};
+use app_support::{archive_dir, default_archive_dir};
 use commands::{
     apply_redaction, cancel_briefing, cancel_chat, cancel_sweep, chat_import_status,
     delete_sessions, get_raw_session_total, get_recent_sessions, get_settings, get_stats,
@@ -237,46 +238,7 @@ pub fn run() {
             tray.build(app)?;
             apply_ring_icon(app.handle());
 
-            let handle = app.handle().clone();
-            std::thread::spawn(move || {
-                let mut last_triggered_minute: Option<(i32, u32, u32, u32, u32)> = None;
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(5));
-                    let config = match sweep_config(&handle, false) {
-                        Ok(config) => config,
-                        Err(error) => {
-                            eprintln!("[scheduler] could not load sweep configuration: {error}");
-                            continue;
-                        }
-                    };
-                    if let Some(config) = config {
-                        let now = Local::now();
-                        let current_minute =
-                            (now.year(), now.month(), now.day(), now.hour(), now.minute());
-                        if last_triggered_minute == Some(current_minute) {
-                            continue;
-                        }
-                        // Use the shared cancel flag so the Cancel button can stop
-                        // a nightly auto-sweep, not just a manual "Run Now".
-                        let cancel = handle.state::<SweepCancel>().0.clone();
-                        cancel.store(false, std::sync::atomic::Ordering::Relaxed);
-                        let result = scheduler::run_sweep(&handle, &config, cancel);
-                        if result.ran {
-                            last_triggered_minute = Some(current_minute);
-                            let marker_errors = if result.completed_successfully() {
-                                mark_sweep_success(&handle)
-                                    .err()
-                                    .into_iter()
-                                    .collect::<Vec<_>>()
-                            } else {
-                                Vec::new()
-                            };
-                            let message = scheduler::sweep_done_message(&result, &marker_errors);
-                            let _ = handle.emit("sweep-done", message);
-                        }
-                    }
-                }
-            });
+            scheduled_sweep::start(app.handle().clone());
 
             // Startup raw capture (coding sources only, no settings gate): a
             // background pass so a coding tool that prunes its own JSONL logs

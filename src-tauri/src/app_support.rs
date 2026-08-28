@@ -1,7 +1,7 @@
 // HalluScribe - shared Tauri-side application support helpers.
 
 use crate::{archive, scanner, scheduler, settings};
-use chrono::Local;
+use chrono::{Local, Timelike};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 use tauri::Manager;
@@ -65,6 +65,21 @@ pub(crate) fn sweep_config(
     let default_root = default_archive_dir(app)?;
     let import_only = crate::workspace::is_active_import_only(&default_root, &dir)?;
     let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
+    if !force {
+        let now = Local::now();
+        let today = now.format("%Y-%m-%d").to_string();
+        if settings.last_auto_sweep_attempt_date == today
+            || !scheduler::is_sweep_due(
+                now.hour(),
+                now.minute(),
+                &today,
+                &settings.schedule_time,
+                &settings.last_sweep_date,
+            )
+        {
+            return Ok(None);
+        }
+    }
     let Some(mut config) = settings.to_sweep_config(dir, force) else {
         return Ok(None);
     };
@@ -130,6 +145,20 @@ pub(crate) fn mark_sweep_success(app: &tauri::AppHandle) -> Result<(), String> {
     if changed {
         settings.first_run = false;
         settings.last_sweep_date = today;
+        settings::save_settings(&dir, &settings).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// Record an automatic daily sweep attempt before it competes for the model.
+/// A busy or failed attempt must not restart every few seconds; manual runs
+/// remain independent and available for an explicit retry.
+pub(crate) fn mark_auto_sweep_attempt(app: &tauri::AppHandle) -> Result<(), String> {
+    let dir = archive_dir(app)?;
+    let mut settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    if settings.last_auto_sweep_attempt_date != today {
+        settings.last_auto_sweep_attempt_date = today;
         settings::save_settings(&dir, &settings).map_err(|error| error.to_string())?;
     }
     Ok(())

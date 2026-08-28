@@ -88,9 +88,7 @@ fn preprocess_transcript(jsonl_path: &Path, tool: &ToolSource) -> String {
     let transcript = match preprocess_session(jsonl_path, tool) {
         Ok(transcript) => transcript,
         Err(PreprocessError::UnsupportedTool) => {
-            eprintln!(
-                "ERROR: Continue tool not yet supported. Set JSONL_PATH to Claude Code or Codex."
-            );
+            eprintln!("ERROR: tool not supported. Set JSONL_PATH to Claude Code, Codex, or Forge.");
             std::process::exit(1);
         }
         Err(error) => {
@@ -193,7 +191,6 @@ fn provider_for_tool(tool: &ToolSource) -> ChatProvider {
     match tool {
         ToolSource::ClaudeCode => ChatProvider::ClaudeCode,
         ToolSource::Codex => ChatProvider::Codex,
-        ToolSource::Continue => ChatProvider::Continue,
         ToolSource::Forge => ChatProvider::Forge,
     }
 }

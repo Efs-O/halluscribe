@@ -93,9 +93,9 @@
     </p>
   {:else}
     <p class="field-note field-note-warn">
-      Import-only off: sweeps will read <strong>this machine's</strong> Claude Code / Codex /
-      Continue / Forge logs into this workspace. Only leave this off if the workspace is meant to
-      track your own coding activity.
+      Import-only off: sweeps will read <strong>this machine's</strong> Claude Code / Codex / Forge
+      logs into this workspace. Only leave this off if the workspace is meant to track your own
+      coding activity.
     </p>
   {/if}
 

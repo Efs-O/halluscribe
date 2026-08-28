@@ -162,6 +162,14 @@ fn save_session_summary_tool_has_required_fields() {
 }
 
 #[test]
+fn required_summary_tool_choice_targets_only_the_summary_tool() {
+    let choice = required_summary_tool_choice();
+
+    assert_eq!(choice["type"], "function");
+    assert_eq!(choice["function"]["name"], "save_session_summary");
+}
+
+#[test]
 fn save_session_summary_tool_uses_provider_agnostic_descriptions() {
     let tool = save_session_summary_tool();
     let function = &tool["function"];

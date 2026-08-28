@@ -6,7 +6,6 @@ use std::path::PathBuf;
 pub enum ToolSource {
     ClaudeCode,
     Codex,
-    Continue,
     Forge,
 }
 

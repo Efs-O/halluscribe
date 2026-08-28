@@ -21,6 +21,8 @@ fn entry(id: &str, project: &str, date: &str) -> IndexEntry {
         source_size_bytes: 0,
         provider: "claude_code".to_string(),
         fill_estimated: false,
+        output_tokens: 0,
+        tokens_estimated: true,
         transcript_hash: String::new(),
         secret_flags: Vec::new(),
         raw_path: String::new(),

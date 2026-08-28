@@ -9,8 +9,8 @@ impl HalluScribeSettings {
     /// Seed a NEW workspace's settings from this (the default root's) settings.
     /// Host-level fields — the machine's inference setup — are inherited so a guest
     /// doesn't re-enter model config. Archive-level fields (import paths,
-    /// profile_sources, schedule, first_run, last_sweep_date, …) start fresh at their
-    /// defaults. See docs/internal/PERSONAL_PARITY_PLAN.md §E cautions.
+    /// profile_sources, schedule, and sweep dates start fresh at their defaults.
+    /// See docs/internal/PERSONAL_PARITY_PLAN.md §E cautions.
     ///
     /// Import paths deliberately come back BLANK: this function cannot know the
     /// new archive root. `settings::ensure_import_paths` derives them from that

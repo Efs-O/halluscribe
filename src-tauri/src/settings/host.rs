@@ -134,11 +134,11 @@ pub(super) fn merge_host_owned(
         gemini_import_path,
         grok_import_path,
         ollama_chat_db_path,
-        continue_data_path,
         forge_sessions_path,
         scheduled_processing_enabled,
         schedule_time,
         last_sweep_date,
+        last_auto_sweep_attempt_date,
         first_run,
         // `profile_sources` is a CONSENT setting - which of this person's
         // providers the distiller may read. Sharing it across people would be a
@@ -152,11 +152,11 @@ pub(super) fn merge_host_owned(
         gemini_import_path,
         grok_import_path,
         ollama_chat_db_path,
-        continue_data_path,
         forge_sessions_path,
         scheduled_processing_enabled,
         schedule_time,
         last_sweep_date,
+        last_auto_sweep_attempt_date,
         first_run,
         profile_sources,
         ..host.clone()
@@ -206,6 +206,7 @@ mod tests {
             chatgpt_import_path: "C:/guest/imports/chatgpt".to_string(),
             profile_sources: vec!["claude_code".to_string()],
             last_sweep_date: "2026-08-07".to_string(),
+            last_auto_sweep_attempt_date: "2026-08-08".to_string(),
             first_run: false,
             schedule_time: "03:30".to_string(),
             ..HalluScribeSettings::default()
@@ -233,6 +234,7 @@ mod tests {
         assert_eq!(merged.chatgpt_import_path, "C:/guest/imports/chatgpt");
         assert_eq!(merged.profile_sources, vec!["claude_code".to_string()]);
         assert_eq!(merged.last_sweep_date, "2026-08-07");
+        assert_eq!(merged.last_auto_sweep_attempt_date, "2026-08-08");
         assert_eq!(merged.schedule_time, "03:30");
         assert!(!merged.first_run);
     }
@@ -257,6 +259,7 @@ mod tests {
         // ...while the person's own fields survive the round trip.
         assert_eq!(stripped.chatgpt_import_path, "C:/guest/imports/chatgpt");
         assert_eq!(stripped.last_sweep_date, "2026-08-07");
+        assert_eq!(stripped.last_auto_sweep_attempt_date, "2026-08-08");
     }
 
     #[test]

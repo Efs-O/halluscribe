@@ -2,6 +2,7 @@
 // Keeps the public inference API stable while backend-specific logic lives in
 // focused sibling modules.
 
+pub(crate) mod large_session;
 mod llamacpp;
 mod ollama;
 mod schema;
@@ -91,6 +92,9 @@ pub enum GemmaError {
     /// not be. Like the two above, retrying never clears it - the user has to
     /// fix the file - so the sweep must not treat it as a transient conflict.
     TuningInvalid(String),
+    /// The caller requested cancellation at a safe boundary between model
+    /// calls. No archive write has occurred for that session.
+    Cancelled,
     EmptyResponse,
     BadToolCall(String),
 }
@@ -107,6 +111,7 @@ impl fmt::Display for GemmaError {
             Self::DrafterAmbiguous(s) => write!(f, "MTP drafter ambiguous: {s}"),
             Self::GpuConfigInvalid(s) => write!(f, "GPU settings invalid: {s}"),
             Self::TuningInvalid(s) => write!(f, "llama-server tuning invalid: {s}"),
+            Self::Cancelled => write!(f, "inference cancelled"),
             Self::EmptyResponse => write!(f, "Gemma returned an empty response"),
             Self::BadToolCall(s) => write!(f, "tool-call response invalid: {s}"),
         }

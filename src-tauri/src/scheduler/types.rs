@@ -47,6 +47,9 @@ pub struct SweepResult {
     pub cancelled: bool,
     pub processed: u32,
     pub skipped: u32,
+    /// Skipped Codex transcripts that contain only a greeting or an external
+    /// capability probe after preprocessing, rather than archive-worthy work.
+    pub low_signal_skipped: u32,
     pub deferred: u32,
     /// Number of sessions written this sweep whose archived markdown matched
     /// at least one high-confidence secret shape (Phase 0b scan).

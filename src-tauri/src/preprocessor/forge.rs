@@ -4,11 +4,18 @@
 //   session_start  — metadata header, skipped (no role)
 //   message lines  — {"role":"user"|"assistant","content":"...","timestamp_ms":...}
 //   tool call      — {"role":"assistant","content":null,"tool_calls":[{"name":"...","input":{...}}]}
+//   usage          — {"type":"usage","output_tokens":N,...} (Forge >= 0.13.17)
 
 use super::shared::truncate_text;
+use crate::tokens::TokenCount;
 use serde_json::Value;
 
+#[cfg(test)]
 pub(super) fn preprocess(content: &str) -> String {
+    preprocess_units(content).join("\n")
+}
+
+pub(super) fn preprocess_units(content: &str) -> Vec<String> {
     let mut out = Vec::new();
 
     for line in content.lines() {
@@ -65,7 +72,47 @@ pub(super) fn preprocess(content: &str) -> String {
         }
     }
 
-    out.join("\n")
+    out
+}
+
+/// Forge 0.13.17 and later writes cumulative `usage` lines; anything older has
+/// no counters at all and falls back to the character estimate.
+///
+/// The largest total is taken rather than the last. The totals are cumulative
+/// and normally only climb, but they live on the conversation and a reader
+/// should not report a smaller number than it has already seen if one ever
+/// resets mid-file.
+pub(super) fn token_count(content: &str) -> TokenCount {
+    let mut reported: Option<u64> = None;
+    let mut generated_chars = 0usize;
+
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(Value::as_str) == Some("usage") {
+            if let Some(output) = v.get("output_tokens").and_then(Value::as_u64) {
+                reported = Some(reported.map_or(output, |seen: u64| seen.max(output)));
+            }
+            continue;
+        }
+        if v.get("role").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        // Reasoning counts as generated: it is the bulk of a thinking model's
+        // output, and a tool-call turn carries reasoning with no content at all.
+        for key in ["content", "reasoning"] {
+            generated_chars += v.get(key).and_then(Value::as_str).map_or(0, str::len);
+        }
+        // So do tool arguments — an edit_file call carries the whole new file.
+        if let Some(calls) = v.get("tool_calls").and_then(Value::as_array) {
+            for call in calls {
+                generated_chars += super::claude::emitted_json_len(call.get("input"));
+            }
+        }
+    }
+
+    TokenCount::from_usage_or_chars(reported, generated_chars)
 }
 
 fn preferred_arg(input: &Value) -> String {
