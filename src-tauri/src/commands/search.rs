@@ -88,7 +88,9 @@ pub(crate) fn search_sessions_semantic(
     let allowed_ids = allowed_session_ids
         .filter(|ids| !ids.is_empty())
         .map(|ids| ids.into_iter().collect::<HashSet<_>>());
-    let _inference_guard = crate::infer_lock::try_acquire().ok_or(BUSY_MESSAGE)?;
+    // Embedding loads a second model. Reclaim an idle warm chat server first so
+    // semantic search cannot overcommit VRAM on constrained GPUs.
+    let _inference_guard = crate::infer_lock::acquire_for_batch().ok_or(BUSY_MESSAGE)?;
     retrieval::semantic_search(
         &dir,
         &settings,
@@ -112,7 +114,7 @@ pub(crate) async fn rebuild_session_embeddings(
         );
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let _inference_guard = crate::infer_lock::try_acquire().ok_or(BUSY_MESSAGE)?;
+        let _inference_guard = crate::infer_lock::acquire_for_batch().ok_or(BUSY_MESSAGE)?;
         retrieval::rebuild_embeddings_with_progress(&dir, &settings, |current, total, result| {
             let _ = app.emit(
                 "embedding-rebuild-progress",

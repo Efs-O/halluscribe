@@ -8,7 +8,6 @@ use crate::profile::ProfileScope;
 use crate::{archive, gemma, pack, profile, settings};
 use serde::Serialize;
 use serde_json::Value;
-use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
@@ -95,10 +94,14 @@ pub(crate) fn run_profile_refresh(
         .ok_or_else(|| "backend not configured (check Settings)".to_string())?;
     let (ctx_size, max_tokens) = settings.generation_limits()?;
     let profile_sources = settings.profile_sources.clone();
-    // Reset before the thread starts, exactly like `trigger_sweep`, so a stop
-    // pressed during a previous run can never abort this one immediately.
-    let cancel = app.state::<ProfileCancel>().0.clone();
-    cancel.store(false, Ordering::Relaxed);
+    // A fresh cancel flag per run, so a stop pressed during a previous run can
+    // never abort this one, and this run's flag is not a shared one a second
+    // trigger could clear out from under it.
+    let cancel = app
+        .state::<ProfileCancel>()
+        .0
+        .try_begin_run()
+        .ok_or_else(|| "A profile refresh is already running.".to_string())?;
 
     std::thread::spawn(move || {
         // Top-level inference lock, exactly like the sweep: the profile code
@@ -115,6 +118,7 @@ pub(crate) fn run_profile_refresh(
                     ..Default::default()
                 },
             );
+            app.state::<ProfileCancel>().0.finish_run(&cancel);
             return;
         };
 
@@ -132,6 +136,7 @@ pub(crate) fn run_profile_refresh(
                     ..Default::default()
                 },
             );
+            app.state::<ProfileCancel>().0.finish_run(&cancel);
             return;
         }
 
@@ -155,6 +160,7 @@ pub(crate) fn run_profile_refresh(
                         ..Default::default()
                     },
                 );
+                app.state::<ProfileCancel>().0.finish_run(&cancel);
                 return;
             }
         };
@@ -217,6 +223,7 @@ pub(crate) fn run_profile_refresh(
             },
         };
         let _ = app.emit("profile-done", payload);
+        app.state::<ProfileCancel>().0.finish_run(&cancel);
     });
     Ok(())
 }
@@ -226,9 +233,7 @@ pub(crate) fn run_profile_refresh(
 /// flag covers both scopes - only one profile job can run at a time.
 #[tauri::command]
 pub(crate) fn cancel_profile_refresh(app: tauri::AppHandle) {
-    app.state::<ProfileCancel>()
-        .0
-        .store(true, Ordering::Relaxed);
+    app.state::<ProfileCancel>().0.request_cancel();
 }
 
 /// The scope key ("work" | "personal") of a profile refresh currently

@@ -7,7 +7,6 @@ use crate::app_state::SweepCancel;
 use crate::app_support::{mark_auto_sweep_attempt, mark_sweep_success, sweep_config};
 use crate::scheduler;
 use chrono::{Datelike, Local, Timelike};
-use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Start the app-lifetime scheduler thread. Automatic attempts are persisted
@@ -39,10 +38,14 @@ pub(crate) fn start(handle: AppHandle) {
                 continue;
             }
 
-            // Use the shared cancel flag so Cancel stops automatic work too.
-            let cancel = handle.state::<SweepCancel>().0.clone();
-            cancel.store(false, Ordering::Relaxed);
-            let result = scheduler::run_sweep(&handle, &config, cancel);
+            // Claim a fresh cancel flag so Cancel stops this automatic run.
+            // It is not shared with a concurrent manual sweep, so neither can
+            // clear the other's cancel (the old reset-before-spawn race).
+            let Some(cancel) = handle.state::<SweepCancel>().0.try_begin_run() else {
+                eprintln!("[scheduler] skipping automatic sweep because one is already running");
+                continue;
+            };
+            let result = scheduler::run_sweep(&handle, &config, cancel.clone());
             if result.ran {
                 let marker_errors = if result.completed_successfully() {
                     mark_sweep_success(&handle)
@@ -55,6 +58,7 @@ pub(crate) fn start(handle: AppHandle) {
                 let message = scheduler::sweep_done_message(&result, &marker_errors);
                 let _ = handle.emit("sweep-done", message);
             }
+            handle.state::<SweepCancel>().0.finish_run(&cancel);
         }
     });
 }

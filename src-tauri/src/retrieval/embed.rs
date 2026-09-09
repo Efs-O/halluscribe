@@ -66,13 +66,21 @@ fn active_child() -> &'static Mutex<Option<Child>> {
     CHILD.get_or_init(|| Mutex::new(None))
 }
 
+/// Take the active-child lock, recovering from poison: a holder that died
+/// while killing a child must not wedge every later start/stop. Extracted so
+/// the recovery is directly testable.
+fn lock_active_child() -> std::sync::MutexGuard<'static, Option<Child>> {
+    active_child()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub fn kill_embedding_server() {
-    if let Ok(mut guard) = active_child().lock() {
-        if let Some(mut child) = guard.take() {
-            let pid = child.id();
-            let _ = child.kill();
-            crate::llama_pids::unregister(pid);
-        }
+    let mut guard = lock_active_child();
+    if let Some(mut child) = guard.take() {
+        let pid = child.id();
+        let _ = child.kill();
+        crate::llama_pids::unregister(pid);
     }
 }
 
@@ -90,7 +98,10 @@ pub fn start_runner(settings: &HalluScribeSettings) -> Result<EmbeddingRunner, S
         return Err(error);
     }
     crate::llama_pids::register(child.id());
-    let mut guard = active_child().lock().unwrap();
+    // Recover from a poisoned lock rather than panicking the command thread:
+    // a prior holder that died inside `child.kill()`/unregister must not wedge
+    // every subsequent `start_runner`. Mirrors `kill_embedding_server`.
+    let mut guard = lock_active_child();
     if let Some(mut old) = guard.take() {
         let pid = old.id();
         let _ = old.kill();
@@ -312,5 +323,20 @@ mod tests {
         normalize_embedding(&mut values);
         assert!((values[0] - 0.6).abs() < 0.0001);
         assert!((values[1] - 0.8).abs() < 0.0001);
+    }
+
+    #[test]
+    fn a_poisoned_active_child_lock_does_not_wedge_start_or_stop() {
+        // A holder that panicked while killing the child must not make every
+        // later lock_active_child() panic: start_runner and
+        // kill_embedding_server recover from the poison instead.
+        drop(active_child().lock().unwrap_or_else(|e| e.into_inner()));
+        std::panic::catch_unwind(|| {
+            let _g = active_child().lock().unwrap();
+            panic!("holder panicked while killing the child");
+        })
+        .expect_err("the holder panics by design");
+        let guard = lock_active_child();
+        assert!(guard.is_none());
     }
 }

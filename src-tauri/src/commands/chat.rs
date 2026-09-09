@@ -8,7 +8,6 @@ use crate::recorded_sessions::{SaveRecordedChatRequest, SaveRecordedChatResult};
 use crate::{archive, briefing, profile, retrieval, settings};
 use serde::Serialize;
 use std::collections::HashSet;
-use std::sync::atomic::Ordering;
 use tauri::{Emitter, Manager};
 
 #[derive(Debug, Clone, Copy, Serialize, serde::Deserialize)]
@@ -21,7 +20,7 @@ pub(crate) enum ChatSearchMode {
 /// Signal the active chat turn to stop after the current blocking step.
 #[tauri::command]
 pub(crate) fn cancel_chat(app: tauri::AppHandle) {
-    app.state::<ChatCancel>().0.store(true, Ordering::Relaxed);
+    app.state::<ChatCancel>().0.request_cancel();
 }
 
 /// Persist one HalluScribe-owned recorded agent chat session for later sweep ingestion.
@@ -62,8 +61,6 @@ pub(crate) fn send_chat_message(
     let backend = settings
         .to_inference_backend()
         .ok_or_else(|| "backend not configured (check Settings)".to_string())?;
-    let cancel = app.state::<ChatCancel>().0.clone();
-    cancel.store(false, Ordering::Relaxed);
     let (ctx_size, max_tokens) = settings.generation_limits()?;
     let search_mode = search_mode.unwrap_or(ChatSearchMode::Archive);
 
@@ -106,7 +103,10 @@ pub(crate) fn send_chat_message(
         // Embedding the query loads the embedding model; serialise it against
         // any other inference job. Released before the chat turn re-acquires.
         let scope_ids = {
-            let _inference_guard = crate::infer_lock::try_acquire().ok_or(BUSY_MESSAGE)?;
+            // Semantic scoping loads the embedding model before the chat turn.
+            // Reclaim any idle warm chat server so the two models cannot occupy
+            // GPU memory at once.
+            let _inference_guard = crate::infer_lock::acquire_for_batch().ok_or(BUSY_MESSAGE)?;
             retrieval::semantic_scope_ids(&dir, &settings, latest_user_query, 12, allowed_ids)?
         };
         Some(scope_ids)
@@ -157,6 +157,11 @@ pub(crate) fn send_chat_message(
         },
         reasoning_enabled: thinking_enabled,
     };
+    let cancel = app
+        .state::<ChatCancel>()
+        .0
+        .try_begin_run()
+        .ok_or_else(|| "A chat turn is already running.".to_string())?;
 
     let app_clone = app.clone();
     std::thread::spawn(move || {
@@ -168,8 +173,9 @@ pub(crate) fn send_chat_message(
             final_messages,
             &dir,
             runtime,
-            cancel,
+            cancel.clone(),
         );
+        app_clone.state::<ChatCancel>().0.finish_run(&cancel);
     });
     Ok(())
 }

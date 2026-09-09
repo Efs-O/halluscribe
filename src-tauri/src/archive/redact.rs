@@ -1,6 +1,6 @@
 // HalluScribe - durable session redaction: ledger + apply/preview operations.
 
-use super::index::{find_session, set_secret_flags};
+use super::index::{archive_path, find_session, set_secret_flags};
 use super::ArchiveError;
 use crate::scanner::secrets::scan_for_secrets;
 use chrono::Utc;
@@ -101,7 +101,7 @@ fn session_md_path(
     let entry = find_session(archive_dir, session_id).ok_or_else(|| {
         ArchiveError::Invalid(format!("session '{session_id}' not found in archive"))
     })?;
-    Ok(archive_dir.join(&entry.archive_path))
+    archive_path(archive_dir, &entry.archive_path)
 }
 
 fn build_excerpts(text: &str, find: &str) -> Vec<String> {

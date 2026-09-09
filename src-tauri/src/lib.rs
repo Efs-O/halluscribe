@@ -39,7 +39,8 @@ pub mod tokens;
 pub mod workspace;
 
 use app_state::{
-    BriefingCancel, CaptureCancel, CaptureStatusState, ChatCancel, ProfileCancel, SweepCancel,
+    BriefingCancel, CancelState, CaptureCancel, CaptureStatusState, ChatCancel, ProfileCancel,
+    SweepCancel,
 };
 use app_support::{archive_dir, default_archive_dir};
 use commands::{
@@ -60,7 +61,7 @@ use commands_workspace::{
     create_workspace, delete_workspace, list_workspaces, move_workspace, rename_default_workspace,
     rename_workspace, set_workspace_import_only, suggest_workspace_path, switch_workspace,
 };
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::Arc;
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -116,11 +117,11 @@ fn persist_always_on_top(app: &tauri::AppHandle, always_on_top: bool) -> Result<
 
 pub fn run() {
     tauri::Builder::default()
-        .manage(BriefingCancel(Arc::new(AtomicBool::new(false))))
-        .manage(ChatCancel(Arc::new(AtomicBool::new(false))))
-        .manage(SweepCancel(Arc::new(AtomicBool::new(false))))
-        .manage(ProfileCancel(Arc::new(AtomicBool::new(false))))
-        .manage(CaptureCancel(Arc::new(AtomicBool::new(false))))
+        .manage(BriefingCancel(CancelState::new()))
+        .manage(ChatCancel(CancelState::new()))
+        .manage(SweepCancel(CancelState::new()))
+        .manage(ProfileCancel(CancelState::new()))
+        .manage(CaptureCancel(CancelState::new()))
         .manage(CaptureStatusState(Arc::new(std::sync::Mutex::new(
             archive::CaptureStatus::default(),
         ))))
@@ -267,7 +268,9 @@ pub fn run() {
                         return;
                     }
                 };
-                let cancel = capture_handle.state::<CaptureCancel>().0.clone();
+                let Some(cancel) = capture_handle.state::<CaptureCancel>().0.try_begin_run() else {
+                    return;
+                };
                 let status_state = capture_handle.state::<CaptureStatusState>().0.clone();
                 let progress_handle = capture_handle.clone();
                 // `run_capture` calls this once per file plus once more with the
@@ -285,6 +288,10 @@ pub fn run() {
                         let _ = progress_handle.emit("raw-capture-progress", status.clone());
                     },
                 );
+                capture_handle
+                    .state::<CaptureCancel>()
+                    .0
+                    .finish_run(&cancel);
             });
 
             Ok(())

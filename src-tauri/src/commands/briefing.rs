@@ -3,7 +3,6 @@
 use crate::app_state::BriefingCancel;
 use crate::app_support::archive_dir;
 use crate::{archive, briefing, settings};
-use std::sync::atomic::Ordering;
 use tauri::{Emitter, Manager};
 
 const BRIEFING_MIN_WORDS_PER_SESSION: usize = 200;
@@ -73,8 +72,14 @@ pub(crate) fn run_briefing(
         None
     };
 
-    let cancel = app.state::<BriefingCancel>().0.clone();
-    cancel.store(false, Ordering::Relaxed);
+    // A fresh cancel flag per run, so a stop pressed during a prior briefing
+    // cannot abort this one and a second trigger cannot clear this run's
+    // in-flight cancel.
+    let cancel = app
+        .state::<BriefingCancel>()
+        .0
+        .try_begin_run()
+        .ok_or_else(|| "A briefing is already running.".to_string())?;
     let _ = app.emit("briefing-warning", warning);
 
     let app_clone = app.clone();
@@ -89,8 +94,9 @@ pub(crate) fn run_briefing(
             &header,
             min_word_limit,
             max_word_limit,
-            cancel,
+            cancel.clone(),
         );
+        app_clone.state::<BriefingCancel>().0.finish_run(&cancel);
     });
     Ok(())
 }
@@ -98,7 +104,5 @@ pub(crate) fn run_briefing(
 /// Signal the active briefing stream to stop. Safe to call when no stream is running.
 #[tauri::command]
 pub(crate) fn cancel_briefing(app: tauri::AppHandle) {
-    app.state::<BriefingCancel>()
-        .0
-        .store(true, Ordering::Relaxed);
+    app.state::<BriefingCancel>().0.request_cancel();
 }

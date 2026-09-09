@@ -53,6 +53,43 @@ fn session_id_uses_file_stem() {
 }
 
 #[test]
+fn session_id_does_not_collapse_paths_without_a_stem() {
+    // A path with no usable stem must not fall back to one shared literal id,
+    // or every such session would evict the previous one via `append_index`.
+    let a = session_id(Path::new("/tmp/."));
+    let b = session_id(Path::new("/tmp/.."));
+    assert_ne!(a, b, "distinct stemless paths need distinct ids");
+    assert_ne!(a, "unknown");
+    // Idempotent: the same path always hashes to the same id.
+    assert_eq!(a, session_id(Path::new("/tmp/.")));
+}
+
+#[test]
+fn write_session_filenames_are_unique_within_the_same_second() {
+    // The core of the overwrite bug: a batch sweep archives several sessions in
+    // one wall-clock second. With only time+slug in the name they collide and
+    // the second write silently clobbers the first; the session id in the name
+    // keeps them distinct.
+    let dir = tmp_dir("unique_filenames");
+    let src_a = Path::new("/fake/session-aaaa.jsonl");
+    let src_b = Path::new("/fake/session-bbbb.jsonl");
+    let meta_a = sample_meta(src_a);
+    let meta_b = sample_meta(src_b);
+
+    let written_a = write_session(&dir, &meta_a, &sample_output(), fixed_now()).unwrap();
+    let written_b = write_session(&dir, &meta_b, &sample_output(), fixed_now()).unwrap();
+
+    assert_ne!(written_a.path, written_b.path);
+    assert!(written_a.path.exists());
+    assert!(written_b.path.exists());
+
+    let sessions = read_sessions(&dir);
+    assert_eq!(sessions.len(), 2, "both sessions keep their own index row");
+    assert!(is_archived(&dir, "session-aaaa"));
+    assert!(is_archived(&dir, "session-bbbb"));
+}
+
+#[test]
 fn is_archived_false_when_no_index() {
     let dir = tmp_dir("no_index");
     assert!(!is_archived(&dir, "some-id"));
@@ -218,10 +255,95 @@ fn delete_sessions_removes_file_and_index_entry() {
 }
 
 #[test]
+fn delete_sessions_purges_raw_history_and_redaction_backups() {
+    let dir = tmp_dir("delete_private_material");
+    let source = Path::new("/fake/private-session.jsonl");
+    let meta = sample_meta(source);
+    let written = write_session(&dir, &meta, &sample_output(), fixed_now()).unwrap();
+    let raw = dir.join("raw/private-session.jsonl.zst");
+    let superseded = dir.join("raw/superseded/private-session.20260909.jsonl.zst");
+    fs::create_dir_all(superseded.parent().unwrap()).unwrap();
+    fs::write(&raw, "raw secret").unwrap();
+    fs::write(&superseded, "old raw secret").unwrap();
+    let backup = written.path.with_file_name(format!(
+        "{}.bak-20260909",
+        written.path.file_name().unwrap().to_string_lossy()
+    ));
+    fs::write(&backup, "backup secret").unwrap();
+
+    let deleted = delete_sessions(&dir, &[meta.id]).unwrap();
+
+    assert_eq!(deleted, vec!["private-session"]);
+    assert!(!written.path.exists());
+    assert!(!raw.exists());
+    assert!(!superseded.exists());
+    assert!(!backup.exists());
+}
+
+#[test]
 fn delete_sessions_ignores_unknown_ids() {
     let dir = tmp_dir("delete_unknown");
     let deleted = delete_sessions(&dir, &["nonexistent".to_string()]).unwrap();
     assert!(deleted.is_empty());
+}
+
+#[test]
+fn delete_sessions_survives_a_failed_removal_without_desync() {
+    // A `remove_file` failure on one entry (Windows: file locked by an editor
+    // or AV) must not abort the whole batch, and must not leave a row whose
+    // file was already deleted. Here the "undeletable" entry is a directory:
+    // `exists()` is true but `remove_file` errors on every platform.
+    let dir = tmp_dir("delete_partial");
+    fs::create_dir_all(&dir).unwrap();
+
+    for id in ["good-1", "good-2", "stuck"] {
+        fs::write(dir.join(format!("{id}.md")), "body").unwrap();
+    }
+    // Replace the "stuck" file with a directory of the same name so its
+    // removal fails.
+    fs::remove_file(dir.join("stuck.md")).unwrap();
+    fs::create_dir(dir.join("stuck.md")).unwrap();
+
+    let index = serde_json::json!({
+        "sessions": [
+            { "id": "good-1", "project": "p", "date": "2026-01-01", "title": "t",
+              "tool": "Claude Code", "fill_pct": 0.0, "session_type": "building",
+              "error_tags": [], "topic_tags": [], "archive_path": "good-1.md",
+              "source_jsonl": "", "provider": "claude_code" },
+            { "id": "good-2", "project": "p", "date": "2026-01-01", "title": "t",
+              "tool": "Claude Code", "fill_pct": 0.0, "session_type": "building",
+              "error_tags": [], "topic_tags": [], "archive_path": "good-2.md",
+              "source_jsonl": "", "provider": "claude_code" },
+            { "id": "stuck", "project": "p", "date": "2026-01-01", "title": "t",
+              "tool": "Claude Code", "fill_pct": 0.0, "session_type": "building",
+              "error_tags": [], "topic_tags": [], "archive_path": "stuck.md",
+              "source_jsonl": "", "provider": "claude_code" }
+        ]
+    });
+    fs::write(
+        dir.join("index.json"),
+        serde_json::to_string_pretty(&index).unwrap(),
+    )
+    .unwrap();
+
+    let deleted = delete_sessions(
+        &dir,
+        &[
+            "good-1".to_string(),
+            "stuck".to_string(),
+            "good-2".to_string(),
+        ],
+    )
+    .unwrap();
+
+    // The two deletable sessions are gone; the undeletable one is reported as
+    // not deleted and keeps its row (consistent, retryable).
+    assert_eq!(deleted, vec!["good-1", "good-2"]);
+    assert!(!dir.join("good-1.md").exists());
+    assert!(!dir.join("good-2.md").exists());
+    assert!(is_archived(&dir, "stuck"), "failed entry keeps its row");
+    assert!(!is_archived(&dir, "good-1"));
+    assert!(!is_archived(&dir, "good-2"));
 }
 
 #[test]

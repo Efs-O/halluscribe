@@ -29,10 +29,14 @@ pub fn write_session(
     let session_date_str = local_session_timestamp.format("%Y-%m-%d").to_string();
     let slug = tool_slug(&meta.tool);
 
+    // The session id is part of the file name so two sessions swept in the
+    // same second (a batch sweep iterates fast) cannot collide onto the same
+    // path and silently overwrite each other's markdown while the index keeps
+    // two rows pointing at one file.
     let rel = PathBuf::from("sessions")
         .join(&meta.project)
         .join(&sweep_date_str)
-        .join(format!("{time_str}-{slug}-sweep.md"));
+        .join(format!("{time_str}-{slug}-{}-sweep.md", meta.id));
     let abs = archive_dir.join(&rel);
 
     fs::create_dir_all(abs.parent().expect("path has parent"))?;

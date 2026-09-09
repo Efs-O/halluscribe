@@ -3,7 +3,6 @@
 use crate::app_state::SweepCancel;
 use crate::app_support::{archive_dir, default_archive_dir, mark_sweep_success};
 use crate::{scheduler, settings};
-use std::sync::atomic::Ordering;
 use tauri::{Emitter, Manager};
 
 /// Run a sweep immediately ("Run Now" button). Bypasses the time-window check.
@@ -18,28 +17,35 @@ pub(crate) fn trigger_sweep(app: tauri::AppHandle) -> Result<(), String> {
         .to_sweep_config(dir, true)
         .ok_or_else(|| "backend is not configured (check Settings)".to_string())?;
     config.import_only = import_only;
-    let cancel = app.state::<SweepCancel>().0.clone();
-    cancel.store(false, Ordering::Relaxed);
+    // A fresh cancel flag per run: a Cancel issued for a prior sweep can never
+    // be cleared by this trigger, and this run's flag is not shared with the
+    // daily scheduler or a concurrent *Run Now*.
+    let cancel = app
+        .state::<SweepCancel>()
+        .0
+        .try_begin_run()
+        .ok_or_else(|| "A sweep is already running.".to_string())?;
     std::thread::spawn(move || {
-        let result = scheduler::run_sweep(&app, &config, cancel);
+        let result = scheduler::run_sweep(&app, &config, cancel.clone());
         if result.busy {
             let _ = app.emit(
                 "sweep-done",
                 "A sweep or other model job is already running. Try again once it finishes."
                     .to_string(),
             );
-            return;
-        }
-        let marker_errors = if result.completed_successfully() {
-            mark_sweep_success(&app)
-                .err()
-                .into_iter()
-                .collect::<Vec<_>>()
         } else {
-            Vec::new()
-        };
-        let message = scheduler::sweep_done_message(&result, &marker_errors);
-        let _ = app.emit("sweep-done", message);
+            let marker_errors = if result.completed_successfully() {
+                mark_sweep_success(&app)
+                    .err()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let message = scheduler::sweep_done_message(&result, &marker_errors);
+            let _ = app.emit("sweep-done", message);
+        }
+        app.state::<SweepCancel>().0.finish_run(&cancel);
     });
     Ok(())
 }
@@ -47,5 +53,5 @@ pub(crate) fn trigger_sweep(app: tauri::AppHandle) -> Result<(), String> {
 /// Signal the active sweep to stop after the current session finishes.
 #[tauri::command]
 pub(crate) fn cancel_sweep(app: tauri::AppHandle) {
-    app.state::<SweepCancel>().0.store(true, Ordering::Relaxed);
+    app.state::<SweepCancel>().0.request_cancel();
 }
