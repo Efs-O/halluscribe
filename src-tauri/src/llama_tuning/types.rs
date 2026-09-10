@@ -82,8 +82,8 @@ impl SpeculativeTuning {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ArchTuning {
-    /// `--batch-size`.
-    pub batch_size: u32,
+    /// Forge-style name for llama.cpp's `--batch-size`.
+    pub n_batch: u32,
     /// `--ubatch-size`. Unset emits no flag, leaving llama.cpp's own default.
     pub ubatch_size: Option<u32>,
     /// `--cache-type-k`, e.g. `q8_0`, `q4_0`, `f16`.
@@ -122,7 +122,7 @@ pub struct ArchTuning {
 impl Default for ArchTuning {
     fn default() -> Self {
         Self {
-            batch_size: 512,
+            n_batch: 512,
             ubatch_size: None,
             cache_type_k: "q8_0".to_string(),
             cache_type_v: "q8_0".to_string(),
@@ -144,10 +144,8 @@ impl ArchTuning {
     /// Reject values llama-server would only reject after spawning, when its
     /// stderr is going to a log nobody is reading.
     pub fn validate(&self, key: &str) -> Result<(), String> {
-        if self.batch_size == 0 {
-            return Err(format!(
-                "llama-tuning.yaml: {key}.batch_size must be above 0"
-            ));
+        if self.n_batch == 0 {
+            return Err(format!("llama-tuning.yaml: {key}.n_batch must be above 0"));
         }
         if self.parallel == 0 {
             return Err(format!("llama-tuning.yaml: {key}.parallel must be above 0"));
@@ -175,7 +173,7 @@ impl ArchTuning {
     pub fn apply(&self, command: &mut Command) {
         command.args([
             "--batch-size",
-            &self.batch_size.to_string(),
+            &self.n_batch.to_string(),
             "--cache-type-k",
             &self.cache_type_k,
             "--cache-type-v",

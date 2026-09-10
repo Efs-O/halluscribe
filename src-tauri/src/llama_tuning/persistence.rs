@@ -80,7 +80,7 @@ mod tests {
         // quietly quarter its indexing batch, so it needs an entry of its own.
         let tuning: TuningFile = serde_yaml::from_str(TEMPLATE).expect("template must parse");
         let embedding = &tuning.architectures["gemma-embedding"];
-        assert_eq!(embedding.batch_size, 4096);
+        assert_eq!(embedding.n_batch, 4096);
         assert_eq!(embedding.ubatch_size, Some(4096));
         assert_eq!(embedding.cache_type_k, "f16");
         assert_eq!(embedding.cache_type_v, "f16");

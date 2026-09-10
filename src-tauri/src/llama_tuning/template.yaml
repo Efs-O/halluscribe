@@ -54,7 +54,7 @@
 # built-in values - conservative, and what every model used before this file
 # existed.
 default:
-  batch_size: 512
+  n_batch: 512
   cache_type_k: q8_0
   cache_type_v: q8_0
   parallel: 1
@@ -79,7 +79,7 @@ architectures:
   # `gemma4`, so one block covers the family.
   # ---------------------------------------------------------------------------
   gemma4:
-    batch_size: 512
+    n_batch: 512
     # q4_0 rather than q8_0: halves KV cost, which is what buys back the context
     # the bigger quants spend on weights. Raise to q8_0 only if you have VRAM to
     # spare and can measure a quality difference.
@@ -134,7 +134,7 @@ architectures:
   # ---------------------------------------------------------------------------
   qwen35:
     # Matches Forge's qwen38-27b-mtp-ud-q4kxl-vision configuration.
-    batch_size: 4096
+    n_batch: 4096
     ubatch_size: 4096
     cache_type_k: q8_0
     cache_type_v: q8_0
@@ -200,7 +200,7 @@ architectures:
     # Indexing can submit a complete 4096-token embedding input. Keep both
     # physical batch limits at that context size so an input just above 2048
     # cannot fail before the embedding request begins.
-    batch_size: 4096
+    n_batch: 4096
     ubatch_size: 4096
     # f16 - llama.cpp's own default. The context is small enough that
     # quantising this cache saves little and costs recall precision.
