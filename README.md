@@ -6,7 +6,7 @@
 
 > Turn every AI coding session into a searchable, human-readable log — fully local, zero API cost.
 
-HalluScribe reads the session files written by Claude Code, Codex, Continue, Forge, ChatGPT, Claude.ai, and Gemini, summarises them with a **local model** (Gemma 4 by default), and saves structured Markdown archives to disk. A configurable nightly sweep runs automatically — no real-time hooks, no cloud calls, no data leaves the machine.
+HalluScribe reads coding-session files from Claude Code, Codex, and Forge, plus exported chats from ChatGPT, Claude.ai, Gemini, and Grok. It summarises them with a **local model** (Gemma 4 by default) and saves structured Markdown archives to disk. A configurable nightly sweep runs automatically — no real-time hooks, no cloud calls, and no data leaves the machine unless you explicitly enable an optional web-search provider or export data.
 
 Pair it with **[HalluMeter](https://github.com/Efs-O/hallumeter)** for real-time context-window risk monitoring during active sessions.
 
@@ -40,11 +40,11 @@ Pair it with **[HalluMeter](https://github.com/Efs-O/hallumeter)** for real-time
 |---|---|
 | Claude Code | `~/.claude/projects/**/*.jsonl` |
 | OpenAI Codex | `~/.codex/sessions/**/*.jsonl` |
-| Continue | `~/.continue/dev_data/0.2.0/tokensGenerated.jsonl` |
 | Forge | `~/.cursor/projects/*/agent-transcripts/*/*.jsonl` |
 | ChatGPT | Exported `conversations.json` (configurable path) |
 | Claude.ai | Exported `conversations.json` (configurable path) |
 | Gemini | Exported `My Activity.json` / Takeout archive (configurable path) |
+| Grok | Exported `prod-grok-backend.json` (configurable path) |
 | HalluScribe Chat | Recorded Gemma chat sessions saved within the app |
 
 ---
@@ -202,7 +202,7 @@ Both backends use native function-calling (no prompt-engineering hacks) — vali
 
 ## Download
 
-Go to [Releases](https://github.com/Efs-O/halluscribe/releases) and download the installer for your platform:
+Go to [Releases](https://github.com/Efs-O/halluscribe/releases) and download the latest installer for your platform. The current release is **v0.3.29**.
 
 | Platform | File |
 |---|---|

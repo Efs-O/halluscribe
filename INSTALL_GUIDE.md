@@ -33,8 +33,8 @@ If unsure, download the latest driver from https://www.nvidia.com/drivers
 
 > Use this if you want full control over GPU layers, context size, and quantisation.
 
-1. Download llama-server **build b8783 or newer** from the llama.cpp releases page.
-   ⚠️ Earlier builds do not support Gemma 4 tool-calling — do not use them.
+1. Download a current `llama-server` build from the llama.cpp releases page.
+   Use a build that supports your chosen model and native tool calling.
 2. Download a Gemma 4 26B GGUF model file. Recommended quantisation: `Q3_K_M` or `Q4_K_M`.
    Available at: https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF
 3. Open HalluScribe → SETTINGS → set Backend to **llama.cpp**
@@ -67,10 +67,9 @@ Unified memory means the model shares RAM between CPU and GPU seamlessly.
 
 ### Option B — llama-server on Mac
 
-> ✅ **Confirmed working** as of April 2026. llama.cpp added Gemma 4 support at
-> model launch (April 2, 2026). Metal is enabled by default on macOS — no extra flags needed.
+> Metal is enabled by default in current macOS llama.cpp builds — no extra flags needed.
 
-1. Download llama-server b8783+ (pre-built macOS binary or build from source)
+1. Download a current llama-server build (pre-built macOS binary or build from source)
 2. Metal support is on by default — no `-DGGML_METAL` flag needed
 3. Follow the same steps as Windows Option B for paths and SETTINGS
 4. Recommended build flag if compiling from source: `-DGGML_CUDA=OFF` (Metal used instead)
@@ -102,7 +101,7 @@ https://rocm.docs.amd.com — then Ollama will use it automatically.
 
 ### Option B — llama-server (Advanced)
 
-Same as Windows Option B. Download b8783+ binary for Linux, or build from source.
+Same as Windows Option B. Download a current binary for Linux, or build from source.
 CUDA and ROCm builds are both available in the llama.cpp releases.
 
 ---

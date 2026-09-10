@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.29] - 2026-09-10
+
+### Added
+- Grok chat-export import support, with discovery for common extracted-export layouts
+- Configurable llama.cpp GPU placement, model-specific MTP drafter selection, and sampling controls
+- Archive analysis, provider session counts, token counts, and active-agent status in the UI
+
+### Changed
+- Import-path ownership is now explicit per workspace; host-level machine settings stay with the host
+- Local-agent archive handling and project labels are more accurate; Continue import support was removed
+
+### Fixed
+- Archive, settings, workspace, and embedding persistence now report corrupt or incomplete state rather than silently treating it as empty
+- Llama-server lifecycle, diagnostic logs, raw-transcript versioning, search cache invalidation, and profile refresh cancellation
+- Sweep and capture failures remain visible instead of being reported as successful completion
+
 ## [0.3.19] - 2026-08-14
 
 ### Fixed
