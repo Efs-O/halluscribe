@@ -135,7 +135,7 @@ architectures:
   qwen35:
     # Matches Forge's qwen38-27b-mtp-ud-q4kxl-vision configuration.
     batch_size: 4096
-    ubatch_size: 512
+    ubatch_size: 4096
     cache_type_k: q8_0
     cache_type_v: q8_0
     parallel: 1
