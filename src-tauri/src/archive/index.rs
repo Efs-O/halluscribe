@@ -6,6 +6,20 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 
+/// Outcome of a best-effort bulk delete. A failure leaves that session's index
+/// row and private files intact, so it can safely be retried from the UI.
+#[derive(Debug, Default, Serialize)]
+pub struct DeleteSessionsResult {
+    pub deleted_ids: Vec<String>,
+    pub failures: Vec<DeleteSessionFailure>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteSessionFailure {
+    pub id: String,
+    pub error: String,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Index {
     sessions: Vec<IndexEntry>,
@@ -25,6 +39,40 @@ pub fn session_id(source: &Path) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     source.hash(&mut hasher);
     format!("unknown-{:016x}", hasher.finish())
+}
+
+/// Resolve a proposed session ID against durable archive ownership. A legacy
+/// bare stem remains its existing owner's ID; a different source requesting
+/// that stem receives a deterministic suffix. The suffix is persisted by the
+/// normal index/manifest writes, so its `DefaultHasher` value is never later
+/// recomputed as the authority for an existing session.
+pub fn resolve_session_id(archive_dir: &Path, source: &Path, proposed: &str) -> String {
+    let source_text = source.to_string_lossy();
+    let index_owner = load_index(archive_dir).ok().and_then(|index| {
+        index
+            .sessions
+            .into_iter()
+            .find(|entry| entry.id == proposed)
+            .map(|entry| entry.source_jsonl)
+    });
+    let manifest_owner = super::captured_manifest::load_captured(archive_dir)
+        .get(proposed)
+        .map(|record| record.source_path.clone());
+    let owners = [index_owner, manifest_owner];
+    if owners.iter().flatten().any(|owner| owner == &source_text) {
+        return proposed.to_string();
+    }
+    if owners.iter().flatten().next().is_some() {
+        format!("{proposed}-{}", path_hash(source))
+    } else {
+        proposed.to_string()
+    }
+}
+
+fn path_hash(source: &Path) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    source.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 /// Serialise the read-modify-write cycle of every index mutation within this
@@ -56,24 +104,15 @@ pub fn find_session(archive_dir: &Path, id: &str) -> Option<IndexEntry> {
         .find(|entry| entry.id == id)
 }
 
-/// Size and modification-time of the archive's `index.json`, as a cheap
-/// "has this archive changed" stamp. Used by the search body cache to notice a
-/// sweep run by another process without stat-ing every session file. A missing
-/// or unreadable index stamps as `(0, 0)`, which simply never matches a real
-/// one and so errs towards rebuilding.
-pub type IndexStamp = (u64, u64);
+/// Exact `index.json` bytes, used as a cross-process cache freshness stamp.
+/// `None` is deliberately never considered fresh by the body cache, so a
+/// missing or unreadable index conservatively rebuilds rather than serving a
+/// potentially stale corpus. Keeping the bytes rather than a metadata tuple
+/// catches equal-length, same-timestamp rewrites without a new hash dependency.
+pub type IndexStamp = Option<Vec<u8>>;
 
 pub fn index_stamp(archive_dir: &Path) -> IndexStamp {
-    let Ok(meta) = std::fs::metadata(archive_dir.join("index.json")) else {
-        return (0, 0);
-    };
-    let modified = meta
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|since| since.as_secs())
-        .unwrap_or(0);
-    (meta.len(), modified)
+    std::fs::read(archive_dir.join("index.json")).ok()
 }
 
 pub fn read_sessions(archive_dir: &Path) -> Vec<IndexEntry> {
@@ -102,10 +141,13 @@ pub fn archived_source_size(archive_dir: &Path, id: &str) -> Option<u64> {
     }
 }
 
-pub fn delete_sessions(archive_dir: &Path, ids: &[String]) -> Result<Vec<String>, ArchiveError> {
+pub fn delete_sessions(
+    archive_dir: &Path,
+    ids: &[String],
+) -> Result<DeleteSessionsResult, ArchiveError> {
     let _guard = index_mutation_lock();
     let mut idx = load_index(archive_dir)?;
-    let mut deleted = Vec::new();
+    let mut result = DeleteSessionsResult::default();
     for id in ids {
         if let Some(pos) = idx.sessions.iter().position(|e| &e.id == id) {
             let md = {
@@ -122,6 +164,10 @@ pub fn delete_sessions(archive_dir: &Path, ids: &[String]) -> Result<Vec<String>
             let entry = &idx.sessions[pos];
             if let Err(error) = remove_private_session_files(archive_dir, entry, &md) {
                 eprintln!("[archive] could not purge private files for {id}: {error}");
+                result.failures.push(DeleteSessionFailure {
+                    id: id.clone(),
+                    error: error.to_string(),
+                });
                 continue;
             }
             if md.exists() {
@@ -130,17 +176,21 @@ pub fn delete_sessions(archive_dir: &Path, ids: &[String]) -> Result<Vec<String>
                         "[archive] could not remove session file {}: {error}",
                         md.display()
                     );
+                    result.failures.push(DeleteSessionFailure {
+                        id: id.clone(),
+                        error: error.to_string(),
+                    });
                     continue;
                 }
             }
             idx.sessions.remove(pos);
-            deleted.push(id.clone());
+            result.deleted_ids.push(id.clone());
         }
     }
-    if !deleted.is_empty() {
+    if !result.deleted_ids.is_empty() {
         save_index(archive_dir, &idx)?;
     }
-    Ok(deleted)
+    Ok(result)
 }
 
 pub(super) fn archive_path(archive_dir: &Path, relative: &str) -> Result<PathBuf, ArchiveError> {
@@ -301,7 +351,11 @@ mod tests {
     }
 
     fn test_dir(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("halluscribe_index_test_{name}"));
+        let d = std::env::temp_dir().join(format!(
+            "halluscribe_index_test_{}_{}",
+            std::process::id(),
+            name
+        ));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
@@ -345,6 +399,22 @@ mod tests {
         }
         let entries = read_sessions(&dir);
         assert_eq!(entries.len(), 8, "every concurrent append must survive");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collision_resolver_keeps_legacy_owner_and_suffixes_the_new_source() {
+        let dir = test_dir("collision_resolver");
+        let first = Path::new("C:/one/session.jsonl");
+        let second = Path::new("C:/two/session.jsonl");
+        let mut legacy = sample_entry("session");
+        legacy.source_jsonl = first.to_string_lossy().to_string();
+        append_index(&dir, legacy).unwrap();
+
+        assert_eq!(resolve_session_id(&dir, first, "session"), "session");
+        let second_id = resolve_session_id(&dir, second, "session");
+        assert!(second_id.starts_with("session-"));
+        assert_ne!(second_id, "session");
         let _ = fs::remove_dir_all(&dir);
     }
 }

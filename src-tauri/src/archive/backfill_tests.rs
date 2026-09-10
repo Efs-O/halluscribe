@@ -8,7 +8,11 @@ use std::fs;
 use std::path::Path;
 
 fn tmp_dir(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("halluscribe_backfill_test_{name}"));
+    let dir = std::env::temp_dir().join(format!(
+        "halluscribe_backfill_test_{}_{}",
+        std::process::id(),
+        name
+    ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir

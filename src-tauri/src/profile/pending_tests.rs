@@ -6,7 +6,11 @@ use std::fs;
 use std::path::PathBuf;
 
 fn tmp_dir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("halluscribe_profile_pending_{name}"));
+    let d = std::env::temp_dir().join(format!(
+        "halluscribe_profile_pending_{}_{}",
+        std::process::id(),
+        name
+    ));
     let _ = fs::remove_dir_all(&d);
     fs::create_dir_all(&d).unwrap();
     d

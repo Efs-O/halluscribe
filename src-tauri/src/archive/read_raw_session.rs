@@ -99,7 +99,11 @@ mod tests {
     use crate::archive::preserve_raw;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("halluscribe_read_raw_session_test_{name}"));
+        let dir = std::env::temp_dir().join(format!(
+            "halluscribe_read_raw_session_test_{}_{}",
+            std::process::id(),
+            name
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir

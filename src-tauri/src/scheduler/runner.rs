@@ -1,7 +1,9 @@
 // HalluScribe - scheduled sweep execution and completion reporting.
 
 use super::eligibility::is_low_signal_codex_session;
-use super::helpers::{backend_display_name, is_sweep_due, provider_display_name};
+use super::helpers::{
+    backend_display_name, is_sweep_due, model_display_name, provider_display_name,
+};
 use super::{SweepConfig, SweepProgress, SweepResult};
 use crate::archive::{self, ArchiveError, SessionMeta};
 use crate::gemma::GemmaError;
@@ -100,7 +102,9 @@ pub fn run_sweep(
             continue;
         }
 
-        for session in parsed_sessions {
+        for mut session in parsed_sessions {
+            session.id =
+                archive::resolve_session_id(&config.archive_dir, &session.source_path, &session.id);
             if is_unchanged_session(&config.archive_dir, &session) {
                 result.skipped += 1;
                 continue;
@@ -252,6 +256,7 @@ pub fn run_sweep(
             output_tokens: session.tokens.output,
             tokens_estimated: session.tokens.estimated,
             backend: backend_display_name(&config.backend),
+            model: model_display_name(&config.backend),
             session_timestamp: session.created_at,
             updated_at: session.updated_at,
             transcript_hash: session.transcript_hash.clone(),

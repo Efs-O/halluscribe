@@ -7,14 +7,19 @@ use crate::settings::HalluScribeSettings;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex, OnceLock,
+};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const STARTUP_TIMEOUT_SECS: u32 = 60;
 const EMBEDDING_TIMEOUT_SECS: u64 = 120;
 const EMBEDDING_MODEL_NAME: &str = "embeddinggemma-300m";
 const QUERY_PREFIX: &str = "task: search result | query: ";
 const DEFAULT_DOCUMENT_TITLE: &str = "none";
+const IDLE_TIMEOUT_SECS: u64 = 300;
 
 enum EmbedMode {
     Query,
@@ -55,21 +60,21 @@ impl EmbeddingRunner {
     }
 }
 
-impl Drop for EmbeddingRunner {
-    fn drop(&mut self) {
-        kill_embedding_server();
-    }
+struct ActiveEmbedding {
+    child: Child,
+    runtime: EmbeddingRuntime,
+    model_name: String,
 }
 
-fn active_child() -> &'static Mutex<Option<Child>> {
-    static CHILD: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
+fn active_child() -> &'static Mutex<Option<ActiveEmbedding>> {
+    static CHILD: OnceLock<Mutex<Option<ActiveEmbedding>>> = OnceLock::new();
     CHILD.get_or_init(|| Mutex::new(None))
 }
 
 /// Take the active-child lock, recovering from poison: a holder that died
 /// while killing a child must not wedge every later start/stop. Extracted so
 /// the recovery is directly testable.
-fn lock_active_child() -> std::sync::MutexGuard<'static, Option<Child>> {
+fn lock_active_child() -> std::sync::MutexGuard<'static, Option<ActiveEmbedding>> {
     active_child()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -77,17 +82,70 @@ fn lock_active_child() -> std::sync::MutexGuard<'static, Option<Child>> {
 
 pub fn kill_embedding_server() {
     let mut guard = lock_active_child();
-    if let Some(mut child) = guard.take() {
-        let pid = child.id();
-        let _ = child.kill();
+    if let Some(mut active) = guard.take() {
+        let pid = active.child.id();
+        let _ = active.child.kill();
         crate::llama_pids::unregister(pid);
     }
 }
 
+fn last_activity() -> &'static AtomicU64 {
+    static LAST: OnceLock<AtomicU64> = OnceLock::new();
+    LAST.get_or_init(|| AtomicU64::new(0))
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|time| time.as_secs())
+        .unwrap_or(0)
+}
+
+fn mark_active() {
+    last_activity().store(now_secs(), Ordering::Relaxed);
+    static STARTED: OnceLock<()> = OnceLock::new();
+    STARTED.get_or_init(|| {
+        let _ = thread::Builder::new()
+            .name("embedding-idle-watchdog".into())
+            .spawn(|| loop {
+                thread::sleep(Duration::from_secs(30));
+                let last = last_activity().load(Ordering::Relaxed);
+                if last == 0 || now_secs().saturating_sub(last) < IDLE_TIMEOUT_SECS {
+                    continue;
+                }
+                if let Some(_guard) = crate::infer_lock::try_acquire() {
+                    kill_embedding_server();
+                    last_activity().store(0, Ordering::Relaxed);
+                }
+            });
+    });
+}
+
 pub fn start_runner(settings: &HalluScribeSettings) -> Result<EmbeddingRunner, String> {
+    mark_active();
     let runtime = embedding_runtime(settings)?;
     let model_name = embedding_model_name(settings)?;
-    let port = llama_runtime::find_free_port(runtime.port);
+    let mut guard = lock_active_child();
+    if let Some(active) = guard.as_mut() {
+        if active
+            .child
+            .try_wait()
+            .map_err(|error| error.to_string())?
+            .is_none()
+            && active.runtime.same_identity(&runtime)
+        {
+            return Ok(EmbeddingRunner {
+                port: active.runtime.port,
+                model_name: active.model_name.clone(),
+            });
+        }
+    }
+    if let Some(mut old) = guard.take() {
+        let pid = old.child.id();
+        let _ = old.child.kill();
+        crate::llama_pids::unregister(pid);
+    }
+    let port = llama_runtime::find_free_port(runtime.port)?;
     let runtime = EmbeddingRuntime { port, ..runtime };
     // Reap a llama-server this app orphaned on a prior hard-kill so it frees
     // VRAM before we load the embedding model (OPS-1).
@@ -101,13 +159,11 @@ pub fn start_runner(settings: &HalluScribeSettings) -> Result<EmbeddingRunner, S
     // Recover from a poisoned lock rather than panicking the command thread:
     // a prior holder that died inside `child.kill()`/unregister must not wedge
     // every subsequent `start_runner`. Mirrors `kill_embedding_server`.
-    let mut guard = lock_active_child();
-    if let Some(mut old) = guard.take() {
-        let pid = old.id();
-        let _ = old.kill();
-        crate::llama_pids::unregister(pid);
-    }
-    *guard = Some(child);
+    *guard = Some(ActiveEmbedding {
+        child,
+        runtime: runtime.clone(),
+        model_name: model_name.clone(),
+    });
     Ok(EmbeddingRunner { port, model_name })
 }
 
@@ -290,11 +346,18 @@ fn wait_for_server(port: u16, child: &mut Child) -> Result<(), String> {
     )
 }
 
+#[derive(Clone)]
 struct EmbeddingRuntime {
     bin: PathBuf,
     model: PathBuf,
     port: u16,
     gpu: GpuConfig,
+}
+
+impl EmbeddingRuntime {
+    fn same_identity(&self, other: &Self) -> bool {
+        self.bin == other.bin && self.model == other.model && self.gpu == other.gpu
+    }
 }
 
 #[cfg(test)]

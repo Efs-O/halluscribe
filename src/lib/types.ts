@@ -67,7 +67,6 @@ export interface HalluScribeSettings {
   forge_sessions_path: string;
   scheduled_processing_enabled: boolean;
   schedule_time: string;
-  last_auto_sweep_attempt_date: string;
   idle_threshold_mins: number;
   first_run: boolean;
   ctx_size: number;

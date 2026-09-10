@@ -92,10 +92,13 @@ pub struct HalluScribeSettings {
     /// per day, any time at or after `schedule_time`, rather than in a single
     /// 60-second window (audit A-2).
     pub last_sweep_date: String,
-    /// Date (`YYYY-MM-DD`, local) when the scheduled runner most recently made
-    /// its one automatic attempt. This remains separate from `last_sweep_date`:
-    /// a failed or busy automatic run is still an attempt, not a success.
-    pub last_auto_sweep_attempt_date: String,
+    /// RFC 3339 timestamp of the latest automatic attempt. This is scheduler-
+    /// owned state and is deliberately not exposed to the frontend.
+    pub last_auto_sweep_attempt_at: String,
+    /// Number of retry attempts consumed after today's initial automatic run.
+    pub auto_sweep_retry_count: u8,
+    /// Local `YYYY-MM-DD` on which automatic retries were exhausted.
+    pub auto_sweep_exhausted_date: String,
     pub idle_threshold_mins: u32,
     pub first_run: bool,
     pub ctx_size: u32,
@@ -166,7 +169,9 @@ impl Default for HalluScribeSettings {
             scheduled_processing_enabled: false,
             schedule_time: "02:00".to_string(),
             last_sweep_date: String::new(),
-            last_auto_sweep_attempt_date: String::new(),
+            last_auto_sweep_attempt_at: String::new(),
+            auto_sweep_retry_count: 0,
+            auto_sweep_exhausted_date: String::new(),
             idle_threshold_mins: 30,
             first_run: true,
             ctx_size: 0,

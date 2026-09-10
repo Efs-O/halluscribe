@@ -18,7 +18,7 @@ pub use analytics::{
     ProviderSessionCounts,
 };
 pub use body_cache::invalidate as invalidate_body_cache;
-pub(crate) use content::{body_contains, body_find};
+pub(crate) use content::body_contains;
 pub(crate) use filtering::matches_params;
 pub use params::SearchParams;
 pub use raw::{search_raw, RawExcerpt, RawSearchError, RawSearchResult, RawSessionMatches};
@@ -56,6 +56,7 @@ pub fn search_sessions_in_scope(
 ) -> Vec<IndexEntry> {
     let limit = params.limit.unwrap_or(20).min(30);
     let mut sessions = read_sessions(archive_dir);
+    let stamp = body_cache::stamp(archive_dir);
     sessions.sort_by_key(|s| std::cmp::Reverse(s.date.clone()));
     sessions
         .into_iter()
@@ -64,7 +65,7 @@ pub fn search_sessions_in_scope(
                 .map(|ids| ids.contains(&entry.id))
                 .unwrap_or(true)
         })
-        .filter(|entry| filtering::matches_params(archive_dir, entry, params))
+        .filter(|entry| filtering::matches_params_with_stamp(archive_dir, entry, params, &stamp))
         .take(limit)
         .collect()
 }
@@ -81,6 +82,7 @@ pub fn search_sessions_page(
     let limit = params.limit.unwrap_or(20).min(30);
     let offset = params.offset.unwrap_or(0);
     let mut sessions = read_sessions(archive_dir);
+    let stamp = body_cache::stamp(archive_dir);
     sessions.sort_by_key(|s| std::cmp::Reverse(s.date.clone()));
     // Sessions actually examined = everything in the allowed scope (the whole
     // archive when unscoped). Counted before the query filter so we can report
@@ -100,7 +102,8 @@ pub fn search_sessions_page(
     let mut matched: Vec<(u32, IndexEntry)> = in_scope
         .into_iter()
         .filter_map(|entry| {
-            filtering::match_score(archive_dir, &entry, params).map(|score| (score, entry))
+            filtering::match_score_with_stamp(archive_dir, &entry, params, &stamp)
+                .map(|score| (score, entry))
         })
         .collect();
     matched.sort_by(|(score_a, entry_a), (score_b, entry_b)| {
@@ -136,9 +139,10 @@ pub fn search_fulltext(archive_dir: &Path, query: &str) -> Vec<IndexEntry> {
         return all;
     }
 
+    let stamp = body_cache::stamp(archive_dir);
     let mut results: Vec<IndexEntry> = read_sessions(archive_dir)
         .into_iter()
-        .filter(|entry| content::matches_fulltext(archive_dir, entry, &q))
+        .filter(|entry| content::matches_fulltext_with_stamp(archive_dir, entry, &q, &stamp))
         .collect();
     results.sort_by_key(|s| std::cmp::Reverse(s.date.clone()));
     results

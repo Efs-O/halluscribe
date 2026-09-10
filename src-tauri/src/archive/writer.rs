@@ -120,7 +120,7 @@ fn build_markdown(
          {summary}\n\n\
          {highlights}\
          ---\n\
-         *Archived by HalluScribe - Gemma 4 26B via {backend}*\n",
+         *Archived by HalluScribe - {model} via {backend}*\n",
         tool = meta.tool,
         provider = meta.provider,
         session_dt = session_dt.format("%Y-%m-%d %H:%M %:z"),
@@ -143,6 +143,7 @@ fn build_markdown(
         summary = output.summary,
         highlights = highlights_section(&output.verbatim_highlights),
         backend = meta.backend,
+        model = meta.model,
     )
 }
 

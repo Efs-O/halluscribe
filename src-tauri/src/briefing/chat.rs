@@ -54,6 +54,7 @@ pub(crate) fn run_chat_turn(
         let _ = app.emit("chat-done", ());
         return;
     };
+    crate::retrieval::kill_embedding_server();
     idle::mark_active();
     let tools = tools::chat_tools(&runtime);
     let mut messages = initial_messages;

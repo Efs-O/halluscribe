@@ -44,7 +44,7 @@ pub(crate) fn stream(
     let port = match server::reusable_port(&spec) {
         Some(port) => port,
         None => {
-            let free = llama_runtime::find_free_port(port);
+            let free = llama_runtime::find_free_port(port)?;
             // Reap a llama-server this app orphaned on a prior hard-kill so it frees
             // VRAM before we load the chat model (OPS-1).
             crate::llama_pids::reap_orphans();

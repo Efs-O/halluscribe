@@ -15,6 +15,7 @@ pub struct SessionMeta {
     pub output_tokens: u64,
     pub tokens_estimated: bool,
     pub backend: String,
+    pub model: String,
     pub session_timestamp: DateTime<Utc>,
     pub updated_at: Option<DateTime<Utc>>,
     pub transcript_hash: String,

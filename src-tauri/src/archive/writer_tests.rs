@@ -22,6 +22,7 @@ fn sample_meta(source: &Path) -> SessionMeta {
         output_tokens: 0,
         tokens_estimated: true,
         backend: "llama.cpp".into(),
+        model: "test-model.gguf".into(),
         session_timestamp: fixed_now(),
         updated_at: None,
         transcript_hash: "abc123".into(),
@@ -41,7 +42,7 @@ fn sample_output() -> GemmaOutput {
 }
 
 fn tmp_dir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("halluscribe_test_{name}"));
+    let d = std::env::temp_dir().join(format!("halluscribe_test_{}_{}", std::process::id(), name));
     let _ = fs::remove_dir_all(&d);
     d
 }
@@ -249,7 +250,8 @@ fn delete_sessions_removes_file_and_index_entry() {
     let written = write_session(&dir, &meta, &sample_output(), fixed_now()).unwrap();
     assert!(written.path.exists());
     let deleted = delete_sessions(&dir, &["to-delete".to_string()]).unwrap();
-    assert_eq!(deleted, vec!["to-delete"]);
+    assert_eq!(deleted.deleted_ids, vec!["to-delete"]);
+    assert!(deleted.failures.is_empty());
     assert!(!written.path.exists());
     assert!(!is_archived(&dir, "to-delete"));
 }
@@ -273,7 +275,8 @@ fn delete_sessions_purges_raw_history_and_redaction_backups() {
 
     let deleted = delete_sessions(&dir, &[meta.id]).unwrap();
 
-    assert_eq!(deleted, vec!["private-session"]);
+    assert_eq!(deleted.deleted_ids, vec!["private-session"]);
+    assert!(deleted.failures.is_empty());
     assert!(!written.path.exists());
     assert!(!raw.exists());
     assert!(!superseded.exists());
@@ -284,7 +287,8 @@ fn delete_sessions_purges_raw_history_and_redaction_backups() {
 fn delete_sessions_ignores_unknown_ids() {
     let dir = tmp_dir("delete_unknown");
     let deleted = delete_sessions(&dir, &["nonexistent".to_string()]).unwrap();
-    assert!(deleted.is_empty());
+    assert!(deleted.deleted_ids.is_empty());
+    assert!(deleted.failures.is_empty());
 }
 
 #[test]
@@ -338,7 +342,9 @@ fn delete_sessions_survives_a_failed_removal_without_desync() {
 
     // The two deletable sessions are gone; the undeletable one is reported as
     // not deleted and keeps its row (consistent, retryable).
-    assert_eq!(deleted, vec!["good-1", "good-2"]);
+    assert_eq!(deleted.deleted_ids, vec!["good-1", "good-2"]);
+    assert_eq!(deleted.failures.len(), 1);
+    assert_eq!(deleted.failures[0].id, "stuck");
     assert!(!dir.join("good-1.md").exists());
     assert!(!dir.join("good-2.md").exists());
     assert!(is_archived(&dir, "stuck"), "failed entry keeps its row");
@@ -369,6 +375,7 @@ fn archived_source_size_stored_and_retrieved() {
         output_tokens: 0,
         tokens_estimated: true,
         backend: "Ollama".into(),
+        model: "test-model".into(),
         session_timestamp: fixed_now(),
         updated_at: None,
         transcript_hash: "hash".into(),

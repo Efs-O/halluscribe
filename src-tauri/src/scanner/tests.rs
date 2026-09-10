@@ -6,11 +6,15 @@ mod tests {
     use super::super::claude::{claude_fill_pct, parse_claude_usage_line};
     use super::super::codex::{codex_fill_pct, parse_codex_token_count};
     use super::super::forge::scan_forge_from_root;
-    use super::super::shared::path_to_session_id;
+    use super::super::shared::{collect_jsonl, mtime_secs, path_to_session_id, SCAN_DEPTH_LIMIT};
     use super::super::{scan_chat_imports, scan_sessions};
     use crate::readers::ChatProvider;
     use crate::settings::HalluScribeSettings;
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{Duration, UNIX_EPOCH},
+    };
     use tempfile::tempdir;
 
     #[test]
@@ -112,6 +116,34 @@ mod tests {
         let a = PathBuf::from("/path/a.jsonl");
         let b = PathBuf::from("/path/b.jsonl");
         assert_ne!(path_to_session_id(&a), path_to_session_id(&b));
+    }
+
+    #[test]
+    fn collect_jsonl_stops_at_the_depth_boundary() {
+        let dir = tempdir().unwrap();
+        let mut at_limit = dir.path().to_path_buf();
+        for index in 0..SCAN_DEPTH_LIMIT {
+            at_limit = at_limit.join(format!("level-{index}"));
+        }
+        fs::create_dir_all(&at_limit).unwrap();
+        fs::write(at_limit.join("included.jsonl"), "{}").unwrap();
+        let beyond_limit = at_limit.join("one-more");
+        fs::create_dir_all(&beyond_limit).unwrap();
+        fs::write(beyond_limit.join("excluded.jsonl"), "{}").unwrap();
+
+        let found = collect_jsonl(dir.path());
+        assert!(found
+            .iter()
+            .any(|(_, path)| path.ends_with("included.jsonl")));
+        assert!(!found
+            .iter()
+            .any(|(_, path)| path.ends_with("excluded.jsonl")));
+    }
+
+    #[test]
+    fn mtime_secs_preserves_pre_epoch_ordering() {
+        assert_eq!(mtime_secs(UNIX_EPOCH - Duration::from_secs(42)), -42);
+        assert_eq!(mtime_secs(UNIX_EPOCH + Duration::from_secs(42)), 42);
     }
 
     #[test]

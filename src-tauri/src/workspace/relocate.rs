@@ -135,7 +135,11 @@ mod tests {
     use crate::workspace::{add_workspace, set_active, Workspace, WorkspaceRegistry};
 
     fn tmp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("halluscribe_relocate_test_{name}"));
+        let dir = std::env::temp_dir().join(format!(
+            "halluscribe_relocate_test_{}_{}",
+            std::process::id(),
+            name
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

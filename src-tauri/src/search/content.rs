@@ -13,7 +13,17 @@ use std::{fs, path::Path};
 /// lives in exactly one place. The body comes from `body_cache`, which holds
 /// the whole corpus in memory; see that module for how staleness is caught.
 pub(crate) fn body_find(archive_dir: &Path, entry: &IndexEntry, needles: &[&str]) -> Vec<bool> {
-    body_cache::with_body(archive_dir, &entry.archive_path, |lower| {
+    let stamp = body_cache::stamp(archive_dir);
+    body_find_with_stamp(archive_dir, entry, needles, &stamp)
+}
+
+pub(crate) fn body_find_with_stamp(
+    archive_dir: &Path,
+    entry: &IndexEntry,
+    needles: &[&str],
+    stamp: &crate::archive::IndexStamp,
+) -> Vec<bool> {
+    body_cache::with_body_for_stamp(archive_dir, &entry.archive_path, stamp, |lower| {
         needles
             .iter()
             .map(|needle| lower.contains(needle))
@@ -27,6 +37,18 @@ pub(crate) fn body_find(archive_dir: &Path, entry: &IndexEntry, needles: &[&str]
 /// `query` must already be lowercased.
 pub(crate) fn body_contains(archive_dir: &Path, entry: &IndexEntry, query: &str) -> bool {
     body_find(archive_dir, entry, &[query])
+        .into_iter()
+        .next()
+        .unwrap_or(false)
+}
+
+pub(crate) fn body_contains_with_stamp(
+    archive_dir: &Path,
+    entry: &IndexEntry,
+    query: &str,
+    stamp: &crate::archive::IndexStamp,
+) -> bool {
+    body_find_with_stamp(archive_dir, entry, &[query], stamp)
         .into_iter()
         .next()
         .unwrap_or(false)
@@ -54,10 +76,16 @@ fn metadata_contains(entry: &IndexEntry, needle: &str) -> bool {
 /// Unquoted multi-word queries are AND-of-tokens: every token is tested
 /// against in-memory metadata first, and the `.md` body is read at most
 /// once - only for the tokens still unmatched after that pass.
-pub(super) fn matches_fulltext(archive_dir: &Path, entry: &IndexEntry, query: &str) -> bool {
+pub(super) fn matches_fulltext_with_stamp(
+    archive_dir: &Path,
+    entry: &IndexEntry,
+    query: &str,
+    stamp: &crate::archive::IndexStamp,
+) -> bool {
     match parse_query(query) {
         ParsedQuery::Phrase(phrase) => {
-            metadata_contains(entry, &phrase) || body_contains(archive_dir, entry, &phrase)
+            metadata_contains(entry, &phrase)
+                || body_contains_with_stamp(archive_dir, entry, &phrase, stamp)
         }
         ParsedQuery::Tokens(tokens) => {
             let unmatched: Vec<&str> = tokens
@@ -68,7 +96,7 @@ pub(super) fn matches_fulltext(archive_dir: &Path, entry: &IndexEntry, query: &s
             if unmatched.is_empty() {
                 return true;
             }
-            body_find(archive_dir, entry, &unmatched)
+            body_find_with_stamp(archive_dir, entry, &unmatched, stamp)
                 .into_iter()
                 .all(|hit| hit)
         }

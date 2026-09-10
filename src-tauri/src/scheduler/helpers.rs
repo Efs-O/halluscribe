@@ -90,6 +90,18 @@ pub(super) fn backend_display_name(backend: &InferenceBackend) -> String {
     .to_string()
 }
 
+/// Display the actual configured model identity in archive provenance.
+pub(super) fn model_display_name(backend: &InferenceBackend) -> String {
+    match backend {
+        InferenceBackend::LlamaCpp { model, .. } => model
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("llama.cpp model")
+            .to_string(),
+        InferenceBackend::Ollama { model, .. } => model.clone(),
+    }
+}
+
 pub(super) fn provider_display_name(provider: &ChatProvider) -> String {
     provider.display_name().to_string()
 }

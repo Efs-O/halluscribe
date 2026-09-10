@@ -4,7 +4,10 @@
 // attempt before inference so a failed or busy run cannot become a retry loop.
 
 use crate::app_state::SweepCancel;
-use crate::app_support::{mark_auto_sweep_attempt, mark_sweep_success, sweep_config};
+use crate::app_support::{
+    automatic_sweep_admission, mark_auto_sweep_attempt, mark_auto_sweep_exhausted,
+    mark_auto_sweep_success, sweep_config,
+};
 use crate::scheduler;
 use chrono::{Datelike, Local, Timelike};
 use tauri::{AppHandle, Emitter, Manager};
@@ -23,6 +26,31 @@ pub(crate) fn start(handle: AppHandle) {
             }
             last_checked_minute = Some(current_minute);
 
+            let admission = match automatic_sweep_admission(&handle) {
+                Ok(admission) => admission,
+                Err(error) => {
+                    eprintln!("[scheduler] could not load automatic sweep state: {error}");
+                    continue;
+                }
+            };
+            match admission {
+                scheduler::AutomaticAdmission::Exhausting => {
+                    if let Err(error) = mark_auto_sweep_exhausted(&handle) {
+                        eprintln!(
+                            "[scheduler] could not persist automatic sweep exhaustion: {error}"
+                        );
+                    } else {
+                        let _ = handle.emit(
+                            "sweep-done",
+                            "Sweep incomplete - automatic retry budget exhausted for today",
+                        );
+                    }
+                    continue;
+                }
+                scheduler::AutomaticAdmission::AttemptInitial
+                | scheduler::AutomaticAdmission::AttemptRetry => {}
+                _ => continue,
+            }
             let config = match sweep_config(&handle, false) {
                 Ok(config) => config,
                 Err(error) => {
@@ -42,13 +70,16 @@ pub(crate) fn start(handle: AppHandle) {
             // It is not shared with a concurrent manual sweep, so neither can
             // clear the other's cancel (the old reset-before-spawn race).
             let Some(cancel) = handle.state::<SweepCancel>().0.try_begin_run() else {
-                eprintln!("[scheduler] skipping automatic sweep because one is already running");
+                let _ = handle.emit(
+                    "sweep-done",
+                    "Sweep incomplete - automatic attempt was busy",
+                );
                 continue;
             };
             let result = scheduler::run_sweep(&handle, &config, cancel.clone());
-            if result.ran {
+            {
                 let marker_errors = if result.completed_successfully() {
-                    mark_sweep_success(&handle)
+                    mark_auto_sweep_success(&handle)
                         .err()
                         .into_iter()
                         .collect::<Vec<_>>()

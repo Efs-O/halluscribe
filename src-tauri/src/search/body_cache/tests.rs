@@ -17,7 +17,11 @@ fn serialised() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn tmp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("halluscribe_body_cache_{name}"));
+    let dir = std::env::temp_dir().join(format!(
+        "halluscribe_body_cache_{}_{}",
+        std::process::id(),
+        name
+    ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("sessions")).unwrap();
     dir

@@ -33,7 +33,11 @@ fn entry(id: &str, archive_path: &str) -> IndexEntry {
 }
 
 fn tmp_dir(name: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("halluscribe_profile_distill_{name}"));
+    let d = std::env::temp_dir().join(format!(
+        "halluscribe_profile_distill_{}_{}",
+        std::process::id(),
+        name
+    ));
     let _ = fs::remove_dir_all(&d);
     fs::create_dir_all(&d).unwrap();
     d

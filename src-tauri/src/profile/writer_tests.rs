@@ -5,7 +5,11 @@ use crate::profile::{ProfileScope, ProfileSection};
 use chrono::TimeZone;
 
 fn tmp_dir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("halluscribe_profile_writer_{name}"));
+    let d = std::env::temp_dir().join(format!(
+        "halluscribe_profile_writer_{}_{}",
+        std::process::id(),
+        name
+    ));
     let _ = fs::remove_dir_all(&d);
     d
 }

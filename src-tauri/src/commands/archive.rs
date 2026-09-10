@@ -51,13 +51,13 @@ pub(crate) fn read_session(app: tauri::AppHandle, session_id: String) -> Result<
 pub(crate) fn delete_sessions(
     app: tauri::AppHandle,
     ids: Vec<String>,
-) -> Result<Vec<String>, String> {
+) -> Result<archive::DeleteSessionsResult, String> {
     let dir = archive_dir(&app)?;
-    let deleted = archive::delete_sessions(&dir, &ids).map_err(|error| error.to_string())?;
-    retrieval::remove_embeddings(&dir, &deleted).map_err(|error| {
+    let result = archive::delete_sessions(&dir, &ids).map_err(|error| error.to_string())?;
+    retrieval::remove_embeddings(&dir, &result.deleted_ids).map_err(|error| {
         format!("archive entries were deleted, but their embeddings could not be removed: {error}")
     })?;
-    Ok(deleted)
+    Ok(result)
 }
 
 /// Preview a redaction: count occurrences and show excerpts, without writing anything.

@@ -67,23 +67,40 @@ fn load(archive_dir: &Path) -> HashMap<String, String> {
 /// if the cache is cold or stale. `None` when that session has no readable
 /// body. Switching workspace archives rebuilds rather than merging: one
 /// archive's bodies must never answer another's search.
+#[cfg(test)]
 pub(super) fn with_body<R>(
     archive_dir: &Path,
     archive_path: &str,
     test: impl FnOnce(&str) -> R,
 ) -> Option<R> {
     let stamp = index_stamp(archive_dir);
+    with_body_for_stamp(archive_dir, archive_path, &stamp, test)
+}
+
+/// Return one content stamp for an entire search pass. Callers that inspect N
+/// entries pass this to `with_body_for_stamp`, amortising a full index read to
+/// one read rather than N reads.
+pub(super) fn stamp(archive_dir: &Path) -> IndexStamp {
+    index_stamp(archive_dir)
+}
+
+pub(super) fn with_body_for_stamp<R>(
+    archive_dir: &Path,
+    archive_path: &str,
+    stamp: &IndexStamp,
+    test: impl FnOnce(&str) -> R,
+) -> Option<R> {
     let mut guard = cache()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let fresh = guard
-        .as_ref()
-        .is_some_and(|cached| cached.archive_dir == archive_dir && cached.stamp == stamp);
+    let fresh = guard.as_ref().is_some_and(|cached| {
+        stamp.is_some() && cached.archive_dir == archive_dir && cached.stamp == *stamp
+    });
     if !fresh {
         *guard = Some(Cached {
             archive_dir: archive_dir.to_path_buf(),
-            stamp,
+            stamp: stamp.clone(),
             bodies: load(archive_dir),
         });
     }

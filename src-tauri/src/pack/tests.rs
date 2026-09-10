@@ -10,7 +10,8 @@ fn fixed_now() -> DateTime<Utc> {
 }
 
 fn tmp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("halluscribe_pack_{name}"));
+    let dir =
+        std::env::temp_dir().join(format!("halluscribe_pack_{}_{}", std::process::id(), name));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

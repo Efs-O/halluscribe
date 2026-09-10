@@ -30,9 +30,30 @@ pub fn try_acquire() -> Option<InferenceGuard> {
     match inference_mutex().try_lock() {
         Ok(guard) => Some(InferenceGuard(guard)),
         Err(TryLockError::WouldBlock) => None,
-        Err(TryLockError::Poisoned(poison)) => Some(InferenceGuard(poison.into_inner())),
+        Err(TryLockError::Poisoned(poison)) => {
+            reconcile_after_panic();
+            inference_mutex().clear_poison();
+            Some(InferenceGuard(poison.into_inner()))
+        }
     }
 }
+
+/// A poisoned mutex proves an inference holder panicked. Reclaim every model
+/// process owned by this app before handing its recovered guard to new work.
+fn reconcile_after_panic() {
+    #[cfg(test)]
+    RECOVERY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    crate::briefing::kill_server();
+    crate::retrieval::kill_embedding_server();
+    crate::llama_pids::reap_orphans();
+    crate::llama_runtime::record_diagnostic(
+        "inference-lock",
+        "recovered poisoned lock; reclaimed managed inference processes",
+    );
+}
+
+#[cfg(test)]
+static RECOVERY_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// Take exclusive inference access for a *batch* job (the sweep, a profile
 /// refresh) and reclaim the warm interactive server before the caller loads a
@@ -53,12 +74,14 @@ pub fn try_acquire() -> Option<InferenceGuard> {
 pub fn acquire_for_batch() -> Option<InferenceGuard> {
     let guard = try_acquire()?;
     crate::briefing::kill_server();
+    crate::retrieval::kill_embedding_server();
     Some(guard)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{acquire_for_batch, try_acquire};
+    use super::{acquire_for_batch, inference_mutex, try_acquire, RECOVERY_COUNT};
+    use std::sync::atomic::Ordering;
 
     // Deliberately ONE test: the lock is process-wide, so a second #[test]
     // taking it would race this one under cargo's parallel test runner.
@@ -91,5 +114,15 @@ mod tests {
             try_acquire().is_some(),
             "acquire should succeed again once the batch guard is dropped"
         );
+
+        RECOVERY_COUNT.store(0, Ordering::Relaxed);
+        std::panic::catch_unwind(|| {
+            let _guard = inference_mutex().lock().unwrap();
+            panic!("intentional poison");
+        })
+        .expect_err("intentional poison must panic");
+        let recovered = try_acquire().expect("poisoned lock recovers");
+        assert_eq!(RECOVERY_COUNT.load(Ordering::Relaxed), 1);
+        drop(recovered);
     }
 }

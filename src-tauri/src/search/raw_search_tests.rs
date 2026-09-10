@@ -13,7 +13,11 @@ struct TestEntry<'a> {
 }
 
 fn tmp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("halluscribe_raw_search_test_{name}"));
+    let dir = std::env::temp_dir().join(format!(
+        "halluscribe_raw_search_test_{}_{}",
+        std::process::id(),
+        name
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("raw")).unwrap();
     dir
@@ -220,7 +224,10 @@ fn allowed_ids_limit_matches_and_all_coverage_counters() {
 
 #[test]
 fn rejects_empty_query_before_reading_the_archive() {
-    let missing_dir = std::env::temp_dir().join("halluscribe_raw_search_missing_archive");
+    let missing_dir = std::env::temp_dir().join(format!(
+        "halluscribe_raw_search_missing_archive_{}",
+        std::process::id()
+    ));
     let result = search_raw(&missing_dir, " \t\n", None);
     assert!(matches!(result, Err(RawSearchError::EmptyQuery)));
 }

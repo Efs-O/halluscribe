@@ -38,7 +38,7 @@ impl LlamaServer {
         if !model.exists() {
             return Err(GemmaError::ModelNotFound(model.display().to_string()));
         }
-        let port = llama_runtime::find_free_port(port);
+        let port = llama_runtime::find_free_port(port).map_err(GemmaError::PortExhaustion)?;
         let model_name = model
             .file_stem()
             .and_then(|s| s.to_str())

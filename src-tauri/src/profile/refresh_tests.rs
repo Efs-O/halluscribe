@@ -7,7 +7,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 fn tmp_dir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("halluscribe_profile_refresh_{name}"));
+    let d = std::env::temp_dir().join(format!(
+        "halluscribe_profile_refresh_{}_{}",
+        std::process::id(),
+        name
+    ));
     let _ = fs::remove_dir_all(&d);
     fs::create_dir_all(&d).unwrap();
     d

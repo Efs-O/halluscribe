@@ -10,7 +10,10 @@ mod runner;
 mod tests;
 mod types;
 
-pub(crate) use helpers::is_sweep_due;
+pub(crate) use automatic::{
+    admit, now_fixed, record_attempt, record_exhaustion, record_success, AutomaticAdmission,
+};
 pub use helpers::sweep_done_message;
 pub use runner::run_sweep;
 pub use types::{SweepConfig, SweepProgress, SweepResult};
+mod automatic;

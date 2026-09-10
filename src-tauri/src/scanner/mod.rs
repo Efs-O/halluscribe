@@ -11,7 +11,7 @@ pub mod import_status;
 #[cfg(test)]
 mod import_status_tests;
 pub mod secrets;
-mod shared;
+pub(crate) mod shared;
 mod tests;
 mod types;
 

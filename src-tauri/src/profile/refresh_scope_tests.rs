@@ -8,7 +8,11 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 fn tmp_dir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("halluscribe_profile_refresh_scope_{name}"));
+    let d = std::env::temp_dir().join(format!(
+        "halluscribe_profile_refresh_scope_{}_{}",
+        std::process::id(),
+        name
+    ));
     let _ = fs::remove_dir_all(&d);
     fs::create_dir_all(&d).unwrap();
     d

@@ -12,7 +12,11 @@ fn fixed_now() -> DateTime<Utc> {
 }
 
 fn tmp_dir(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("halluscribe_redact_test_{name}"));
+    let d = std::env::temp_dir().join(format!(
+        "halluscribe_redact_test_{}_{}",
+        std::process::id(),
+        name
+    ));
     let _ = fs::remove_dir_all(&d);
     d
 }
@@ -29,6 +33,7 @@ fn sample_meta(source: &Path, id: &str) -> SessionMeta {
         output_tokens: 0,
         tokens_estimated: true,
         backend: "llama.cpp".into(),
+        model: "test-model.gguf".into(),
         session_timestamp: fixed_now(),
         updated_at: None,
         transcript_hash: "abc123".into(),

@@ -160,7 +160,8 @@ mod tests {
 
     #[test]
     fn oversized_images_are_rejected_before_reading() {
-        let dir = std::env::temp_dir().join("halluscribe-image-test");
+        let dir =
+            std::env::temp_dir().join(format!("halluscribe-image-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("big.png");
         std::fs::write(&path, vec![0u8; (MAX_IMAGE_BYTES + 1) as usize]).unwrap();
@@ -171,7 +172,8 @@ mod tests {
 
     #[test]
     fn a_small_png_round_trips() {
-        let dir = std::env::temp_dir().join("halluscribe-image-test");
+        let dir =
+            std::env::temp_dir().join(format!("halluscribe-image-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("small.png");
         std::fs::write(&path, b"foobar").unwrap();

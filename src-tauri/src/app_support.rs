@@ -1,7 +1,7 @@
 // HalluScribe - shared Tauri-side application support helpers.
 
 use crate::{archive, scanner, scheduler, settings};
-use chrono::{Local, Timelike};
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 use tauri::Manager;
@@ -55,8 +55,9 @@ pub(crate) fn archive_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     crate::workspace::resolve_active_dir(&default_root)
 }
 
-/// Build a SweepConfig from saved settings. Returns None if the backend config
-/// is incomplete (e.g. empty llama-server bin path).
+/// Build a SweepConfig from saved settings. Automatic-clock admission is kept
+/// separate in `scheduler::automatic` so configuration failures, backoff, and
+/// exhaustion cannot all collapse into one ambiguous `None`.
 pub(crate) fn sweep_config(
     app: &tauri::AppHandle,
     force: bool,
@@ -65,21 +66,6 @@ pub(crate) fn sweep_config(
     let default_root = default_archive_dir(app)?;
     let import_only = crate::workspace::is_active_import_only(&default_root, &dir)?;
     let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
-    if !force {
-        let now = Local::now();
-        let today = now.format("%Y-%m-%d").to_string();
-        if settings.last_auto_sweep_attempt_date == today
-            || !scheduler::is_sweep_due(
-                now.hour(),
-                now.minute(),
-                &today,
-                &settings.schedule_time,
-                &settings.last_sweep_date,
-            )
-        {
-            return Ok(None);
-        }
-    }
     let Some(mut config) = settings.to_sweep_config(dir, force) else {
         return Ok(None);
     };
@@ -150,18 +136,42 @@ pub(crate) fn mark_sweep_success(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Record an automatic daily sweep attempt before it competes for the model.
-/// A busy or failed attempt must not restart every few seconds; manual runs
-/// remain independent and available for an explicit retry.
+/// Read the pure scheduled-sweep admission state using the local wall clock.
+pub(crate) fn automatic_sweep_admission(
+    app: &tauri::AppHandle,
+) -> Result<scheduler::AutomaticAdmission, String> {
+    let dir = archive_dir(app)?;
+    let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
+    Ok(scheduler::admit(&settings, scheduler::now_fixed()))
+}
+
+/// Persist an automatic attempt before it competes for inference. A busy run
+/// spends the same bounded budget as a failed run, so it cannot become a
+/// tight retry loop.
 pub(crate) fn mark_auto_sweep_attempt(app: &tauri::AppHandle) -> Result<(), String> {
     let dir = archive_dir(app)?;
     let mut settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
-    let today = Local::now().format("%Y-%m-%d").to_string();
-    if settings.last_auto_sweep_attempt_date != today {
-        settings.last_auto_sweep_attempt_date = today;
-        settings::save_settings(&dir, &settings).map_err(|error| error.to_string())?;
-    }
+    let admission = scheduler::admit(&settings, scheduler::now_fixed());
+    scheduler::record_attempt(&mut settings, scheduler::now_fixed(), admission);
+    settings::save_settings(&dir, &settings).map_err(|error| error.to_string())?;
     Ok(())
+}
+
+/// Persist the once-per-day terminal exhaustion notification state.
+pub(crate) fn mark_auto_sweep_exhausted(app: &tauri::AppHandle) -> Result<(), String> {
+    let dir = archive_dir(app)?;
+    let mut settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
+    scheduler::record_exhaustion(&mut settings, scheduler::now_fixed());
+    settings::save_settings(&dir, &settings).map_err(|error| error.to_string())
+}
+
+/// Automatic success owns its retry state; manual success intentionally does
+/// not mutate it, beyond the shared `last_sweep_date` completion marker.
+pub(crate) fn mark_auto_sweep_success(app: &tauri::AppHandle) -> Result<(), String> {
+    let dir = archive_dir(app)?;
+    let mut settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
+    scheduler::record_success(&mut settings, scheduler::now_fixed());
+    settings::save_settings(&dir, &settings).map_err(|error| error.to_string())
 }
 
 fn top_n(counts: HashMap<String, u32>, n: usize) -> Vec<String> {

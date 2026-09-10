@@ -76,6 +76,7 @@ pub fn run_briefing_stream(
         let _ = app.emit("briefing-done", ());
         return;
     };
+    crate::retrieval::kill_embedding_server();
     idle::mark_active();
     let _ = app.emit("briefing-header", header.to_string());
     let system_prompt = prompt::briefing_system_prompt(min_word_limit, max_word_limit);

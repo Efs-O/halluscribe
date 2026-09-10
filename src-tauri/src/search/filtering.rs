@@ -20,17 +20,28 @@ pub(crate) fn matches_params(
     entry: &IndexEntry,
     params: &SearchParams,
 ) -> bool {
-    match_score(archive_dir, entry, params).is_some()
+    let stamp = super::body_cache::stamp(archive_dir);
+    matches_params_with_stamp(archive_dir, entry, params, &stamp)
+}
+
+pub(crate) fn matches_params_with_stamp(
+    archive_dir: &Path,
+    entry: &IndexEntry,
+    params: &SearchParams,
+    stamp: &crate::archive::IndexStamp,
+) -> bool {
+    match_score_with_stamp(archive_dir, entry, params, stamp).is_some()
 }
 
 /// Score-returning match: `None` means the entry fails a structured filter
 /// (date/tags/project/tool) or the query itself; `Some(score)` means it
 /// passes, with `score` reflecting only the query's field-weighted relevance
 /// (0 when no query was given - there is nothing to rank on).
-pub(super) fn match_score(
+pub(super) fn match_score_with_stamp(
     archive_dir: &Path,
     entry: &IndexEntry,
     params: &SearchParams,
+    stamp: &crate::archive::IndexStamp,
 ) -> Option<u32> {
     if !matches_date_from(entry, params)
         || !matches_date_to(entry, params)
@@ -40,33 +51,49 @@ pub(super) fn match_score(
     {
         return None;
     }
-    query_score(archive_dir, entry, params)
+    query_score(archive_dir, entry, params, stamp)
 }
 
-fn query_score(archive_dir: &Path, entry: &IndexEntry, params: &SearchParams) -> Option<u32> {
+fn query_score(
+    archive_dir: &Path,
+    entry: &IndexEntry,
+    params: &SearchParams,
+    stamp: &crate::archive::IndexStamp,
+) -> Option<u32> {
     let Some(query) = params.query.as_ref() else {
         return Some(0);
     };
 
     match parse_query(query) {
-        ParsedQuery::Phrase(phrase) => phrase_score(archive_dir, entry, &phrase),
-        ParsedQuery::Tokens(tokens) => tokens_score(archive_dir, entry, &tokens),
+        ParsedQuery::Phrase(phrase) => phrase_score(archive_dir, entry, &phrase, stamp),
+        ParsedQuery::Tokens(tokens) => tokens_score(archive_dir, entry, &tokens, stamp),
     }
 }
 
 /// Exact-substring mode (today's behaviour): best single field weight, or
 /// `None` if the phrase appears nowhere.
-fn phrase_score(archive_dir: &Path, entry: &IndexEntry, needle: &str) -> Option<u32> {
+fn phrase_score(
+    archive_dir: &Path,
+    entry: &IndexEntry,
+    needle: &str,
+    stamp: &crate::archive::IndexStamp,
+) -> Option<u32> {
     match metadata_best_weight(entry, needle) {
         Some(weight) => Some(weight),
-        None => super::body_contains(archive_dir, entry, needle).then_some(WEIGHT_BODY),
+        None => super::content::body_contains_with_stamp(archive_dir, entry, needle, stamp)
+            .then_some(WEIGHT_BODY),
     }
 }
 
 /// AND-of-tokens mode: every token must match somewhere. Cheap metadata
 /// checks first; the `.md` body is read at most once, only for tokens still
 /// unmatched after the metadata pass (per-token short-circuit, plan §3.1(4)).
-fn tokens_score(archive_dir: &Path, entry: &IndexEntry, tokens: &[String]) -> Option<u32> {
+fn tokens_score(
+    archive_dir: &Path,
+    entry: &IndexEntry,
+    tokens: &[String],
+    stamp: &crate::archive::IndexStamp,
+) -> Option<u32> {
     let mut total = 0u32;
     let mut unmatched: Vec<&str> = Vec::new();
     for token in tokens {
@@ -79,7 +106,7 @@ fn tokens_score(archive_dir: &Path, entry: &IndexEntry, tokens: &[String]) -> Op
         return Some(total);
     }
 
-    let hits = super::body_find(archive_dir, entry, &unmatched);
+    let hits = super::content::body_find_with_stamp(archive_dir, entry, &unmatched, stamp);
     if hits.iter().all(|hit| *hit) {
         total += WEIGHT_BODY * unmatched.len() as u32;
         Some(total)

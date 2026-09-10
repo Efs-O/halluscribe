@@ -76,6 +76,7 @@
   }
 
   let fullCols = $derived(fullTemplate(cols));
+  let deleteWarning = $state<string | null>(null);
   let dragCol = $state<ColKey | null>(null);
   let dragStartX = 0;
   let dragStartWidth = 0;
@@ -232,8 +233,11 @@
     const n = checkedIds.size;
     const label = n === 1 ? "1 session" : `${n} sessions`;
     if (!confirm(`Permanently delete ${label}? This cannot be undone.`)) return;
-    await invoke<string[]>("delete_sessions", { ids: [...checkedIds] });
-    clearSelection();
+    const result = await invoke<{ deleted_ids: string[]; failures: { id: string; error: string }[] }>("delete_sessions", { ids: [...checkedIds] });
+    checkedIds = new Set(result.failures.map((failure) => failure.id));
+    deleteWarning = result.failures.length
+      ? `Could not delete ${result.failures.map((failure) => failure.id).join(", ")}. Close any program using the session and retry.`
+      : null;
     reload();
   }
 
@@ -321,6 +325,10 @@
         onClearSelection={clearSelection}
         onDelete={confirmDelete}
       />
+    {/if}
+
+    {#if deleteWarning}
+      <p class="raw-coverage error" role="alert">{deleteWarning}</p>
     {/if}
 
     <div class="list" role="grid" aria-label="Session list">

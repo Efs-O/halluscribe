@@ -12,13 +12,14 @@
 
 use super::captured_manifest::{self, CapturedManifest, CapturedRecord};
 use super::{
-    ensure_index_readable, preserve_raw, raw_rel_path, read_sessions, session_id, set_raw_path,
+    ensure_index_readable, preserve_raw, raw_rel_path, read_sessions, resolve_session_id,
+    session_id, set_raw_path,
 };
+use crate::scanner::shared::mtime_secs;
 use crate::scanner::{self, ScanTargetKind};
 use crate::settings::HalluScribeSettings;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Progress/outcome of one capture pass, mirrored to the UI as managed Tauri
 /// state and as the `raw-capture-progress` event payload.
@@ -45,11 +46,6 @@ pub enum CaptureStatus {
         errors: Vec<String>,
     },
     Cancelled,
-}
-
-fn mtime_secs(time: SystemTime) -> i64 {
-    time.duration_since(UNIX_EPOCH)
-        .map_or(0, |dur| dur.as_secs() as i64)
 }
 
 /// Run one capture pass. Reuses `scanner::scan_sessions` (the exact discovery
@@ -108,7 +104,8 @@ pub fn run_capture(
         }
 
         done += 1;
-        let id = session_id(&target.path);
+        let base_id = session_id(&target.path);
+        let id = resolve_session_id(archive_dir, &target.path, &base_id);
 
         let Ok(meta) = std::fs::metadata(&target.path) else {
             // Source vanished between discovery and capture (pruned mid-scan) -
@@ -190,7 +187,11 @@ mod tests {
     use std::sync::atomic::AtomicBool;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("halluscribe_capture_test_{name}"));
+        let dir = std::env::temp_dir().join(format!(
+            "halluscribe_capture_test_{}_{}",
+            std::process::id(),
+            name
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -210,13 +211,10 @@ mod tests {
         session_id(&path)
     }
 
-    /// Point the scanner at an isolated fake HOME so tests never touch the
-    /// real user's `.claude/projects` directory. Serialized via a mutex since
-    /// env vars are process-global and tests run on multiple threads.
-    static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     fn with_fake_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
-        let _guard = HOME_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::scanner::shared::HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let key = if cfg!(target_os = "windows") {
             "USERPROFILE"
         } else {
@@ -295,6 +293,11 @@ mod tests {
         let home = tmp_dir("index_home");
         with_fake_home(&home, || {
             let id = write_claude_session(&home, "proj", "session-c");
+            let source_path = home
+                .join(".claude")
+                .join("projects")
+                .join("proj")
+                .join("session-c.jsonl");
             let idx = serde_json::json!({
                 "sessions": [{
                     "id": id,
@@ -307,7 +310,7 @@ mod tests {
                     "error_tags": [],
                     "topic_tags": [],
                     "archive_path": "sessions/proj/2026-07-15/session.md",
-                    "source_jsonl": "unused.jsonl",
+                    "source_jsonl": source_path,
                     "raw_path": ""
                 }]
             });

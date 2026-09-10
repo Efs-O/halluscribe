@@ -92,6 +92,10 @@ pub enum GemmaError {
     /// not be. Like the two above, retrying never clears it - the user has to
     /// fix the file - so the sweep must not treat it as a transient conflict.
     TuningInvalid(String),
+    /// Every candidate port in the scan range was already bound, so a server
+    /// could not be started. Distinct from `Conflict`: nothing running was
+    /// reusable, the machine simply had no port to hand us.
+    PortExhaustion(String),
     /// The caller requested cancellation at a safe boundary between model
     /// calls. No archive write has occurred for that session.
     Cancelled,
@@ -111,6 +115,7 @@ impl fmt::Display for GemmaError {
             Self::DrafterAmbiguous(s) => write!(f, "MTP drafter ambiguous: {s}"),
             Self::GpuConfigInvalid(s) => write!(f, "GPU settings invalid: {s}"),
             Self::TuningInvalid(s) => write!(f, "llama-server tuning invalid: {s}"),
+            Self::PortExhaustion(s) => write!(f, "no free llama-server port: {s}"),
             Self::Cancelled => write!(f, "inference cancelled"),
             Self::EmptyResponse => write!(f, "Gemma returned an empty response"),
             Self::BadToolCall(s) => write!(f, "tool-call response invalid: {s}"),

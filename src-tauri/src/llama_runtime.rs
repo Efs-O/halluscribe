@@ -21,17 +21,38 @@ pub enum ServerWaitError {
     Timeout,
 }
 
-/// Scans upward from `start` (up to 20 ports) and returns the first port that
-/// is not bound by any process. Falls back to `start` if all are taken,
-/// letting the OS error surface naturally on spawn.
-pub fn find_free_port(start: u16) -> u16 {
-    for offset in 0u16..20 {
+/// Number of candidate ports scanned upward from `start` by [`find_free_port`].
+const PORT_SCAN_WIDTH: u16 = 20;
+
+/// Scans upward from `start` (up to [`PORT_SCAN_WIDTH`] ports) and returns the
+/// first port that is not bound by any process.
+///
+/// When every candidate is already bound this returns an error rather than
+/// falling back to `start`. The old fallback handed back a port it had just
+/// observed to be taken, so the caller spawned `llama-server` onto a busy port
+/// and the failure surfaced later as an opaque readiness timeout — the worst
+/// possible place to learn the port was the problem. Failing here lets each
+/// caller report port exhaustion at the point of decision (audit addendum E).
+pub fn find_free_port(start: u16) -> Result<u16, String> {
+    find_free_port_with(start, &|port| {
+        std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
+    })
+}
+
+/// The scan body of [`find_free_port`], with the bind probe injected so the
+/// fully-occupied case can be tested deterministically. A real test cannot
+/// reserve a contiguous 20-port range in the global ephemeral space without
+/// racing other tests, so the probe — not the live OS — decides occupancy here.
+fn find_free_port_with(start: u16, is_free: &dyn Fn(u16) -> bool) -> Result<u16, String> {
+    for offset in 0..PORT_SCAN_WIDTH {
         let port = start.saturating_add(offset);
-        if std::net::TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            return port;
+        if is_free(port) {
+            return Ok(port);
         }
     }
-    start
+    Err(format!(
+        "no free port in the {PORT_SCAN_WIDTH} starting at {start}"
+    ))
 }
 
 /// Resolve a llama-server binary path. Absolute paths are used as-is (with a
@@ -229,9 +250,36 @@ mod tests {
 
     #[test]
     fn find_free_port_returns_a_bindable_port() {
-        let port = find_free_port(49_500);
+        let port = find_free_port(49_500).expect("a free port");
         // The returned port must itself be bindable right now.
         assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok());
+    }
+
+    #[test]
+    fn find_free_port_reports_exhaustion_when_every_candidate_is_taken() {
+        // The probe reports every port busy, so the scan must run its full
+        // width and then error rather than handing back a bound port. A live
+        // test cannot reserve a contiguous 20-port range without racing other
+        // tests, so occupancy is decided by the injected probe.
+        let seen = std::cell::RefCell::new(Vec::new());
+        let result = find_free_port_with(49_500, &|port| {
+            seen.borrow_mut().push(port);
+            false
+        });
+        let error = result.expect_err("all candidates busy must be an error");
+        assert!(error.contains("49500"), "names the start port: {error}");
+        // Exactly PORT_SCAN_WIDTH candidates were probed, from `start` upward.
+        let probed = seen.into_inner();
+        assert_eq!(probed.len() as u16, PORT_SCAN_WIDTH);
+        assert_eq!(probed.first().copied(), Some(49_500));
+        assert_eq!(probed.last().copied(), Some(49_500 + PORT_SCAN_WIDTH - 1));
+    }
+
+    #[test]
+    fn find_free_port_scans_upward_past_taken_ports() {
+        // The first two candidates are busy; the third is free and must win.
+        let result = find_free_port_with(49_500, &|port| port > 49_501);
+        assert_eq!(result.expect("scans to the first free port"), 49_502);
     }
 
     #[test]
