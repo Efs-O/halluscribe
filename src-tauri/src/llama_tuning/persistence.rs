@@ -99,7 +99,7 @@ mod tests {
         let tuning = load_tuning(&root).unwrap();
         assert!(tuning_path(&root).exists(), "template should be written");
         let qwen = &tuning.architectures["qwen35"];
-        assert_eq!(qwen.cache_type_k, "q4_0");
+        assert_eq!(qwen.cache_type_k, "q8_0");
         assert_eq!(qwen.speculative.n_max, 2);
         assert!(
             !qwen.mmproj_offload,
@@ -110,7 +110,7 @@ mod tests {
         assert!(qwen.speculative.gpu_layers.is_empty());
 
         assert_eq!(qwen.sampling.top_k, Some(20));
-        assert_eq!(qwen.sampling.reasoning_effort.as_deref(), Some("medium"));
+        assert_eq!(qwen.sampling.reasoning_effort.as_deref(), Some("low"));
 
         let gemma = &tuning.architectures["gemma4"];
         assert_eq!(gemma.speculative.n_max, 1);
