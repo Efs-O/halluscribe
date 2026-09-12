@@ -96,7 +96,7 @@ mod tests {
         let transcript = transcript_dir.join("session-1.jsonl");
         fs::write(&transcript, "{\"role\":\"user\"}\n").unwrap();
 
-        let targets = scan_forge_from_root(&root, u64::MAX);
+        let targets = scan_forge_from_root(&root, u64::MAX, 0.0);
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].path, transcript);
         assert!(matches!(

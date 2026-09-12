@@ -47,7 +47,11 @@ pub fn scan_sessions(
             let p = settings.forge_sessions_path.trim();
             (!p.is_empty()).then(|| std::path::Path::new(p))
         };
-        sessions.extend(forge::scan_forge(lookback_secs, forge_override));
+        sessions.extend(forge::scan_forge(
+            lookback_secs,
+            min_fill_pct,
+            forge_override,
+        ));
         sessions.extend(scan_ollama_chat(settings));
     }
     sessions.extend(scan_chat_imports(settings, lookback_secs));

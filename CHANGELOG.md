@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.30] - 2026-09-12
+
+### Fixed
+- Forge session context fill is now measured from compaction records instead of a character estimate, so Forge sessions show a real fill, respect the minimum-fill gate, and are no longer always flagged as estimated
+
 ## [0.3.29] - 2026-09-10
 
 ### Added

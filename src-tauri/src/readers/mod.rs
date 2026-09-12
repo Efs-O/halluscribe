@@ -263,7 +263,10 @@ fn read_coding_target(
     };
 
     let created_at = DateTime::from_timestamp(target.mtime_secs, 0).unwrap_or_else(Utc::now);
-    let fill_estimated = matches!(tool, ToolSource::Forge) || target.fill_pct.is_none();
+    // A Forge session whose fill came from a compaction row is a real
+    // measurement, not an estimate; only a missing fill falls back to the
+    // character heuristic and is flagged estimated.
+    let fill_estimated = target.fill_pct.is_none();
     let fill_pct = target
         .fill_pct
         .unwrap_or_else(|| estimate_fill_pct(&transcript));
@@ -374,4 +377,46 @@ pub(super) fn stable_hash(value: &str) -> String {
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::{ScanTarget, ScanTargetKind, ToolSource};
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn forge_target(root: &Path, file: &str, fill_pct: Option<f64>) -> ScanTarget {
+        let path = root.join(file);
+        fs::write(
+            &path,
+            "{\"role\":\"user\",\"content\":\"Fix the build\",\"timestamp_ms\":1}\n",
+        )
+        .unwrap();
+        ScanTarget {
+            path,
+            kind: ScanTargetKind::Coding(ToolSource::Forge),
+            fill_pct,
+            mtime_secs: 0,
+        }
+    }
+
+    #[test]
+    fn forge_measured_fill_is_not_estimated() {
+        let dir = tempdir().unwrap();
+        let target = forge_target(dir.path(), "measured.jsonl", Some(66.0));
+        let sessions = read_target(&target).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert!(!sessions[0].fill_estimated);
+        assert!((sessions[0].fill_pct - 66.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn forge_unknown_fill_is_estimated() {
+        let dir = tempdir().unwrap();
+        let target = forge_target(dir.path(), "unknown.jsonl", None);
+        let sessions = read_target(&target).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert!(sessions[0].fill_estimated);
+    }
 }
