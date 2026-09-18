@@ -7,7 +7,6 @@ use crate::readers::ChatProvider;
 use serde_json::Value;
 
 const PROMPT_HEADROOM_TOKENS: u32 = 4_096;
-const CURRENT_CHUNK_TARGET_TOKENS: u32 = 45_000;
 const PARTIAL_MAX_TOKENS: u32 = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,8 +25,15 @@ pub(crate) fn estimated_tokens(text: &str) -> u32 {
 }
 
 pub(crate) fn needs_chunking(transcript: &str, ctx_size: u32, max_tokens: u32) -> bool {
-    let usable = ctx_size.saturating_sub(max_tokens.saturating_add(PROMPT_HEADROOM_TOKENS));
-    estimated_tokens(transcript) > usable
+    estimated_tokens(transcript) > input_budget(ctx_size, max_tokens)
+}
+
+/// Reserve room for the completion and the fixed system/tool prompt. The
+/// remaining configured context is available to complete conversation turns;
+/// this must scale with `ctx_size` so a deliberately larger context can admit
+/// one large, unsplittable turn.
+fn input_budget(ctx_size: u32, max_tokens: u32) -> u32 {
+    ctx_size.saturating_sub(max_tokens.saturating_add(PROMPT_HEADROOM_TOKENS))
 }
 
 pub(crate) fn summarize(
@@ -39,9 +45,7 @@ pub(crate) fn summarize(
     cancelled: &dyn Fn() -> bool,
     on_chunk: &mut dyn FnMut(usize, usize),
 ) -> Result<GemmaOutput, GemmaError> {
-    let input_budget = ctx_size
-        .saturating_sub(max_tokens.saturating_add(PROMPT_HEADROOM_TOKENS))
-        .min(CURRENT_CHUNK_TARGET_TOKENS);
+    let input_budget = input_budget(ctx_size, max_tokens);
     let chunks = plan_chunks(units, input_budget)?;
     let total = chunks.len();
     let mut partials = Vec::with_capacity(total);
@@ -196,7 +200,7 @@ fn render_partials(partials: &[Value]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{estimated_tokens, needs_chunking, plan_chunks, summarize};
+    use super::{estimated_tokens, input_budget, needs_chunking, plan_chunks, summarize};
     use crate::gemma::start_sweep_session;
     use crate::llama_tuning;
     use crate::preprocessor::preprocess_session_units;
@@ -237,6 +241,13 @@ mod tests {
         let transcript = "x".repeat(200_000);
         assert!(needs_chunking(&transcript, 58_000, 8_192));
         assert_eq!(estimated_tokens("abcd"), 2);
+    }
+
+    #[test]
+    fn chunk_budget_scales_with_the_configured_context() {
+        let budget = input_budget(128_000, 8_192);
+        assert_eq!(budget, 115_712);
+        assert!(plan_chunks(&["x".repeat(112_192)], budget).is_ok());
     }
 
     /// Manual end-to-end check of the chunked path against one real source.

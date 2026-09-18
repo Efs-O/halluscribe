@@ -146,6 +146,7 @@ fn spawn_server(
         } else {
             vec!["--reasoning", "off"]
         });
+    llama_runtime::apply_metrics_endpoint(&mut command);
     resolved.tuning.apply(&mut command);
     gpu.apply(&mut command)?;
     if multimodal {

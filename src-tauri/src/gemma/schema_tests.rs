@@ -162,11 +162,10 @@ fn save_session_summary_tool_has_required_fields() {
 }
 
 #[test]
-fn required_summary_tool_choice_targets_only_the_summary_tool() {
+fn required_summary_tool_choice_requires_the_only_available_tool() {
     let choice = required_summary_tool_choice();
 
-    assert_eq!(choice["type"], "function");
-    assert_eq!(choice["function"]["name"], "save_session_summary");
+    assert_eq!(choice, "required");
 }
 
 #[test]

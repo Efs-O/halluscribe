@@ -27,7 +27,7 @@
   <span class="divider" role="separator" onmousedown={(e) => onDividerMouseDown(e, "tool")}></span>
   <button class="header-btn" onclick={() => toggleSort("fill")}>{sortLabel("fill", "FILL")}</button>
   <span class="divider" role="separator" onmousedown={(e) => onDividerMouseDown(e, "fill")}></span>
-  <button class="header-btn" onclick={() => toggleSort("tokens")}>
+  <button class="header-btn tokens-header" onclick={() => toggleSort("tokens")}>
     {sortLabel("tokens", "TOKENS")}
   </button>
   <span class="divider" role="separator" onmousedown={(e) => onDividerMouseDown(e, "tokens")}
@@ -70,6 +70,10 @@
 
   .header-btn:hover {
     color: var(--text);
+  }
+
+  .tokens-header {
+    text-align: center;
   }
 
   .divider {

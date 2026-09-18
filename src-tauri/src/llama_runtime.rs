@@ -110,6 +110,13 @@ pub fn apply_serve_subcommand(command: &mut Command, bin: &Path) {
     }
 }
 
+/// Enable the Prometheus-compatible endpoint on every llama-server HalluScribe
+/// starts. This exposes inference timings to local monitoring tools without
+/// changing request handling or model behaviour.
+pub fn apply_metrics_endpoint(command: &mut Command) {
+    command.arg("--metrics");
+}
+
 /// Largest the log may grow before the next spawn rotates it. One failed load
 /// writes a few hundred lines, so this holds many sessions of history while
 /// staying small enough to attach to a bug report.
@@ -307,6 +314,14 @@ mod tests {
         let mut server = Command::new("llama-server");
         apply_serve_subcommand(&mut server, Path::new("llama-server.exe"));
         assert_eq!(server.get_args().count(), 0);
+    }
+
+    #[test]
+    fn apply_metrics_endpoint_enables_metrics() {
+        let mut server = Command::new("llama-server");
+        apply_metrics_endpoint(&mut server);
+        let args: Vec<_> = server.get_args().collect();
+        assert_eq!(args, ["--metrics"]);
     }
 
     #[test]

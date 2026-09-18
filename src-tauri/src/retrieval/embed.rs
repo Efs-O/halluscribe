@@ -325,6 +325,7 @@ fn spawn_server(runtime: &EmbeddingRuntime) -> Result<Child, String> {
         "--pooling",
         "mean",
     ]);
+    llama_runtime::apply_metrics_endpoint(&mut cmd);
     resolved.tuning.apply(&mut cmd);
     runtime.gpu.apply(&mut cmd)?;
     llama_runtime::apply_output_capture(&mut cmd);

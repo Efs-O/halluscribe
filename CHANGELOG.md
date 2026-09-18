@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.33] - 2026-09-18
+
+### Fixed
+- Sweep summary requests force the tool call with `tool_choice: "required"`, which llama-server accepts, instead of the object form some builds reject
+- Large-session chunk budget now scales with the configured context instead of stopping at 45K tokens, so a single oversized turn fits when the context is raised
+
+### Changed
+- Every llama-server HalluScribe starts exposes `--metrics` for local monitoring
+- TOKENS column is centred in the session table
+
 ## [0.3.31] - 2026-09-18
 
 ### Changed

@@ -153,6 +153,7 @@ fn spawn_server(
         "--ctx-size",
         &ctx_size.to_string(),
     ]);
+    llama_runtime::apply_metrics_endpoint(&mut cmd);
     resolved.tuning.apply(&mut cmd);
     gpu.apply(&mut cmd).map_err(GemmaError::GpuConfigInvalid)?;
     crate::llama_mtp::apply_mtp_flags(&mut cmd, model, resolved)

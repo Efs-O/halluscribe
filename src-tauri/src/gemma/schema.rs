@@ -58,15 +58,12 @@ pub(crate) fn save_session_summary_tool() -> Value {
     })
 }
 
-/// OpenAI-compatible llama-server instruction that makes the summary tool the
-/// only valid assistant response for an unattended archive-sweep request.
-/// Generic tool callers deliberately do not use this because their model may
-/// need to choose among several tools.
+/// llama.cpp-compatible instruction that requires the summary tool for an
+/// unattended archive-sweep request. The sweep supplies exactly one tool, so
+/// the string form forces `save_session_summary` without relying on the
+/// OpenAI object form that some llama-server builds reject.
 pub(crate) fn required_summary_tool_choice() -> Value {
-    serde_json::json!({
-        "type": "function",
-        "function": { "name": "save_session_summary" }
-    })
+    Value::String("required".to_string())
 }
 
 /// Extract and parse the raw tool-call arguments from an OpenAI-shaped

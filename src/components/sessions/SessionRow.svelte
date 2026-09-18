@@ -188,7 +188,7 @@
   .tokens {
     white-space: nowrap;
     font-weight: 700;
-    text-align: right;
+    text-align: center;
   }
 
   .tags {
