@@ -113,9 +113,14 @@ pub(crate) fn collect_raw_session_total(app: &tauri::AppHandle) -> Result<u32, S
     Ok(
         scanner::scan_sessions(&dir, &settings, u64::MAX, 0.0, import_only)
             .into_iter()
-            .map(|target| match crate::readers::read_target(&target) {
-                Ok(parsed_sessions) => parsed_sessions.len() as u32,
-                Err(_) => 0,
+            .map(|target| {
+                match crate::readers::read_target(
+                    &target,
+                    settings.business_default_country_code_opt(),
+                ) {
+                    Ok(parsed_sessions) => parsed_sessions.len() as u32,
+                    Err(_) => 0,
+                }
             })
             .sum(),
     )

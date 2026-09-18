@@ -120,7 +120,7 @@ fn gemini_activities_carry_only_their_own_raw_slice() {
 #[test]
 fn raw_slices_for_source_maps_every_conversation_id() {
     let dir = write_fixture("conversations.json", CHATGPT_EXPORT);
-    let slices = raw_slices_for_source(&dir.path().join("conversations.json"), "chatgpt")
+    let slices = raw_slices_for_source(&dir.path().join("conversations.json"), "chatgpt", None)
         .expect("chatgpt is a multi-session provider");
 
     assert_eq!(slices.len(), 2);
@@ -135,7 +135,7 @@ fn raw_slices_for_source_maps_every_conversation_id() {
 fn one_file_per_session_providers_report_no_slices() {
     for provider in ["claude_code", "codex", "continue", "forge", ""] {
         assert!(
-            raw_slices_for_source(Path::new("session.jsonl"), provider).is_none(),
+            raw_slices_for_source(Path::new("session.jsonl"), provider, None).is_none(),
             "{provider} maps 1:1 to a file and must keep the whole-file raw"
         );
     }
@@ -146,7 +146,7 @@ fn one_file_per_session_providers_report_no_slices() {
 #[test]
 fn unparseable_multi_session_source_yields_no_slices_not_a_file_fallback() {
     let dir = write_fixture("conversations.json", "{ not valid json");
-    let slices = raw_slices_for_source(&dir.path().join("conversations.json"), "chatgpt")
+    let slices = raw_slices_for_source(&dir.path().join("conversations.json"), "chatgpt", None)
         .expect("still a multi-session provider");
 
     assert!(slices.is_empty());

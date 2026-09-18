@@ -105,7 +105,13 @@ pub(crate) fn backfill_raw_with(
 
         let slices = slice_cache
             .entry((source.clone(), entry.provider.clone()))
-            .or_insert_with(|| crate::readers::raw_slices_for_source(&source, &entry.provider));
+            .or_insert_with(|| {
+                crate::readers::raw_slices_for_source(
+                    &source,
+                    &entry.provider,
+                    settings.business_default_country_code_opt(),
+                )
+            });
 
         let preserved = match slices {
             // Multi-session source: only this session's own slice may be

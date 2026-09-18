@@ -53,6 +53,9 @@ pub fn scan_sessions(
             forge_override,
         ));
         sessions.extend(scan_ollama_chat(settings));
+        // Business ingestion is business-workspace-only (D3): a guest's
+        // import-only sweep must not read the host's iPhone backup.
+        sessions.extend(scan_apple_backup(settings));
     }
     sessions.extend(scan_chat_imports(settings, lookback_secs));
     sessions.extend(scan_recorded_chat_sessions(archive_dir, lookback_secs));
@@ -145,6 +148,9 @@ pub fn chat_import_sources(settings: &HalluScribeSettings, provider_key: &str) -
         // The Ollama chat DB is a single machine-local file with its own
         // resolver (optional override, else the OS default location).
         "ollama_chat" => return resolve_ollama_db_path(settings).into_iter().collect(),
+        // The Apple backup is a single configured directory, gated by the
+        // business-ingestion toggle (one authority, shared with the sweep).
+        "apple_messages" => return resolve_apple_backup_path(settings).into_iter().collect(),
         _ => return Vec::new(),
     };
     let trimmed = configured.trim();
@@ -333,6 +339,43 @@ fn scan_ollama_chat(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
     vec![ScanTarget {
         path,
         kind: ScanTargetKind::Import(ChatProvider::OllamaChat),
+        fill_pct: None,
+        mtime_secs: shared::mtime_secs(modified),
+    }]
+}
+
+/// The configured Apple backup directory, when business ingestion is enabled,
+/// the path is set, and the directory exists. One authority for both the sweep
+/// (`scan_apple_backup`) and the raw backfill (`chat_import_sources`), so the
+/// two can never disagree about which backup to read.
+fn resolve_apple_backup_path(settings: &HalluScribeSettings) -> Option<PathBuf> {
+    if !settings.business_ingestion_enabled {
+        return None;
+    }
+    let configured = settings.apple_backup_path.trim();
+    if configured.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(configured);
+    path.is_dir().then_some(path)
+}
+
+/// One `ScanTarget` for the configured Apple backup directory, when it is
+/// enabled, set and present. Modelled on `scan_ollama_chat` (a single local
+/// source yielding one target), but gated by the business-ingestion toggle.
+fn scan_apple_backup(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
+    let Some(path) = resolve_apple_backup_path(settings) else {
+        return Vec::new();
+    };
+    let Ok(meta) = fs::metadata(&path) else {
+        return Vec::new();
+    };
+    let Ok(modified) = meta.modified() else {
+        return Vec::new();
+    };
+    vec![ScanTarget {
+        path,
+        kind: ScanTargetKind::Import(ChatProvider::AppleMessages),
         fill_pct: None,
         mtime_secs: shared::mtime_secs(modified),
     }]

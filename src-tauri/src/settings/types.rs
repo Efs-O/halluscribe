@@ -119,6 +119,25 @@ pub struct HalluScribeSettings {
     /// to E.164 (D8). Empty = no default: only already-international numbers
     /// (`+…`, `00…`) are normalized; local numbers are matched verbatim.
     pub business_default_country_code: String,
+    /// Absolute path to an Apple iPhone backup directory (the folder holding
+    /// `Manifest.db`). Empty = not configured. Only read when
+    /// `business_ingestion_enabled` is on and the directory exists.
+    pub apple_backup_path: String,
+    /// Business (iPhone Messages) ingestion is opt-in and OFF by default (D3):
+    /// the raw transcripts contain customers' phone numbers, addresses, prices
+    /// and invoices, so nothing is read from a backup until the user turns
+    /// this on.
+    pub business_ingestion_enabled: bool,
+}
+
+impl HalluScribeSettings {
+    /// The business default country code as `Option<&str>`: `None` when blank,
+    /// so a caller can hand it straight to the phone normalizer (D8) without
+    /// special-casing the empty string.
+    pub fn business_default_country_code_opt(&self) -> Option<&str> {
+        let trimmed = self.business_default_country_code.trim();
+        (!trimmed.is_empty()).then_some(trimmed)
+    }
 }
 
 fn default_profile_sources() -> Vec<String> {
@@ -185,6 +204,8 @@ impl Default for HalluScribeSettings {
             tts_piper_bin: String::new(),
             tts_voice: String::new(),
             business_default_country_code: String::new(),
+            apple_backup_path: String::new(),
+            business_ingestion_enabled: false,
         }
     }
 }

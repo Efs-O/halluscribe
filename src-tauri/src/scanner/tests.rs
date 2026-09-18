@@ -301,6 +301,104 @@ mod tests {
         }));
     }
 
+    /// Business ingestion is OFF by default: a configured backup must not be
+    /// scanned until the user turns it on.
+    #[test]
+    fn apple_backup_disabled_yields_no_target() {
+        let dir = tempdir().unwrap();
+        let settings = HalluScribeSettings {
+            apple_backup_path: dir.path().display().to_string(),
+            business_ingestion_enabled: false,
+            ..HalluScribeSettings::default()
+        };
+        let targets = scan_sessions(dir.path(), &settings, u64::MAX, 0.0, false);
+        assert!(targets.iter().all(|t| !matches!(
+            t.kind,
+            super::super::ScanTargetKind::Import(ChatProvider::AppleMessages)
+        )));
+    }
+
+    /// A blank backup path yields no target even when enabled.
+    #[test]
+    fn apple_backup_blank_path_yields_no_target() {
+        let dir = tempdir().unwrap();
+        let settings = HalluScribeSettings {
+            apple_backup_path: "   ".to_string(),
+            business_ingestion_enabled: true,
+            ..HalluScribeSettings::default()
+        };
+        let targets = scan_sessions(dir.path(), &settings, u64::MAX, 0.0, false);
+        assert!(targets.iter().all(|t| !matches!(
+            t.kind,
+            super::super::ScanTargetKind::Import(ChatProvider::AppleMessages)
+        )));
+    }
+
+    /// A non-existent backup directory yields no target even when enabled.
+    #[test]
+    fn apple_backup_missing_dir_yields_no_target() {
+        let dir = tempdir().unwrap();
+        let settings = HalluScribeSettings {
+            apple_backup_path: "N:/does/not/exist/backup-xyz".to_string(),
+            business_ingestion_enabled: true,
+            ..HalluScribeSettings::default()
+        };
+        let targets = scan_sessions(dir.path(), &settings, u64::MAX, 0.0, false);
+        assert!(targets.iter().all(|t| !matches!(
+            t.kind,
+            super::super::ScanTargetKind::Import(ChatProvider::AppleMessages)
+        )));
+    }
+
+    /// Enabled + a real directory ⇒ exactly one AppleMessages target, and the
+    /// sweep and the backfill authority agree on the same directory.
+    #[test]
+    fn apple_backup_enabled_yields_exactly_one_target() {
+        let dir = tempdir().unwrap();
+        let settings = HalluScribeSettings {
+            apple_backup_path: dir.path().display().to_string(),
+            business_ingestion_enabled: true,
+            ..HalluScribeSettings::default()
+        };
+        let targets = scan_sessions(dir.path(), &settings, u64::MAX, 0.0, false);
+        let apple: Vec<_> = targets
+            .iter()
+            .filter(|t| {
+                matches!(
+                    t.kind,
+                    super::super::ScanTargetKind::Import(ChatProvider::AppleMessages)
+                )
+            })
+            .collect();
+        assert_eq!(apple.len(), 1);
+        assert_eq!(apple[0].path, dir.path().to_path_buf());
+        // The backfill authority returns the same single directory.
+        let backfilled = super::super::chat_import_sources(&settings, "apple_messages");
+        assert_eq!(backfilled, vec![dir.path().to_path_buf()]);
+    }
+
+    /// Business ingestion is business-workspace-only (D3): an import-only
+    /// (guest) sweep must not scan the host's iPhone backup.
+    #[test]
+    fn apple_backup_is_gated_out_of_import_only_sweeps() {
+        let dir = tempdir().unwrap();
+        let settings = HalluScribeSettings {
+            apple_backup_path: dir.path().display().to_string(),
+            business_ingestion_enabled: true,
+            ..HalluScribeSettings::default()
+        };
+        let host = scan_sessions(dir.path(), &settings, u64::MAX, 0.0, false);
+        assert!(host.iter().any(|t| matches!(
+            t.kind,
+            super::super::ScanTargetKind::Import(ChatProvider::AppleMessages)
+        )));
+        let guest = scan_sessions(dir.path(), &settings, u64::MAX, 0.0, true);
+        assert!(guest.iter().all(|t| !matches!(
+            t.kind,
+            super::super::ScanTargetKind::Import(ChatProvider::AppleMessages)
+        )));
+    }
+
     #[test]
     fn import_only_skips_local_tools_keeps_recorded_chats() {
         // Local-tool source: a Forge override root with one minimal .jsonl fixture.

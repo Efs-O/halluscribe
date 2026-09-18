@@ -149,6 +149,10 @@ pub(super) fn merge_host_owned(
         // This person's business contacts' default country code - a
         // person-owned value, never shared across people.
         business_default_country_code,
+        // This person's Apple backup location and their opt-in to reading it -
+        // both person-owned, never shared across people.
+        apple_backup_path,
+        business_ingestion_enabled,
     } = guest;
 
     HalluScribeSettings {
@@ -167,6 +171,8 @@ pub(super) fn merge_host_owned(
         first_run,
         profile_sources,
         business_default_country_code,
+        apple_backup_path,
+        business_ingestion_enabled,
         ..host.clone()
     }
 }
@@ -252,6 +258,25 @@ mod tests {
         assert_eq!(merged.auto_sweep_exhausted_date, "2026-08-08");
         assert_eq!(merged.schedule_time, "03:30");
         assert!(!merged.first_run);
+    }
+
+    #[test]
+    fn business_ingestion_fields_stay_with_the_workspace() {
+        // The backup path and the opt-in are person-owned: a guest's choice
+        // must never be widened or replaced by the host's.
+        let host = HalluScribeSettings {
+            apple_backup_path: "N:/host/backups".to_string(),
+            business_ingestion_enabled: true,
+            ..HalluScribeSettings::default()
+        };
+        let guest = HalluScribeSettings {
+            apple_backup_path: "N:/guest/backups".to_string(),
+            business_ingestion_enabled: false,
+            ..HalluScribeSettings::default()
+        };
+        let merged = merge_host_owned(&host, guest);
+        assert_eq!(merged.apple_backup_path, "N:/guest/backups");
+        assert!(!merged.business_ingestion_enabled);
     }
 
     #[test]

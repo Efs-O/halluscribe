@@ -1,3 +1,4 @@
+// HalluScribe - dev example: scan configured imports and report what each reader parses.
 use app_lib::{
     readers,
     scanner::{self, ScanTargetKind},
@@ -30,7 +31,7 @@ fn main() {
         println!("\n--- {} ---", provider);
         println!("source: {}", target.path.display());
 
-        match readers::read_target(&target) {
+        match readers::read_target(&target, None) {
             Ok(sessions) => {
                 println!("parsed sessions: {}", sessions.len());
                 for session in sessions.iter().take(3) {

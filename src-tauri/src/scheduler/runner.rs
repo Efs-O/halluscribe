@@ -97,16 +97,18 @@ pub fn run_sweep(
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("source");
-        let parsed_sessions = match readers::read_target(source) {
-            Ok(parsed_sessions) => parsed_sessions,
-            Err(error) => {
-                result.errors.push(format!(
-                    "{source_label} ({}): parse: {error}",
-                    source.path.display()
-                ));
-                continue;
-            }
-        };
+        let parsed_sessions =
+            match readers::read_target(source, config.settings.business_default_country_code_opt())
+            {
+                Ok(parsed_sessions) => parsed_sessions,
+                Err(error) => {
+                    result.errors.push(format!(
+                        "{source_label} ({}): parse: {error}",
+                        source.path.display()
+                    ));
+                    continue;
+                }
+            };
 
         if parsed_sessions.is_empty() {
             result.skipped += 1;

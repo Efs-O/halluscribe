@@ -1,5 +1,7 @@
 // HalluScribe - parsed chat import readers and shared session assembly.
+pub mod apple_messages;
 pub mod apple_messages_db;
+pub mod apple_messages_raw;
 pub mod apple_messages_window;
 mod chatgpt;
 mod chatgpt_content;
@@ -259,7 +261,10 @@ impl ParsedSession {
     }
 }
 
-pub fn read_target(target: &ScanTarget) -> Result<Vec<ParsedSession>, ReaderError> {
+pub fn read_target(
+    target: &ScanTarget,
+    default_cc: Option<&str>,
+) -> Result<Vec<ParsedSession>, ReaderError> {
     match &target.kind {
         ScanTargetKind::Coding(tool) => read_coding_target(target, tool),
         ScanTargetKind::Import(provider) => match provider {
@@ -269,8 +274,8 @@ pub fn read_target(target: &ScanTarget) -> Result<Vec<ParsedSession>, ReaderErro
             ChatProvider::Grok => grok::read(&target.path),
             ChatProvider::HalluScribeAgentChat => halluscribe_agent_chat::read(&target.path),
             ChatProvider::OllamaChat => ollama_chat::read(&target.path),
-            // Phase 5: the Apple backup reader lands here.
-            ChatProvider::AppleMessages => Ok(Vec::new()),
+            // The Apple backup reader: `target.path` is the backup directory.
+            ChatProvider::AppleMessages => apple_messages::read(&target.path, default_cc),
             ChatProvider::ClaudeCode | ChatProvider::Codex | ChatProvider::Forge => Ok(Vec::new()),
         },
     }
@@ -439,7 +444,7 @@ mod tests {
     fn forge_measured_fill_is_not_estimated() {
         let dir = tempdir().unwrap();
         let target = forge_target(dir.path(), "measured.jsonl", Some(66.0));
-        let sessions = read_target(&target).unwrap();
+        let sessions = read_target(&target, None).unwrap();
         assert_eq!(sessions.len(), 1);
         assert!(!sessions[0].fill_estimated);
         assert!((sessions[0].fill_pct - 66.0).abs() < 0.001);
@@ -449,7 +454,7 @@ mod tests {
     fn forge_unknown_fill_is_estimated() {
         let dir = tempdir().unwrap();
         let target = forge_target(dir.path(), "unknown.jsonl", None);
-        let sessions = read_target(&target).unwrap();
+        let sessions = read_target(&target, None).unwrap();
         assert_eq!(sessions.len(), 1);
         assert!(sessions[0].fill_estimated);
     }
@@ -462,7 +467,10 @@ mod tests {
         // it was before.
         let dir = tempdir().expect("tempdir");
         let target = forge_target(dir.path(), "session.jsonl", None);
-        let session = read_target(&target).expect("read").pop().expect("session");
+        let session = read_target(&target, None)
+            .expect("read")
+            .pop()
+            .expect("session");
         assert_eq!(session.transcript(), "[User]\nFix the build");
     }
 }

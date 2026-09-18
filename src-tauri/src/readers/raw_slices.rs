@@ -2,7 +2,7 @@
 // sessions (chat exports, the Ollama DB). Used by the raw backfill to recover
 // correct raws for sessions archived before slicing existed.
 
-use super::{chatgpt, claudeai, gemini, grok, ollama_chat};
+use super::{apple_messages, chatgpt, claudeai, gemini, grok, ollama_chat};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -24,7 +24,11 @@ pub fn is_multi_session_provider(provider_key: &str) -> bool {
 ///
 /// The source is parsed once, so every session sharing it is filled from a
 /// single read rather than one read per session.
-pub fn raw_slices_for_source(source: &Path, provider_key: &str) -> Option<HashMap<String, String>> {
+pub fn raw_slices_for_source(
+    source: &Path,
+    provider_key: &str,
+    default_cc: Option<&str>,
+) -> Option<HashMap<String, String>> {
     if !is_multi_session_provider(provider_key) {
         // One file per session: preserving the whole file is the correct raw.
         return None;
@@ -35,6 +39,8 @@ pub fn raw_slices_for_source(source: &Path, provider_key: &str) -> Option<HashMa
         "gemini" => gemini::read(source),
         "grok" => grok::read(source),
         "ollama_chat" => ollama_chat::read(source),
+        // The Apple backup reader: `source` is the backup directory.
+        "apple_messages" => apple_messages::read(source, default_cc),
         _ => return None,
     };
 

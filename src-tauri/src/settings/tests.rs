@@ -376,6 +376,47 @@ mod tests {
     }
 
     #[test]
+    fn old_settings_json_without_business_ingestion_fields_loads_defaults() {
+        // A settings.json written before the Apple-backup fields existed must
+        // still load, with the new fields at their safe defaults (off, blank).
+        let dir = tmp();
+        fs::write(
+            dir.path().join("settings.json"),
+            r#"{"schedule_time": "04:00", "business_default_country_code": "30"}"#,
+        )
+        .unwrap();
+        let settings = load_settings(dir.path()).unwrap();
+        assert_eq!(settings.business_default_country_code, "30");
+        assert!(settings.apple_backup_path.is_empty());
+        assert!(!settings.business_ingestion_enabled);
+    }
+
+    #[test]
+    fn business_ingestion_fields_round_trip() {
+        let dir = tmp();
+        let settings = HalluScribeSettings {
+            apple_backup_path: "N:/backups/00008020-TEST".to_string(),
+            business_ingestion_enabled: true,
+            ..Default::default()
+        };
+        save_settings(dir.path(), &settings).unwrap();
+        let reloaded = load_settings(dir.path()).unwrap();
+        assert_eq!(reloaded.apple_backup_path, "N:/backups/00008020-TEST");
+        assert!(reloaded.business_ingestion_enabled);
+    }
+
+    #[test]
+    fn business_default_country_code_opt_is_none_when_blank() {
+        let settings = HalluScribeSettings::default();
+        assert_eq!(settings.business_default_country_code_opt(), None);
+        let with_cc = HalluScribeSettings {
+            business_default_country_code: " 30 ".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(with_cc.business_default_country_code_opt(), Some("30"));
+    }
+
+    #[test]
     fn business_default_country_code_round_trips() {
         let dir = tmp();
         let settings = HalluScribeSettings {
