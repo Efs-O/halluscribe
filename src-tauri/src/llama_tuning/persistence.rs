@@ -100,10 +100,12 @@ mod tests {
         assert!(tuning_path(&root).exists(), "template should be written");
         let qwen = &tuning.architectures["qwen35"];
         assert_eq!(qwen.cache_type_k, "q8_0");
-        assert_eq!(qwen.speculative.n_max, 2);
+        assert_eq!(qwen.speculative.n_max, 3);
+        assert_eq!(qwen.n_batch, 16384);
+        assert_eq!(qwen.ubatch_size, Some(1024));
         assert!(
-            !qwen.mmproj_offload,
-            "the projector belongs on the CPU here"
+            qwen.mmproj_offload,
+            "the projector runs on the GPU, as in Forge"
         );
         // Qwen's MTP head is inside the model, so there is no sidecar drafter
         // to place or give a cache to.

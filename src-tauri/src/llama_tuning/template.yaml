@@ -134,8 +134,8 @@ architectures:
   # ---------------------------------------------------------------------------
   qwen35:
     # Matches Forge's qwen38-27b-mtp-ud-q4kxl-vision configuration.
-    n_batch: 4096
-    ubatch_size: 4096
+    n_batch: 16384
+    ubatch_size: 1024
     cache_type_k: q8_0
     cache_type_v: q8_0
     parallel: 1
@@ -143,9 +143,9 @@ architectures:
     threads: 6
     threads_batch: 6
     kv_unified: false
-    # Keep the vision projector in system RAM, matching Forge's
-    # `--no-mmproj-offload` flag.
-    mmproj_offload: false
+    # Vision projector on the GPU, matching Forge (which pins it to its third
+    # card with `--mmproj-device`; add that under extra_args for your own cards).
+    mmproj_offload: true
     reasoning_budget: 4096
     # Qwen 3.8 carries its MTP head INSIDE the model GGUF
     # (`qwen35.nextn_predict_layers`), so there is no sidecar drafter to find:
@@ -154,7 +154,7 @@ architectures:
     # left unset here - they describe a sidecar drafter that does not exist.
     speculative:
       spec_type: draft-mtp,ngram-mod
-      n_max: 2
+      n_max: 3
     sampling:
       top_k: 20
       top_p: 0.95
