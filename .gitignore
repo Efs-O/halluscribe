@@ -62,3 +62,10 @@ Microsoft/
 
 # Dev result logs
 *.txt
+
+# Forge local-agent coordination state and instructions (local only)
+.forge/
+FORGE.md
+
+# Locally built installers
+release/

@@ -38,8 +38,9 @@ Applies to `.rs`, `.ts`, `.svelte`, `.css`, `.js`. Does NOT apply to `.json`, `.
 ---
 
 ## File Size Limit
-- 350 LOC max per source file
-- Split into modules if exceeded
+- 350 LOC soft target per source file; 500 LOC hard ceiling
+- Between 350 and 500 is allowed when splitting would scatter one cohesive unit; above 500, split into modules
+- Tests go in sibling `*_tests.rs` files and do not count toward the limit
 - Does NOT apply to `.md`, `.json`, `.toml`, config files, or generated files
 
 ---
