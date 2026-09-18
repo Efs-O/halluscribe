@@ -21,6 +21,7 @@ mod scheduled_sweep;
 mod tts;
 mod window_size;
 
+pub mod apple_backup;
 pub mod archive;
 pub mod briefing;
 pub mod core;
