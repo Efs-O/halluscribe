@@ -10,7 +10,9 @@
 // or any column value other than counts and dates. The path comes only from
 // argv - there is no default and no hardcoded path.
 
-use app_lib::apple_backup::{open_backup, open_sqlite_read_only, plist_value, BackupError};
+use app_lib::apple_backup::{
+    decode_attributed_body, open_backup, open_sqlite_read_only, plist_value, BackupError,
+};
 use chrono::TimeZone;
 use chrono::Utc;
 use rusqlite::Connection;
@@ -169,10 +171,45 @@ fn print_sms_stats(conn: &Connection) {
                 println!(
                     "message rows text NULL but attributedBody set: {null_text_with_body} of {total} ({pct:.1}%)",
                 );
+                // Decode count only - never the text. Each NULL-text row with a
+                // non-NULL attributedBody is streamed and decoded; a row read
+                // error or an undecodable blob counts as failed.
+                match attributed_body_decode_stats(conn) {
+                    Ok((ok, fail)) => {
+                        let n = ok + fail;
+                        println!("attributedBody decode: {ok} of {n} decoded, {fail} failed");
+                    }
+                    Err(e) => println!("attributedBody decode: unreadable: {e}"),
+                }
             }
             Err(e) => println!("sms.db message: unreadable: {e}"),
         }
     }
+}
+
+/// Count how many NULL-text rows with a non-NULL attributedBody decode to a
+/// string, and how many fail. Streams row by row; never returns or prints the
+/// decoded text. A row read error counts as a failure.
+fn attributed_body_decode_stats(conn: &Connection) -> rusqlite::Result<(i64, i64)> {
+    let mut stmt = conn.prepare(
+        "SELECT attributedBody FROM message WHERE text IS NULL AND attributedBody IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, Vec<u8>>(0))?;
+    let mut ok: i64 = 0;
+    let mut fail: i64 = 0;
+    for row in rows {
+        match row {
+            Ok(blob) => {
+                if decode_attributed_body(&blob).is_some() {
+                    ok += 1;
+                } else {
+                    fail += 1;
+                }
+            }
+            Err(_) => fail += 1,
+        }
+    }
+    Ok((ok, fail))
 }
 
 /// min/max date, total row count, and the count of rows with NULL text but a
