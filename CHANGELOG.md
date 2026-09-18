@@ -5,6 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.31] - 2026-09-18
+
+### Changed
+- The app now opens on the Session Summary tab instead of Briefing
+- Qwen 3.8 llama.cpp tuning template matches the retuned Forge setup: batch 16384, micro-batch 1024, 3 draft tokens, vision projector on the GPU
+
 ## [0.3.30] - 2026-09-12
 
 ### Fixed

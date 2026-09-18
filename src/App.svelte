@@ -24,7 +24,7 @@
   } from "./lib/types";
 
   type Tab = "briefing" | "sessions" | "profile" | "settings";
-  let activeTab = $state<Tab>("briefing");
+  let activeTab = $state<Tab>("sessions");
 
   // One shared SpeakController owned here (App is never destroyed) so TTS
   // playback keeps running when the user switches tabs — BriefingPanel used to
