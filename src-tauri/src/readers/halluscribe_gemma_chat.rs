@@ -67,6 +67,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
                 role,
                 text,
                 timestamp: Some(created_at),
+                speaker: None,
             })
         })
         .collect::<Vec<_>>();
@@ -139,5 +140,8 @@ mod tests {
         assert!(session
             .transcript()
             .contains("Tool activity: searching archives"));
+        // Golden: the user turn renders with the role label exactly as before
+        // the business-messaging work (no speaker label is set).
+        assert!(session.transcript().contains("[User]\nwhat broke?"));
     }
 }

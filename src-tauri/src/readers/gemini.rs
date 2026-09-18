@@ -61,6 +61,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
                 role: MessageRole::User,
                 text: prompt.clone(),
                 timestamp: Some(created_at),
+                speaker: None,
             });
         }
         if !response.is_empty() {
@@ -68,6 +69,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
                 role: MessageRole::Assistant,
                 text: response,
                 timestamp: Some(created_at),
+                speaker: None,
             });
         }
         if messages.is_empty() {
@@ -213,6 +215,12 @@ mod tests {
         assert_eq!(
             session.messages[1].text,
             "Naxos & Crete\nTry shoulder season.\nLess crowded."
+        );
+        // Golden transcript: the multi-line assistant turn is preserved as-is
+        // and the role labels are used exactly as before.
+        assert_eq!(
+            session.transcript(),
+            "[User]\nBest islands in Greece?\n\n[Assistant]\nNaxos & Crete\nTry shoulder season.\nLess crowded."
         );
     }
 

@@ -181,6 +181,10 @@ fn tool_slug(tool: &str) -> &str {
         "grok"
     } else if t.contains("claude.ai") || t == "claude" {
         "claude"
+    } else if t == "messages" {
+        // Explicit: the "continue" fallback is the unknown-tool bucket and must
+        // never catch the business-messaging provider.
+        "apple_messages"
     } else {
         "continue"
     }

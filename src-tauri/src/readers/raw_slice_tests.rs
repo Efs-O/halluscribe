@@ -6,7 +6,7 @@
 // `read_raw_session` returning every other conversation alongside the wanted
 // one. Each session must carry only its own slice.
 
-use super::{chatgpt, claudeai, gemini, raw_slices_for_source};
+use super::{chatgpt, claudeai, gemini, is_multi_session_provider, raw_slices_for_source};
 use std::fs;
 use std::path::Path;
 
@@ -150,4 +150,18 @@ fn unparseable_multi_session_source_yields_no_slices_not_a_file_fallback() {
         .expect("still a multi-session provider");
 
     assert!(slices.is_empty());
+}
+
+#[test]
+fn apple_messages_is_a_multi_session_provider() {
+    // An Apple backup holds every conversation in one sms.db, so it is
+    // multi-session like the other chat exports.
+    assert!(is_multi_session_provider("apple_messages"));
+}
+
+#[test]
+fn coding_providers_are_not_multi_session_providers() {
+    assert!(!is_multi_session_provider("claude_code"));
+    assert!(!is_multi_session_provider("codex"));
+    assert!(!is_multi_session_provider("forge"));
 }

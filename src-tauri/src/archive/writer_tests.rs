@@ -48,6 +48,20 @@ fn tmp_dir(name: &str) -> PathBuf {
 }
 
 #[test]
+fn tool_slug_maps_messages_to_apple_messages() {
+    // The business-messaging provider must land in its own bucket, never the
+    // unknown-tool "continue" fallback.
+    assert_eq!(tool_slug("Messages"), "apple_messages");
+    assert_eq!(tool_slug("messages"), "apple_messages");
+}
+
+#[test]
+fn tool_slug_unknown_tools_still_fall_back_to_continue() {
+    // A genuinely unknown label still uses the fallback bucket.
+    assert_eq!(tool_slug("something-else"), "continue");
+}
+
+#[test]
 fn session_id_uses_file_stem() {
     let p = Path::new("/foo/bar/abc-123-def.jsonl");
     assert_eq!(crate::archive::session_id(p), "abc-123-def");

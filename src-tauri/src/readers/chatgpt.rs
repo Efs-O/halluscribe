@@ -59,6 +59,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
                 role,
                 text,
                 timestamp: message.get("create_time").and_then(value_to_datetime),
+                speaker: None,
             });
         }
 
@@ -249,6 +250,12 @@ mod tests {
         assert!(matches!(session.messages[1].role, MessageRole::Assistant));
         assert_eq!(session.messages[1].text, "Try Athens and Naxos.");
         assert_eq!(session.updated_at, None);
+        // Golden transcript: with no speaker labels, the role labels are used
+        // exactly as before the business-messaging work.
+        assert_eq!(
+            session.transcript(),
+            "[User]\nPlan my trip\n\n[Assistant]\nTry Athens and Naxos."
+        );
     }
 
     #[test]

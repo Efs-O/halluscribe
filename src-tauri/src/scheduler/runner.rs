@@ -7,15 +7,26 @@ use super::helpers::{
 use super::{SweepConfig, SweepProgress, SweepResult};
 use crate::archive::{self, ArchiveError, SessionMeta};
 use crate::gemma::GemmaError;
-use crate::readers::{self, ParsedSession};
+use crate::readers::{self, ChatProvider, ParsedSession};
 use crate::retrieval;
 use crate::scanner::scan_sessions;
 use chrono::{Local, Timelike, Utc};
+use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
 use tauri::Emitter;
+
+/// The project a session is archived under. A per-session override (business
+/// messaging) wins over the provider-derived label; otherwise the provider
+/// label is used. Kept as a pure helper so the override precedence is testable
+/// without driving a full sweep.
+fn resolve_project(provider: &ChatProvider, source_path: &Path, override_: Option<&str>) -> String {
+    override_
+        .map(str::to_string)
+        .unwrap_or_else(|| provider.project_label(source_path))
+}
 
 /// Run one sweep pass according to `config`.
 ///
@@ -248,7 +259,11 @@ pub fn run_sweep(
         let meta = SessionMeta {
             id: session.id.clone(),
             source: session.source_path.clone(),
-            project: session.provider.project_label(&session.source_path),
+            project: resolve_project(
+                &session.provider,
+                &session.source_path,
+                session.project_override.as_deref(),
+            ),
             tool: provider_display_name(&session.provider),
             provider: session.provider.provider_key().to_string(),
             fill_pct: session.fill_pct,
@@ -355,4 +370,36 @@ fn emit_progress(
             status: status.to_string(),
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_project;
+    use crate::readers::ChatProvider;
+    use std::path::Path;
+
+    fn path() -> &'static Path {
+        Path::new("/tmp/nowhere/session.jsonl")
+    }
+
+    #[test]
+    fn resolve_project_uses_override_when_set() {
+        let project = resolve_project(&ChatProvider::AppleMessages, path(), Some("Client Acme"));
+        assert_eq!(project, "Client Acme");
+    }
+
+    #[test]
+    fn resolve_project_falls_back_to_provider_label_when_unset() {
+        // AppleMessages has no per-path label, so the provider label is the
+        // fixed "Messages" string.
+        let project = resolve_project(&ChatProvider::AppleMessages, path(), None);
+        assert_eq!(project, "Messages");
+    }
+
+    #[test]
+    fn resolve_project_override_wins_over_provider_label() {
+        // Even when the provider has a label, a set override wins.
+        let project = resolve_project(&ChatProvider::AppleMessages, path(), Some("Other"));
+        assert_eq!(project, "Other");
+    }
 }

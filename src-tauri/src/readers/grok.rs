@@ -125,6 +125,7 @@ fn collect_messages(entry: &Value) -> Vec<ParsedMessage> {
                 role: message_role(response),
                 text: text.to_string(),
                 timestamp: response.get("create_time").and_then(mongo_datetime),
+                speaker: None,
             },
         ));
     }
@@ -245,6 +246,12 @@ mod tests {
             "2026-08-06T21:33:23.599938+00:00"
         );
         assert!(session.updated_at.is_some());
+        // Golden transcript: the role labels are used exactly as before the
+        // business-messaging work.
+        assert_eq!(
+            session.transcript(),
+            "[User]\nHow does an old Windows box get owned so fast?\n\n[Assistant]\nBecause unpatched services are scanned constantly."
+        );
     }
 
     /// The trap from GROK_IMPORT_PLAN § 2.1: only "human" is a user turn, and

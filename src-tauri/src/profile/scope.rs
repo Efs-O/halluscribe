@@ -143,6 +143,20 @@ mod tests {
     }
 
     #[test]
+    fn apple_messages_is_never_added_by_the_function() {
+        // D11: business messaging is not a profile source. The function only
+        // ever *adds* the personal chat-export extras (chatgpt, claude_ai,
+        // gemini, grok); `apple_messages` is not one of them, so it never
+        // appears in either scope's result for a default (empty) config.
+        let work = sources_for_scope(&[], ProfileScope::Work);
+        assert!(!work.iter().any(|s| s == "apple_messages"));
+        let personal = sources_for_scope(&[], ProfileScope::Personal);
+        assert!(!personal.iter().any(|s| s == "apple_messages"));
+        // The personal extras are exactly the four chat-export providers.
+        assert_eq!(personal, vec!["chatgpt", "claude_ai", "gemini", "grok"]);
+    }
+
+    #[test]
     fn sources_for_scope_personal_dedups_already_configured_extras() {
         let configured = vec!["claude_code".to_string(), "chatgpt".to_string()];
         let sources = sources_for_scope(&configured, ProfileScope::Personal);

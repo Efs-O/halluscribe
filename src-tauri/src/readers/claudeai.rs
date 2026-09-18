@@ -101,6 +101,7 @@ pub fn read(path: &Path) -> Result<Vec<ParsedSession>, ReaderError> {
                 role,
                 text,
                 timestamp: message.created_at.as_deref().and_then(parse_rfc3339),
+                speaker: None,
             });
         }
 
@@ -265,6 +266,12 @@ mod tests {
         assert_eq!(session.messages.len(), 2);
         assert!(matches!(session.messages[0].role, MessageRole::User));
         assert!(matches!(session.messages[1].role, MessageRole::Assistant));
+        // Golden transcript: empty and tool-sender turns are skipped, and the
+        // role labels are used exactly as before the business-messaging work.
+        assert_eq!(
+            session.transcript(),
+            "[User]\nWhat does this error mean?\n\n[Assistant]\nIt means the media type is missing."
+        );
     }
 
     #[test]

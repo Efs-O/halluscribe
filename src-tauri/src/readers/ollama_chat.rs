@@ -153,6 +153,7 @@ fn load_messages(conn: &Connection, chat_id: &str) -> Result<ChatRows, ReaderErr
             role,
             text,
             timestamp: parse_ollama_ts(&ts_raw),
+            speaker: None,
         });
     }
 
@@ -179,7 +180,37 @@ fn truncate(s: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_ollama_ts, truncate};
+    use super::{parse_ollama_ts, read, truncate};
+    use crate::readers::ChatProvider;
+    use rusqlite::Connection;
+    use std::fs;
+
+    #[test]
+    fn reads_a_chat_into_a_session_with_golden_transcript() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("ollama.db");
+        let conn = Connection::open(&db).expect("open db");
+        conn.execute_batch(
+            "CREATE TABLE chats (id TEXT PRIMARY KEY, title TEXT, created_at TEXT, updated_at TEXT);
+             CREATE TABLE messages (chat_id TEXT, role TEXT, content TEXT, thinking TEXT, created_at TEXT);
+             INSERT INTO chats VALUES ('c1', 'Ollama chat', '2026-01-10T08:58:41Z', '2026-01-10T09:00:00Z');
+             INSERT INTO messages VALUES ('c1', 'user', 'hello there', '', '2026-01-10T08:58:41Z');
+             INSERT INTO messages VALUES ('c1', 'assistant', 'hi, how can I help', '', '2026-01-10T08:59:00Z');",
+        )
+        .expect("build db");
+        drop(conn);
+
+        let sessions = read(&db).expect("read ollama db");
+        assert_eq!(sessions.len(), 1);
+        let session = &sessions[0];
+        assert_eq!(session.provider, ChatProvider::OllamaChat);
+        // Golden transcript: role labels, exactly as before the business-messaging work.
+        assert_eq!(
+            session.transcript(),
+            "[User]\nhello there\n\n[Assistant]\nhi, how can I help"
+        );
+        let _ = fs::remove_dir_all(dir.path());
+    }
 
     #[test]
     fn parses_space_separated_timestamp_with_offset() {

@@ -37,6 +37,10 @@ pub enum ChatProvider {
     Grok,
     HalluScribeAgentChat,
     OllamaChat,
+    /// iPhone "Messages" (iMessage/SMS) imported from an Apple backup. The
+    /// reader lands in Phase 5; this variant exists now (Phase 2) so the model
+    /// and its wiring are complete before the reader arrives.
+    AppleMessages,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +55,21 @@ pub struct ParsedMessage {
     pub role: MessageRole,
     pub text: String,
     pub timestamp: Option<DateTime<Utc>>,
+    /// Optional human-readable speaker label (e.g. "Me", "Client"). When set,
+    /// the transcript renders `[speaker]` in place of the role label; when
+    /// `None`, the role label is used exactly as before. Set by the business
+    /// messaging readers (Phase 5+); every existing reader leaves it `None`.
+    pub speaker: Option<String>,
+}
+
+impl ParsedMessage {
+    /// The label rendered in the transcript: the speaker (business messaging)
+    /// when present, otherwise the role label.
+    pub fn label(&self) -> String {
+        self.speaker
+            .clone()
+            .unwrap_or_else(|| self.role.label().to_string())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +96,11 @@ pub struct ParsedSession {
     /// coding tool writes one file per session), where copying the file is
     /// correct.
     pub raw_slice: Option<String>,
+    /// Overrides the project label the runner would otherwise derive from
+    /// `provider.project_label(..)`. When `Some`, the runner archives the
+    /// session under this project instead. Set by the business messaging
+    /// readers (Phase 5+); every existing reader leaves it `None`.
+    pub project_override: Option<String>,
     /// Coding preprocessors retain these whole-turn fragments before rendering
     /// the transcript. Imports use their already-structured messages instead.
     preprocessed_units: Option<Vec<String>>,
@@ -131,6 +155,7 @@ impl ChatProvider {
             Self::Grok => "Grok",
             Self::HalluScribeAgentChat => "HalluScribe Agent",
             Self::OllamaChat => "Ollama Chat",
+            Self::AppleMessages => "Messages",
         }
     }
 
@@ -156,6 +181,7 @@ impl ChatProvider {
             Self::Grok => "Grok".to_string(),
             Self::HalluScribeAgentChat => "HalluScribe".to_string(),
             Self::OllamaChat => "Ollama".to_string(),
+            Self::AppleMessages => "Messages".to_string(),
         }
     }
 
@@ -174,6 +200,7 @@ impl ChatProvider {
             Self::Grok => "grok",
             Self::HalluScribeAgentChat => "halluscribe_agent_chat",
             Self::OllamaChat => "ollama_chat",
+            Self::AppleMessages => "apple_messages",
         }
     }
 }
@@ -207,7 +234,7 @@ impl ParsedSession {
                 if text.is_empty() {
                     None
                 } else {
-                    Some(format!("[{}]\n{}", message.role.label(), text))
+                    Some(format!("[{}]\n{}", message.label(), text))
                 }
             })
             .collect::<Vec<_>>()
@@ -224,7 +251,7 @@ impl ParsedSession {
             .iter()
             .filter_map(|message| {
                 let text = message.text.trim();
-                (!text.is_empty()).then(|| format!("[{}]\n{}", message.role.label(), text))
+                (!text.is_empty()).then(|| format!("[{}]\n{}", message.label(), text))
             })
             .collect()
     }
@@ -240,6 +267,8 @@ pub fn read_target(target: &ScanTarget) -> Result<Vec<ParsedSession>, ReaderErro
             ChatProvider::Grok => grok::read(&target.path),
             ChatProvider::HalluScribeAgentChat => halluscribe_agent_chat::read(&target.path),
             ChatProvider::OllamaChat => ollama_chat::read(&target.path),
+            // Phase 5: the Apple backup reader lands here.
+            ChatProvider::AppleMessages => Ok(Vec::new()),
             ChatProvider::ClaudeCode | ChatProvider::Codex | ChatProvider::Forge => Ok(Vec::new()),
         },
     }
@@ -279,6 +308,7 @@ fn read_coding_target(
             role: MessageRole::Assistant,
             text: transcript.clone(),
             timestamp: Some(created_at),
+            speaker: None,
         }],
         source_path: target.path.clone(),
         provider,
@@ -293,6 +323,7 @@ fn read_coding_target(
         // One JSONL file == one coding session, so the whole-file copy the
         // sweep falls back to is already the correct raw for this session.
         raw_slice: None,
+        project_override: None,
         preprocessed_units: Some(preprocessed.units),
     }])
 }
@@ -351,6 +382,7 @@ pub(super) fn build_session(
         transcript_hash: stable_hash(&transcript),
         messages,
         raw_slice: None,
+        project_override: None,
         preprocessed_units: None,
     })
 }
@@ -419,4 +451,20 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert!(sessions[0].fill_estimated);
     }
+
+    #[test]
+    fn coding_transcript_is_unchanged_golden() {
+        // The coding path renders from preprocessed_units (a branch
+        // `transcript()` did not change in the business-messaging work). This
+        // golden pins that a coding session's transcript is byte-for-byte what
+        // it was before.
+        let dir = tempdir().expect("tempdir");
+        let target = forge_target(dir.path(), "session.jsonl", None);
+        let session = read_target(&target).expect("read").pop().expect("session");
+        assert_eq!(session.transcript(), "[User]\nFix the build");
+    }
 }
+
+#[cfg(test)]
+#[path = "reader_model_tests.rs"]
+mod reader_model_tests;

@@ -14,7 +14,7 @@ use std::path::Path;
 pub fn is_multi_session_provider(provider_key: &str) -> bool {
     matches!(
         provider_key,
-        "chatgpt" | "claude_ai" | "gemini" | "grok" | "ollama_chat"
+        "chatgpt" | "claude_ai" | "gemini" | "grok" | "ollama_chat" | "apple_messages"
     )
 }
 
