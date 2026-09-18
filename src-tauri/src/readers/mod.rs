@@ -1,4 +1,6 @@
 // HalluScribe - parsed chat import readers and shared session assembly.
+pub mod apple_messages_db;
+pub mod apple_messages_window;
 mod chatgpt;
 mod chatgpt_content;
 mod claudeai;
