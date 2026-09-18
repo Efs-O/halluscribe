@@ -115,6 +115,10 @@ pub struct HalluScribeSettings {
     /// Bare name (file stem, not full path) of the selected voice in
     /// `~/.halluscribe/tts/voices`. Empty = no voice selected.
     pub tts_voice: String,
+    /// Default country code for normalizing business-messaging phone handles
+    /// to E.164 (D8). Empty = no default: only already-international numbers
+    /// (`+…`, `00…`) are normalized; local numbers are matched verbatim.
+    pub business_default_country_code: String,
 }
 
 fn default_profile_sources() -> Vec<String> {
@@ -180,6 +184,7 @@ impl Default for HalluScribeSettings {
             profile_sources: default_profile_sources(),
             tts_piper_bin: String::new(),
             tts_voice: String::new(),
+            business_default_country_code: String::new(),
         }
     }
 }

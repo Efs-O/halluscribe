@@ -361,6 +361,33 @@ mod tests {
     }
 
     #[test]
+    fn old_settings_json_without_business_default_country_code_loads_blank() {
+        // A settings.json written before the field existed must still load, with
+        // the new field defaulting to blank (D8: no guessed country code).
+        let dir = tmp();
+        fs::write(
+            dir.path().join("settings.json"),
+            r#"{"schedule_time": "04:00", "ollama_model": "gemma4:12b"}"#,
+        )
+        .unwrap();
+        let settings = load_settings(dir.path()).unwrap();
+        assert_eq!(settings.ollama_model, "gemma4:12b");
+        assert!(settings.business_default_country_code.is_empty());
+    }
+
+    #[test]
+    fn business_default_country_code_round_trips() {
+        let dir = tmp();
+        let settings = HalluScribeSettings {
+            business_default_country_code: "30".to_string(),
+            ..Default::default()
+        };
+        save_settings(dir.path(), &settings).unwrap();
+        let reloaded = load_settings(dir.path()).unwrap();
+        assert_eq!(reloaded.business_default_country_code, "30");
+    }
+
+    #[test]
     fn old_settings_json_without_profile_sources_gets_default() {
         let dir = tmp();
         fs::write(

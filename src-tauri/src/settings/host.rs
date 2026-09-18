@@ -146,6 +146,9 @@ pub(super) fn merge_host_owned(
         // providers the distiller may read. Sharing it across people would be a
         // privacy regression, so it can never become host-owned.
         profile_sources,
+        // This person's business contacts' default country code - a
+        // person-owned value, never shared across people.
+        business_default_country_code,
     } = guest;
 
     HalluScribeSettings {
@@ -163,6 +166,7 @@ pub(super) fn merge_host_owned(
         auto_sweep_exhausted_date,
         first_run,
         profile_sources,
+        business_default_country_code,
         ..host.clone()
     }
 }
