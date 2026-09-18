@@ -1,5 +1,6 @@
 // HalluScribe - search predicate helpers: match an IndexEntry against SearchParams.
 
+use super::fold::fold_for_search;
 use super::tokenize::{parse_query, ParsedQuery};
 use super::SearchParams;
 use crate::archive::IndexEntry;
@@ -116,21 +117,22 @@ fn tokens_score(
 }
 
 /// Best (highest-weight) metadata field containing `needle`, if any. No disk read.
+/// `needle` is already folded (see `parse_query`); the fields are folded here.
 fn metadata_best_weight(entry: &IndexEntry, needle: &str) -> Option<u32> {
-    if entry.title.to_lowercase().contains(needle) {
+    if fold_for_search(&entry.title).contains(needle) {
         return Some(WEIGHT_TITLE);
     }
     if entry
         .topic_tags
         .iter()
-        .any(|tag| tag.to_lowercase().contains(needle))
+        .any(|tag| fold_for_search(tag).contains(needle))
     {
         return Some(WEIGHT_TOPIC_TAG);
     }
     if entry
         .error_tags
         .iter()
-        .any(|tag| tag.to_lowercase().contains(needle))
+        .any(|tag| fold_for_search(tag).contains(needle))
     {
         return Some(WEIGHT_ERROR_TAG);
     }
@@ -198,10 +200,7 @@ fn matches_project(entry: &IndexEntry, params: &SearchParams) -> bool {
         return true;
     };
 
-    entry
-        .project
-        .to_lowercase()
-        .contains(&project.to_lowercase())
+    fold_for_search(&entry.project).contains(&fold_for_search(project))
 }
 
 fn matches_tool(entry: &IndexEntry, params: &SearchParams) -> bool {

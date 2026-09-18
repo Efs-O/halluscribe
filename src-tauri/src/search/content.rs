@@ -1,6 +1,7 @@
 // HalluScribe - session content search: shared .md body read + full-text matcher.
 
 use super::body_cache;
+use super::fold::fold_for_search;
 use super::tokenize::{parse_query, ParsedQuery};
 use crate::archive::{read_sessions, IndexEntry};
 use std::{fs, path::Path};
@@ -57,16 +58,16 @@ pub(crate) fn body_contains_with_stamp(
 /// Does `needle` (already lowercased) appear in this entry's session-list
 /// metadata fields (title, project, error_tags, topic_tags)? No disk read.
 fn metadata_contains(entry: &IndexEntry, needle: &str) -> bool {
-    entry.title.to_lowercase().contains(needle)
-        || entry.project.to_lowercase().contains(needle)
+    fold_for_search(&entry.title).contains(needle)
+        || fold_for_search(&entry.project).contains(needle)
         || entry
             .error_tags
             .iter()
-            .any(|tag| tag.to_lowercase().contains(needle))
+            .any(|tag| fold_for_search(tag).contains(needle))
         || entry
             .topic_tags
             .iter()
-            .any(|tag| tag.to_lowercase().contains(needle))
+            .any(|tag| fold_for_search(tag).contains(needle))
 }
 
 /// Full-text session-list matcher: title, project, error_tags, topic_tags,

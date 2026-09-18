@@ -13,6 +13,7 @@
 //     process (the MCP server, a second window) without a per-file `stat`.
 // Either one changing drops the whole map; it is rebuilt on the next search.
 
+use super::fold::fold_for_search;
 use crate::archive::{index_stamp, read_sessions, IndexStamp};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -57,7 +58,7 @@ fn load(archive_dir: &Path) -> HashMap<String, String> {
             continue;
         }
         if let Ok(markdown) = std::fs::read_to_string(archive_dir.join(&entry.archive_path)) {
-            bodies.insert(entry.archive_path, markdown.to_lowercase());
+            bodies.insert(entry.archive_path, fold_for_search(&markdown));
         }
     }
     bodies

@@ -153,6 +153,34 @@ fn counts_entries_without_raw_and_returns_other_matches() {
 }
 
 #[test]
+fn greek_query_finds_accented_raw() {
+    let dir = tmp_dir("greek");
+    write_index(
+        &dir,
+        &[TestEntry {
+            id: "greek",
+            date: "2026-07-01",
+            raw_path: Some("raw/greek.zst"),
+        }],
+    );
+    // The raw holds the accented word Καλημέρα (tonos on the epsilon); the
+    // query is the plain accent-free form. D9 folding must make them match.
+    // Codepoints are explicit so the accented vowel is unambiguous.
+    let accented = "\u{039A}\u{03B1}\u{03BB}\u{03B7}\u{03BC}\u{03AD}\u{03C1}\u{03B1}"; // Καλημέρα
+    write_raw(
+        &dir,
+        "raw/greek.zst",
+        format!("line one\n{accented} world\n").as_str(),
+    );
+    let plain = "\u{03BA}\u{03B1}\u{03BB}\u{03B7}\u{03BC}\u{03B5}\u{03C1}\u{03B1}"; // καλημερα
+    let result = search_raw(&dir, plain, None).unwrap();
+    assert_eq!(result.sessions_scanned, 1);
+    assert_eq!(result.sessions[0].session_id, "greek");
+    assert_eq!(result.total_hits, 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn records_missing_and_corrupt_raws_then_continues() {
     let dir = tmp_dir("failed");
     write_index(

@@ -1,5 +1,7 @@
 // HalluScribe - query tokenization: quoted-phrase vs AND-of-terms parsing for keyword search.
 
+use super::fold::fold_for_search;
+
 /// Result of parsing a raw search query string (see `parse_query`).
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum ParsedQuery {
@@ -42,7 +44,7 @@ pub(super) fn parse_query(query: &str) -> ParsedQuery {
     if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
         let inner = &trimmed[1..trimmed.len() - 1];
         if !inner.is_empty() {
-            return ParsedQuery::Phrase(inner.to_lowercase());
+            return ParsedQuery::Phrase(fold_for_search(inner));
         }
     }
     let tokens = tokenize(trimmed);
@@ -50,7 +52,7 @@ pub(super) fn parse_query(query: &str) -> ParsedQuery {
         // Punctuation/whitespace-only input tokenizes to nothing; an empty
         // AND would vacuously match every session. Fall back to exact
         // substring on the raw text (old behaviour: garbage in, 0 hits out).
-        return ParsedQuery::Phrase(trimmed.to_lowercase());
+        return ParsedQuery::Phrase(fold_for_search(trimmed));
     }
     ParsedQuery::Tokens(tokens)
 }
@@ -59,8 +61,7 @@ pub(super) fn parse_query(query: &str) -> ParsedQuery {
 /// Never returns an empty vec for a non-empty input: if removing stop-words
 /// would empty the token list, the un-stopped tokens are kept instead.
 fn tokenize(query: &str) -> Vec<String> {
-    let raw: Vec<String> = query
-        .to_lowercase()
+    let raw: Vec<String> = fold_for_search(query)
         .split(|c: char| c.is_whitespace() || SPLIT_PUNCTUATION.contains(&c))
         .filter(|token| !token.is_empty())
         .map(String::from)
@@ -150,10 +151,22 @@ mod tests {
     }
 
     #[test]
-    fn greek_tokens_are_preserved() {
-        match parse_query("διόρθωση σφάλματος") {
+    fn greek_tokens_are_folded_not_dropped() {
+        // D9: Greek tokens are kept (never stripped as stop-words) but folded
+        // to their accent-free form, so an accented query matches plain text.
+        // Codepoints are explicit: the second word ends in a FINAL sigma
+        // (ς U+03C2) which folds to the MEDIAL sigma (σ U+03C3).
+        let query = "\u{03B4}\u{03B9}\u{03CC}\u{03C1}\u{03B8}\u{03C9}\u{03C3}\u{03B7} \
+                     \u{03C3}\u{03C6}\u{03B1}\u{03BB}\u{03BC}\u{03B1}\u{03C4}\u{03BF}\u{03C2}";
+        match parse_query(query) {
             ParsedQuery::Tokens(tokens) => {
-                assert_eq!(tokens, vec!["διόρθωση", "σφάλματος"]);
+                assert_eq!(
+                    tokens,
+                    vec![
+                        "\u{03B4}\u{03B9}\u{03BF}\u{03C1}\u{03B8}\u{03C9}\u{03C3}\u{03B7}",
+                        "\u{03C3}\u{03C6}\u{03B1}\u{03BB}\u{03BC}\u{03B1}\u{03C4}\u{03BF}\u{03C3}",
+                    ]
+                );
             }
             ParsedQuery::Phrase(_) => panic!("expected Tokens"),
         }

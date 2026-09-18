@@ -304,3 +304,34 @@ fn t10_fulltext_quoted_phrase_still_exact_substring() {
     let results = search_fulltext(dir.path(), "\"Forge MCP client bridge\"");
     assert!(results.is_empty());
 }
+
+// --- D9: Greek accent folding in session search ---------------------------
+
+#[test]
+fn d9_greek_query_finds_accented_session_body() {
+    let dir = tmp();
+    // A session whose body holds the accented word Καλημέρα (tonos on the
+    // epsilon). Codepoints are explicit so the accented vowel is unambiguous.
+    let accented = "\u{039A}\u{03B1}\u{03BB}\u{03B7}\u{03BC}\u{03AD}\u{03C1}\u{03B1}"; // Καλημέρα
+    make_index(
+        dir.path(),
+        &[("greek", "Greeting session", "2026-07-06", "Forge")],
+    );
+    write_md(
+        dir.path(),
+        "2026-07-06",
+        format!("client said {accented} this morning").as_str(),
+    );
+
+    // The plain accent-free query must find it (D9).
+    let plain = "\u{03BA}\u{03B1}\u{03BB}\u{03B7}\u{03BC}\u{03B5}\u{03C1}\u{03B1}"; // καλημερα
+    let results = search_sessions(
+        dir.path(),
+        &SearchParams {
+            query: Some(plain.to_string()),
+            ..Default::default()
+        },
+    );
+    assert_eq!(results.len(), 1, "plain query must find the accented body");
+    assert_eq!(results[0].id, "greek");
+}

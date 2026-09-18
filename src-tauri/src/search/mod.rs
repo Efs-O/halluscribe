@@ -7,6 +7,7 @@ mod analytics;
 mod body_cache;
 mod content;
 mod filtering;
+mod fold;
 mod params;
 mod raw;
 mod tokenize;
@@ -20,6 +21,7 @@ pub use analytics::{
 pub use body_cache::invalidate as invalidate_body_cache;
 pub(crate) use content::body_contains;
 pub(crate) use filtering::matches_params;
+pub use fold::fold_for_search;
 pub use params::SearchParams;
 pub use raw::{search_raw, RawExcerpt, RawSearchError, RawSearchResult, RawSessionMatches};
 
@@ -132,7 +134,7 @@ pub fn search_sessions_page(
 /// Returns all matches sorted newest-first - no limit (caller paginates).
 /// Same logic as the briefing keyword filter so behaviour is consistent.
 pub fn search_fulltext(archive_dir: &Path, query: &str) -> Vec<IndexEntry> {
-    let q = query.trim().to_lowercase();
+    let q = fold::fold_for_search(query.trim());
     if q.is_empty() {
         let mut all = read_sessions(archive_dir);
         all.sort_by_key(|s| std::cmp::Reverse(s.date.clone()));

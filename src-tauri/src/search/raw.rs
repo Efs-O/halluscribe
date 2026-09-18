@@ -1,5 +1,6 @@
 // HalluScribe - raw transcript matching and archive search orchestration.
 
+use super::fold::fold_for_search;
 use crate::archive::{load_captured, raw_rel_path, read_raw_at, read_sessions, IndexEntry};
 use std::collections::HashSet;
 use std::fmt;
@@ -245,8 +246,11 @@ pub(crate) fn scan_text(text: &str, needle: &str, max_excerpts: usize) -> RawSca
         };
     }
 
-    let literal = needle.to_lowercase();
-    let escaped = json_escaped(needle).to_lowercase();
+    // Fold (case + Greek accents, D9) rather than just lowercase, on BOTH the
+    // needle and the haystack, so `καλημερα` finds `Καλημέρα`. The fold
+    // preserves char count (see fold.rs), so the offsets below stay valid.
+    let literal = fold_for_search(needle);
+    let escaped = fold_for_search(&json_escaped(needle));
     let second_needle = (escaped != literal).then_some(escaped.as_str());
     let literal_chars = literal.chars().count();
     let escaped_chars = escaped.chars().count();
@@ -257,7 +261,7 @@ pub(crate) fn scan_text(text: &str, needle: &str, max_excerpts: usize) -> RawSca
     };
 
     for (line_index, line) in text.lines().enumerate() {
-        let lowered = line.to_lowercase();
+        let lowered = fold_for_search(line);
         let mut line_hits = 0;
         let mut first_hit = None;
 
