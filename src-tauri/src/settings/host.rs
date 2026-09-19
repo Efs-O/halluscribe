@@ -153,6 +153,10 @@ pub(super) fn merge_host_owned(
         // both person-owned, never shared across people.
         apple_backup_path,
         business_ingestion_enabled,
+        // This person's last business import outcome - person-owned, never
+        // shared across people.
+        business_last_import,
+        business_last_error,
     } = guest;
 
     HalluScribeSettings {
@@ -173,6 +177,8 @@ pub(super) fn merge_host_owned(
         business_default_country_code,
         apple_backup_path,
         business_ingestion_enabled,
+        business_last_import,
+        business_last_error,
         ..host.clone()
     }
 }

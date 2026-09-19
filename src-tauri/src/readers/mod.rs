@@ -239,6 +239,28 @@ impl ChatProvider {
             Self::Viber => "viber",
         }
     }
+
+    /// The inverse of `provider_key`: recover a provider from its machine key
+    /// (the `profile_sources` / archive-index `provider` string). `None` for a
+    /// key no provider owns.
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "claude_code" => Some(Self::ClaudeCode),
+            "codex" => Some(Self::Codex),
+            "forge" => Some(Self::Forge),
+            "chatgpt" => Some(Self::ChatGPT),
+            "claude_ai" => Some(Self::ClaudeAI),
+            "gemini" => Some(Self::Gemini),
+            "grok" => Some(Self::Grok),
+            "halluscribe_agent_chat" => Some(Self::HalluScribeAgentChat),
+            "ollama_chat" => Some(Self::OllamaChat),
+            "apple_messages" => Some(Self::AppleMessages),
+            "whatsapp" => Some(Self::WhatsApp),
+            "whatsapp_business" => Some(Self::WhatsAppBusiness),
+            "viber" => Some(Self::Viber),
+            _ => None,
+        }
+    }
 }
 
 impl MessageRole {

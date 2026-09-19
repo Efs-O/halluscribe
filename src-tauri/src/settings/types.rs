@@ -128,6 +128,13 @@ pub struct HalluScribeSettings {
     /// and invoices, so nothing is read from a backup until the user turns
     /// this on.
     pub business_ingestion_enabled: bool,
+    /// When the last business import (sweep) finished, as an ISO-8601 UTC
+    /// string. Empty = never run. Surfaced in the business settings section as
+    /// "Last import".
+    pub business_last_import: String,
+    /// The error from the last failed business import (or an unsupported-schema
+    /// note), empty = none. Surfaced next to the last import time.
+    pub business_last_error: String,
 }
 
 impl HalluScribeSettings {
@@ -206,6 +213,8 @@ impl Default for HalluScribeSettings {
             business_default_country_code: String::new(),
             apple_backup_path: String::new(),
             business_ingestion_enabled: false,
+            business_last_import: String::new(),
+            business_last_error: String::new(),
         }
     }
 }

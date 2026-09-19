@@ -50,7 +50,7 @@ use commands::{
     preview_redaction, read_image_attachment, read_session, rebuild_session_embeddings,
     run_briefing, save_recorded_chat_session, save_settings, search_raw_transcripts,
     search_sessions, search_sessions_fulltext, search_sessions_semantic, send_chat_message,
-    trigger_sweep, validate_ollama_api_key,
+    trigger_business_import, trigger_sweep, validate_ollama_api_key,
 };
 use commands_capture::{cancel_capture, get_capture_status};
 use commands_profile::{
@@ -301,6 +301,7 @@ pub fn run() {
             get_recent_sessions,
             get_stats,
             get_raw_session_total,
+            trigger_business_import,
             trigger_sweep,
             get_settings,
             save_settings,

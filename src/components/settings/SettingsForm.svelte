@@ -5,6 +5,7 @@
   import type { HalluScribeSettings } from "../../lib/types";
   import "./SettingsForm.css";
   import BriefingSettings from "./BriefingSettings.svelte";
+  import BusinessMessagesSettings from "./BusinessMessagesSettings.svelte";
   import ChatImportSettings from "./ChatImportSettings.svelte";
   import ModelBackendSettings from "./ModelBackendSettings.svelte";
   import SemanticSearchSettings from "./SemanticSearchSettings.svelte";
@@ -71,6 +72,7 @@
       <SemanticSearchSettings bind:settings onSave={save} onNotify={showFlash} />
       <SweepSettings bind:settings onSave={save} onNotify={showFlash} />
       <ChatImportSettings bind:settings onSave={save} />
+      <BusinessMessagesSettings bind:settings onSave={save} onNotify={showFlash} />
       <BriefingSettings bind:settings onSave={save} />
       <TtsVoiceSettings
         bind:piperBin={settings.tts_piper_bin}

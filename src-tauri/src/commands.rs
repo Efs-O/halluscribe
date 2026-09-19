@@ -25,4 +25,4 @@ pub(crate) use search::{
 pub(crate) use settings::{
     chat_import_status, get_settings, save_settings, validate_ollama_api_key,
 };
-pub(crate) use sweep::{cancel_sweep, trigger_sweep};
+pub(crate) use sweep::{cancel_sweep, trigger_business_import, trigger_sweep};

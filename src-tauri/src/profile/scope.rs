@@ -77,6 +77,12 @@ impl ProfileScope {
 /// `profile_sources` setting. Work is exactly `profile_sources`; Personal is
 /// the union of `profile_sources` and the personal-chat-export providers
 /// (deduplicated, `profile_sources`' order preserved, extras appended).
+///
+/// Business-messaging providers are always excluded (D11): business chats are
+/// customer data, never a profile source, and never leave the machine in a
+/// Persona Pack. A user could configure one into `profile_sources`, so the
+/// filter is applied here — the single source of truth for a scope's
+/// providers — rather than at each call site.
 pub fn sources_for_scope(profile_sources: &[String], scope: ProfileScope) -> Vec<String> {
     let mut sources: Vec<String> = profile_sources.to_vec();
     if scope == ProfileScope::Personal {
@@ -86,6 +92,11 @@ pub fn sources_for_scope(profile_sources: &[String], scope: ProfileScope) -> Vec
             }
         }
     }
+    sources.retain(|source| {
+        crate::readers::ChatProvider::from_key(source)
+            .map(|provider| !provider.is_business())
+            .unwrap_or(true)
+    });
     sources
 }
 
@@ -154,6 +165,38 @@ mod tests {
         assert!(!personal.iter().any(|s| s == "apple_messages"));
         // The personal extras are exactly the four chat-export providers.
         assert_eq!(personal, vec!["chatgpt", "claude_ai", "gemini", "grok"]);
+    }
+
+    #[test]
+    fn business_providers_are_never_in_any_scope() {
+        // D11: even when a business provider is explicitly configured, it must
+        // be filtered out of every scope's source list, so it can never reach
+        // the profile or a Persona Pack.
+        let configured = vec![
+            "claude_code".to_string(),
+            "apple_messages".to_string(),
+            "whatsapp".to_string(),
+            "whatsapp_business".to_string(),
+            "viber".to_string(),
+        ];
+        for scope in [ProfileScope::Work, ProfileScope::Personal] {
+            let sources = sources_for_scope(&configured, scope);
+            assert!(
+                !sources.iter().any(|s| s == "apple_messages"),
+                "scope {scope:?}"
+            );
+            assert!(!sources.iter().any(|s| s == "whatsapp"), "scope {scope:?}");
+            assert!(
+                !sources.iter().any(|s| s == "whatsapp_business"),
+                "scope {scope:?}"
+            );
+            assert!(!sources.iter().any(|s| s == "viber"), "scope {scope:?}");
+            // The non-business source survives.
+            assert!(
+                sources.contains(&"claude_code".to_string()),
+                "scope {scope:?}"
+            );
+        }
     }
 
     #[test]

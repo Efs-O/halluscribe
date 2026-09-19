@@ -74,6 +74,16 @@ export interface HalluScribeSettings {
   briefing_window_hours: number;
   tts_piper_bin: string;
   tts_voice: string;
+  /** Business (iPhone backup) ingestion is opt-in and OFF by default. */
+  business_ingestion_enabled: boolean;
+  /** Default country code for local numbers in business chats (D8). Empty = none. */
+  business_default_country_code: string;
+  /** Absolute path to the iPhone backup folder (holds `Manifest.db`). Empty = unset. */
+  apple_backup_path: string;
+  /** When the last business import finished (ISO-8601). Empty = never run. */
+  business_last_import: string;
+  /** The last failed business import's error (or unsupported-schema note). Empty = none. */
+  business_last_error: string;
 }
 
 /** Filters passed to run_briefing. Empty strings mean "no restriction". */

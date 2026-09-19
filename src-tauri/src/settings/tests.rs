@@ -406,6 +406,34 @@ mod tests {
     }
 
     #[test]
+    fn old_settings_json_without_business_import_fields_loads_blank() {
+        // A settings.json written before the last-import/last-error fields
+        // existed must still load, with both defaulting to empty (never run /
+        // no error).
+        let dir = tmp();
+        let json = r#"{ "ollama_model": "gemma4:12b", "business_ingestion_enabled": true }"#;
+        std::fs::write(dir.path().join("settings.json"), json).unwrap();
+        let settings = load_settings(dir.path()).unwrap();
+        assert!(settings.business_ingestion_enabled);
+        assert!(settings.business_last_import.is_empty());
+        assert!(settings.business_last_error.is_empty());
+    }
+
+    #[test]
+    fn business_import_outcome_fields_round_trip() {
+        let dir = tmp();
+        let settings = HalluScribeSettings {
+            business_last_import: "2026-09-19T06:00:00+00:00".to_string(),
+            business_last_error: "unsupported schema".to_string(),
+            ..Default::default()
+        };
+        save_settings(dir.path(), &settings).unwrap();
+        let reloaded = load_settings(dir.path()).unwrap();
+        assert_eq!(reloaded.business_last_import, "2026-09-19T06:00:00+00:00");
+        assert_eq!(reloaded.business_last_error, "unsupported schema");
+    }
+
+    #[test]
     fn business_default_country_code_opt_is_none_when_blank() {
         let settings = HalluScribeSettings::default();
         assert_eq!(settings.business_default_country_code_opt(), None);

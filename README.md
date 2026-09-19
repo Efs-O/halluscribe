@@ -96,6 +96,15 @@ Hold more than one person's archive on a single machine. Each **workspace** is a
 
 Every path field in Settings — model files, binaries, chat-import folders, workspace roots — pairs its text input with a native **Browse…** dialog, so paths can be picked from the OS file/folder picker or typed as before.
 
+### Business messages (import-only workspace)
+Customer conversations (iPhone Messages, WhatsApp, WhatsApp Business, Viber) are kept out of your personal archive by design. To use them:
+
+1. Create a dedicated **workspace** (e.g. `business`) from Settings → Workspaces.
+2. Mark it **import-only**. An import-only workspace's sweep ingests only its configured chat imports — never the host machine's coding sessions.
+3. In that workspace's Settings → **Business messages**, turn the toggle on, pick the iPhone backup folder (the one holding `Manifest.db`), and set a default country code for local numbers.
+
+**Why the MCP never sees these:** the registered MCP server serves exactly one archive — the host default (or `HALLUSCRIBE_DIR`) — and a business workspace is a *different* archive. Customer messages therefore live in a separate root that the MCP does not point at, so Claude/Codex cannot read them by construction, with no extra permission code. Exposing business messages to a cloud agent later is a deliberate act (register a second MCP against the business root), not an accident.
+
 ### Privacy &amp; redaction
 A secret scanner flags likely credentials (API keys, tokens) in each session, and a per-session redaction panel lets you review and strip sensitive spans before anything is exported or exposed over MCP. Redaction is applied to archive Markdown and MCP reads; raw copies are never redacted and never leave unless you opt in.
 
