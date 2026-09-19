@@ -212,6 +212,16 @@ impl ChatProvider {
         matches!(self, Self::ClaudeCode | Self::Codex | Self::Forge)
     }
 
+    /// The business-messaging providers (Apple Messages, WhatsApp, WhatsApp
+    /// Business, Viber). These are the only ones that get the business summary
+    /// prompt (Phase 8); every other provider keeps its existing prompt.
+    pub fn is_business(&self) -> bool {
+        matches!(
+            self,
+            Self::AppleMessages | Self::WhatsApp | Self::WhatsAppBusiness | Self::Viber
+        )
+    }
+
     pub fn provider_key(&self) -> &'static str {
         match self {
             Self::ClaudeCode => "claude_code",

@@ -171,7 +171,9 @@ pub fn run_inference(
 /// warm-server `SweepSession` so both prompt identically.
 fn build_system_prompt(provider: &ChatProvider, transcript: &str) -> String {
     let target_words = summary_word_target(transcript);
-    if provider.is_coding() {
+    if provider.is_business() {
+        business_system_prompt(target_words)
+    } else if provider.is_coding() {
         coding_system_prompt(target_words)
     } else {
         general_system_prompt(target_words)
@@ -213,6 +215,31 @@ fn general_system_prompt(target_words: usize) -> String {
          headings and its conclusions. Do not paraphrase it and do not count it against the word \
          budget above; verbatim_highlights is separate from the summary. \
          Do not assume the conversation is about coding unless it clearly is. \
+         For error_tags and topic_tags, only use short tags that are explicitly grounded in the \
+         transcript text itself. Do not invent inferred tags that are not literally supported by \
+         the transcript."
+    )
+}
+
+/// The business-messaging summary prompt (Phase 8). Selected only for the
+/// business providers (`ChatProvider::is_business`); the coding and general
+/// prompts above are untouched. It is written in English and kept short — the
+/// model handles Greek content. The one hard rule: figures are quoted exactly
+/// as written and never inferred, because a wrong price in a business log is
+/// worse than a missing one.
+fn business_system_prompt(target_words: usize) -> String {
+    format!(
+        "You are summarizing a business conversation (a customer exchange). Analyse the normalized \
+         transcript and call save_session_summary with a clear result. For the summary be specific \
+         and factual: cover the customer, the products or materials discussed, quantities, \
+         dimensions, prices, dates, the agreed outcome, and any open issues. \
+         Quote every figure exactly as written in the transcript; never infer, round, or convert a \
+         price, quantity, or dimension that is not stated. If a detail is not present, omit it \
+         rather than guessing. Aim for approximately {target_words} words, staying concise but \
+         complete. If the transcript contains a comparison table, rating, verdict, or decision \
+         matrix, copy it into verbatim_highlights exactly as written — including its column \
+         headings and its conclusions. Do not paraphrase it and do not count it against the word \
+         budget above; verbatim_highlights is separate from the summary. \
          For error_tags and topic_tags, only use short tags that are explicitly grounded in the \
          transcript text itself. Do not invent inferred tags that are not literally supported by \
          the transcript."

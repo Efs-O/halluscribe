@@ -97,6 +97,102 @@ fn retain_grounded_highlights_enforces_caps() {
     );
 }
 
+// The exact current text of the two existing prompts, captured byte-for-byte
+// (at the 900-word target) so any edit to them fails loudly. These are the
+// regression guard for Phase 8: the business variant must not touch them.
+const CODING_PROMPT_900: &str = "You are a technical scribe. Analyse the AI coding session transcript the user provides and call save_session_summary with a detailed, developer-quality result. For the summary be specific and complete: cover Goal, What Was Done, Key Decisions, Files Changed, Open Issues, and Suggested Next Step. Aim for approximately 900 words, staying concise but complete. If the transcript contains a comparison table, benchmark result, rating, verdict, or decision matrix, copy it into verbatim_highlights exactly as written \u{2014} including its column headings and its conclusions. Do not paraphrase it and do not count it against the word budget above; verbatim_highlights is separate from the summary. For error_tags and topic_tags, only use short tags that are explicitly grounded in the transcript text itself, such as literal technologies, filenames, APIs, libraries, or error names that appear in the transcript. Do not infer broad languages, frameworks, or domains unless they are directly mentioned.";
+
+const GENERAL_PROMPT_900: &str = "You are summarizing an AI conversation session. Analyse the normalized transcript and call save_session_summary with a clear result. For the summary be specific: cover the main topic, key questions, key answers or decisions, unresolved follow-ups, and any notable next steps. Aim for approximately 900 words, staying concise but complete. If the transcript contains a comparison table, rating, verdict, or decision matrix, copy it into verbatim_highlights exactly as written \u{2014} including its column headings and its conclusions. Do not paraphrase it and do not count it against the word budget above; verbatim_highlights is separate from the summary. Do not assume the conversation is about coding unless it clearly is. For error_tags and topic_tags, only use short tags that are explicitly grounded in the transcript text itself. Do not invent inferred tags that are not literally supported by the transcript.";
+
+#[test]
+fn coding_prompt_is_byte_identical() {
+    assert_eq!(coding_system_prompt(900), CODING_PROMPT_900);
+}
+
+#[test]
+fn general_prompt_is_byte_identical() {
+    assert_eq!(general_system_prompt(900), GENERAL_PROMPT_900);
+}
+
+/// The word target `build_system_prompt` computes for the short transcript the
+/// selection tests feed it (the minimum clamp), so the expected prompts match
+/// exactly what the dispatcher produces.
+const TEST_TRANSCRIPT: &str = "a transcript";
+
+#[test]
+fn the_business_prompt_is_selected_for_every_business_provider() {
+    let target = summary_word_target(TEST_TRANSCRIPT);
+    let expected = business_system_prompt(target);
+    for provider in [
+        ChatProvider::AppleMessages,
+        ChatProvider::WhatsApp,
+        ChatProvider::WhatsAppBusiness,
+        ChatProvider::Viber,
+    ] {
+        assert_eq!(
+            build_system_prompt(&provider, TEST_TRANSCRIPT),
+            expected,
+            "provider {provider:?}"
+        );
+    }
+}
+
+#[test]
+fn the_coding_prompt_is_selected_for_every_coding_provider() {
+    let target = summary_word_target(TEST_TRANSCRIPT);
+    let expected = coding_system_prompt(target);
+    for provider in [
+        ChatProvider::ClaudeCode,
+        ChatProvider::Codex,
+        ChatProvider::Forge,
+    ] {
+        assert_eq!(
+            build_system_prompt(&provider, TEST_TRANSCRIPT),
+            expected,
+            "provider {provider:?}"
+        );
+    }
+}
+
+#[test]
+fn the_general_prompt_is_selected_for_every_general_provider() {
+    let target = summary_word_target(TEST_TRANSCRIPT);
+    let expected = general_system_prompt(target);
+    for provider in [
+        ChatProvider::ChatGPT,
+        ChatProvider::ClaudeAI,
+        ChatProvider::Gemini,
+        ChatProvider::Grok,
+        ChatProvider::HalluScribeAgentChat,
+        ChatProvider::OllamaChat,
+    ] {
+        assert_eq!(
+            build_system_prompt(&provider, TEST_TRANSCRIPT),
+            expected,
+            "provider {provider:?}"
+        );
+    }
+}
+
+#[test]
+fn the_business_prompt_covers_the_required_fields_and_price_rule() {
+    let prompt = business_system_prompt(900);
+    for field in [
+        "customer",
+        "products or materials",
+        "quantities",
+        "dimensions",
+        "prices",
+        "dates",
+        "agreed outcome",
+        "open issues",
+    ] {
+        assert!(prompt.contains(field), "missing {field:?}");
+    }
+    assert!(prompt.contains("exactly as written"));
+    assert!(prompt.contains("never infer"));
+}
+
 #[test]
 fn coding_prompt_asks_for_verbatim_highlights_outside_the_budget() {
     let prompt = coding_system_prompt(900);
