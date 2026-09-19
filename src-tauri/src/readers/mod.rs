@@ -15,6 +15,9 @@ mod project_label;
 #[cfg(test)]
 mod raw_slice_tests;
 mod raw_slices;
+pub mod whatsapp;
+pub mod whatsapp_db;
+pub mod whatsapp_raw;
 
 pub use raw_slices::{is_multi_session_provider, raw_slices_for_source};
 
@@ -45,6 +48,11 @@ pub enum ChatProvider {
     /// reader lands in Phase 5; this variant exists now (Phase 2) so the model
     /// and its wiring are complete before the reader arrives.
     AppleMessages,
+    /// WhatsApp (personal) imported from an Apple backup. Phase 7a.
+    WhatsApp,
+    /// WhatsApp Business imported from an Apple backup. Phase 7a. Shares the
+    /// reader with `WhatsApp`; the variant selects the backup domain.
+    WhatsAppBusiness,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +168,8 @@ impl ChatProvider {
             Self::HalluScribeAgentChat => "HalluScribe Agent",
             Self::OllamaChat => "Ollama Chat",
             Self::AppleMessages => "Messages",
+            Self::WhatsApp => "WhatsApp",
+            Self::WhatsAppBusiness => "WhatsApp Business",
         }
     }
 
@@ -186,6 +196,8 @@ impl ChatProvider {
             Self::HalluScribeAgentChat => "HalluScribe".to_string(),
             Self::OllamaChat => "Ollama".to_string(),
             Self::AppleMessages => "Messages".to_string(),
+            Self::WhatsApp => "WhatsApp".to_string(),
+            Self::WhatsAppBusiness => "WhatsApp Business".to_string(),
         }
     }
 
@@ -205,6 +217,8 @@ impl ChatProvider {
             Self::HalluScribeAgentChat => "halluscribe_agent_chat",
             Self::OllamaChat => "ollama_chat",
             Self::AppleMessages => "apple_messages",
+            Self::WhatsApp => "whatsapp",
+            Self::WhatsAppBusiness => "whatsapp_business",
         }
     }
 }
@@ -276,6 +290,11 @@ pub fn read_target(
             ChatProvider::OllamaChat => ollama_chat::read(&target.path),
             // The Apple backup reader: `target.path` is the backup directory.
             ChatProvider::AppleMessages => apple_messages::read(&target.path, default_cc),
+            // The WhatsApp readers: `target.path` is the backup directory and
+            // the provider selects the app's domain.
+            ChatProvider::WhatsApp | ChatProvider::WhatsAppBusiness => {
+                whatsapp::read(&target.path, provider.clone(), default_cc)
+            }
             ChatProvider::ClaudeCode | ChatProvider::Codex | ChatProvider::Forge => Ok(Vec::new()),
         },
     }

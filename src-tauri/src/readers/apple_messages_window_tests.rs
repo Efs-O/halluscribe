@@ -33,11 +33,11 @@ const C1: ConversationKey = ConversationKey::Chat(1);
 fn a_31_day_gap_splits_but_exactly_30_does_not() {
     // Two messages 30 days apart: one window (gap is not > 30).
     let within = vec![msg("a", C1, at(0)), msg("b", C1, at(30))];
-    assert_eq!(windows(&within).len(), 1);
+    assert_eq!(windows(&within, "apple_messages").len(), 1);
 
     // Two messages 31 days apart: two windows (gap is > 30).
     let across = vec![msg("a", C1, at(0)), msg("b", C1, at(31))];
-    assert_eq!(windows(&across).len(), 2);
+    assert_eq!(windows(&across, "apple_messages").len(), 2);
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn a_401_message_run_splits_into_400_plus_1() {
     for i in 0..401 {
         messages.push(msg(&format!("m{i}"), C1, at(0)));
     }
-    let ws = windows(&messages);
+    let ws = windows(&messages, "apple_messages");
     assert_eq!(ws.len(), 2);
     assert_eq!(ws[0].range.len(), WINDOW_MAX_MESSAGES);
     assert_eq!(ws[1].range.len(), 1);
@@ -60,7 +60,7 @@ fn a_conversation_change_splits() {
         msg("b", ConversationKey::Chat(2), at(1)),
         msg("c", ConversationKey::Chat(1), at(2)),
     ];
-    let ws = windows(&messages);
+    let ws = windows(&messages, "apple_messages");
     assert_eq!(ws.len(), 3);
     assert_eq!(ws[0].conversation, ConversationKey::Chat(1));
     assert_eq!(ws[1].conversation, ConversationKey::Chat(2));
@@ -71,8 +71,12 @@ fn a_conversation_change_splits() {
 fn the_session_id_sanitizes_the_first_guid() {
     // A guid with `;`, `+` and `/` becomes all underscores.
     let messages = vec![msg("a;b+c/d", C1, at(0))];
-    let ws = windows(&messages);
+    let ws = windows(&messages, "apple_messages");
     assert_eq!(ws[0].session_id, "apple_messages-a_b_c_d");
+
+    // The same logic prefixes the WhatsApp provider key.
+    let ws = windows(&messages, "whatsapp");
+    assert_eq!(ws[0].session_id, "whatsapp-a_b_c_d");
 }
 
 #[test]
@@ -82,7 +86,7 @@ fn appending_one_message_leaves_earlier_windows_unchanged() {
         msg("b", C1, at(1)),
         msg("c", C1, at(2)),
     ];
-    let before = windows(&base);
+    let before = windows(&base, "apple_messages");
 
     // Append a message that does NOT open a new window (same conversation,
     // within the gap, under the cap).
@@ -92,7 +96,7 @@ fn appending_one_message_leaves_earlier_windows_unchanged() {
         msg("c", C1, at(2)),
         msg("d", C1, at(3)),
     ];
-    let after = windows(&extended);
+    let after = windows(&extended, "apple_messages");
 
     assert_eq!(after.len(), before.len());
     for (b, a) in before.iter().zip(after.iter()) {

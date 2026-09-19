@@ -25,11 +25,14 @@ const IOS_EPOCH_SECS: i64 = 978_307_200;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 2 {
-        eprintln!("usage: halluscribe-backup-probe <backup-dir>");
+    if args.len() < 2 || args.len() > 3 {
+        eprintln!("usage: halluscribe-backup-probe <backup-dir> [domain-filter]");
         exit(2);
     }
     let dir = Path::new(&args[1]);
+    // Optional: only print domains whose name contains this substring
+    // (e.g. "WhatsAppSMB") so a single app's schema can be read in isolation.
+    let domain_filter: Option<&str> = args.get(2).map(|s| s.as_str());
 
     let handle = match open_backup(dir) {
         Ok(h) => h,
@@ -104,6 +107,11 @@ fn main() {
     // Viber / WhatsApp domains and their database files.
     for needle in ["viber", "whatsapp"] {
         for domain in handle.domains_matching(needle) {
+            if let Some(f) = domain_filter {
+                if !domain.contains(f) {
+                    continue;
+                }
+            }
             println!("domain: {domain}");
             for rel in handle.files_in_domain(&domain) {
                 if !is_db_extension(&rel) {
@@ -111,7 +119,12 @@ fn main() {
                 }
                 match handle.copy_to_temp(&domain, &rel) {
                     Ok(copy) => match open_sqlite_read_only(copy.path()) {
-                        Ok(conn) => print_table_list(&rel, &conn),
+                        Ok(conn) => {
+                            print_table_list(&rel, &conn);
+                            if rel == "ChatStorage.sqlite" {
+                                whatsapp_message_stats(&rel, &conn);
+                            }
+                        }
                         Err(e) => println!("  {rel}: unreadable: {e}"),
                     },
                     Err(e) => println!("  {rel}: unreadable: {e}"),
@@ -121,13 +134,101 @@ fn main() {
     }
 }
 
-/// Print the table list for one database file.
+/// WhatsApp `ChatStorage.sqlite`: print the `ZWAMESSAGE` date range (as raw
+/// integers, so the epoch unit is visible) and the `ZMESSAGETYPE` /
+/// `ZGROUPEVENTTYPE` value distributions. Metadata only - never a message
+/// text, JID, name or number. This is the Phase 7 column/data recon the plan
+/// anticipated (I.3 is a guess, not a contract).
+fn whatsapp_message_stats(rel: &str, conn: &Connection) {
+    if !table_has_column(conn, "ZWAMESSAGE", "ZMESSAGEDATE") {
+        return;
+    }
+    match conn.query_row(
+        "SELECT MIN(ZMESSAGEDATE), MAX(ZMESSAGEDATE), COUNT(*) FROM ZWAMESSAGE",
+        [],
+        |r| {
+            Ok((
+                r.get::<_, Option<f64>>(0)?,
+                r.get::<_, Option<f64>>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        },
+    ) {
+        Ok((min, max, count)) => {
+            println!("  {rel}: ZWAMESSAGE {count} rows");
+            println!(
+                "    ZMESSAGEDATE raw range (REAL): {} .. {} (epoch unit inferred from magnitude)",
+                min.map(|v| v.to_string()).unwrap_or_default(),
+                max.map(|v| v.to_string()).unwrap_or_default()
+            );
+            for column in ["ZMESSAGETYPE", "ZGROUPEVENTTYPE"] {
+                if !table_has_column(conn, "ZWAMESSAGE", column) {
+                    continue;
+                }
+                let sql = format!(
+                    "SELECT {column}, COUNT(*) FROM ZWAMESSAGE GROUP BY {column} ORDER BY {column}"
+                );
+                let Ok(mut stmt) = conn.prepare(&sql) else {
+                    continue;
+                };
+                let Ok(rows) = stmt
+                    .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
+                    .map(|it| it.collect::<Result<Vec<_>, _>>().unwrap_or_default())
+                else {
+                    continue;
+                };
+                let dist: Vec<String> = rows.iter().map(|(v, c)| format!("{v}={c}")).collect();
+                println!("    {column}: {}", dist.join(", "));
+            }
+        }
+        Err(e) => println!("  {rel}: ZWAMESSAGE unreadable: {e}"),
+    }
+}
+
+/// Print the table list for one database file. For every table it prints the
+/// row count and the column names/types from `PRAGMA table_info`. Metadata
+/// only - never a row value, name, number or JID.
 fn print_table_list(rel: &str, conn: &Connection) {
     match table_names(conn) {
-        Ok(names) if !names.is_empty() => println!("  {rel}: tables [{}]", names.join(", ")),
+        Ok(names) if !names.is_empty() => {
+            println!("  {rel}: {} tables", names.len());
+            for t in &names {
+                let count = row_count(conn, t).unwrap_or(-1);
+                let cols = columns(conn, t).unwrap_or_default();
+                let col_str = cols
+                    .iter()
+                    .map(|(c, ty)| format!("{c}:{ty}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("    {t}: {count} rows | cols [{}]", col_str);
+            }
+        }
         Ok(_) => println!("  {rel}: (no tables)"),
         Err(e) => println!("  {rel}: unreadable: {e}"),
     }
+}
+
+/// `true` if `table` exists and has a column named `column`.
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> bool {
+    let safe = table.replace('\'', "''");
+    let Ok(mut stmt) = conn.prepare(&format!("PRAGMA table_info('{safe}')")) else {
+        return false;
+    };
+    let Ok(rows) = stmt
+        .query_map([], |r| r.get::<_, String>(1))
+        .map(|it| it.flatten().collect::<Vec<_>>())
+    else {
+        return false;
+    };
+    rows.iter().any(|name| name == column)
+}
+
+/// Column names and declared types for one table, in schema order.
+fn columns(conn: &Connection, table: &str) -> rusqlite::Result<Vec<(String, String)>> {
+    let safe = table.replace('\'', "''");
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info('{safe}')"))?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
+    rows.collect()
 }
 
 fn is_db_extension(rel: &str) -> bool {

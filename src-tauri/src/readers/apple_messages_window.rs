@@ -32,8 +32,10 @@ pub struct Window {
 /// Split `messages` (already sorted by conversation, date, rowid) into windows.
 /// A new window starts on a new conversation, on a gap greater than
 /// `WINDOW_GAP_DAYS` from the previous message, or when the current window
-/// already holds `WINDOW_MAX_MESSAGES` messages.
-pub fn windows(messages: &[RawMessage]) -> Vec<Window> {
+/// already holds `WINDOW_MAX_MESSAGES` messages. `provider_key` prefixes the
+/// session id (e.g. `apple_messages` or `whatsapp`), so the same logic serves
+/// every business-messaging reader.
+pub fn windows(messages: &[RawMessage], provider_key: &str) -> Vec<Window> {
     let mut out: Vec<Window> = Vec::new();
     if messages.is_empty() {
         return out;
@@ -52,25 +54,25 @@ pub fn windows(messages: &[RawMessage]) -> Vec<Window> {
             .is_some_and(|d| d > Duration::days(WINDOW_GAP_DAYS));
 
         if i > 0 && (new_conversation || cap_reached || gap_too_large) {
-            out.push(make_window(messages, start, count));
+            out.push(make_window(messages, start, count, provider_key));
             start = i;
             count = 0;
         }
         count += 1;
         prev_date = Some(msg.date_utc);
     }
-    out.push(make_window(messages, start, count));
+    out.push(make_window(messages, start, count, provider_key));
     out
 }
 
 /// Build the `Window` for `messages[start..start + count]`.
-fn make_window(messages: &[RawMessage], start: usize, count: usize) -> Window {
+fn make_window(messages: &[RawMessage], start: usize, count: usize, provider_key: &str) -> Window {
     let first = &messages[start];
     let first_guid = first.guid.clone();
     Window {
         conversation: first.conversation.clone(),
         first_guid: first_guid.clone(),
-        session_id: format!("apple_messages-{}", sanitize(&first_guid)),
+        session_id: format!("{provider_key}-{}", sanitize(&first_guid)),
         range: start..(start + count),
     }
 }

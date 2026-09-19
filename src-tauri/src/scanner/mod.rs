@@ -56,6 +56,7 @@ pub fn scan_sessions(
         // Business ingestion is business-workspace-only (D3): a guest's
         // import-only sweep must not read the host's iPhone backup.
         sessions.extend(scan_apple_backup(settings));
+        sessions.extend(scan_whatsapp(settings));
     }
     sessions.extend(scan_chat_imports(settings, lookback_secs));
     sessions.extend(scan_recorded_chat_sessions(archive_dir, lookback_secs));
@@ -151,6 +152,11 @@ pub fn chat_import_sources(settings: &HalluScribeSettings, provider_key: &str) -
         // The Apple backup is a single configured directory, gated by the
         // business-ingestion toggle (one authority, shared with the sweep).
         "apple_messages" => return resolve_apple_backup_path(settings).into_iter().collect(),
+        // WhatsApp (personal and Business) share the same configured backup
+        // directory; the provider key selects the app's domain at read time.
+        "whatsapp" | "whatsapp_business" => {
+            return resolve_apple_backup_path(settings).into_iter().collect()
+        }
         _ => return Vec::new(),
     };
     let trimmed = configured.trim();
@@ -379,6 +385,40 @@ fn scan_apple_backup(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
         fill_pct: None,
         mtime_secs: shared::mtime_secs(modified),
     }]
+}
+
+/// One `ScanTarget` per WhatsApp app (personal and/or Business) present in the
+/// configured Apple backup directory, when business ingestion is enabled. The
+/// backup is opened once to discover which apps actually have a
+/// `ChatStorage.sqlite`, so a phone without WhatsApp Business never yields a
+/// `WhatsAppBusiness` target (and vice versa). Shares the backup-path authority
+/// with `scan_apple_backup`, so the two can never disagree about which backup
+/// to read.
+fn scan_whatsapp(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
+    let Some(path) = resolve_apple_backup_path(settings) else {
+        return Vec::new();
+    };
+    let Ok(meta) = fs::metadata(&path) else {
+        return Vec::new();
+    };
+    let Ok(modified) = meta.modified() else {
+        return Vec::new();
+    };
+    let mtime_secs = shared::mtime_secs(modified);
+    match crate::readers::whatsapp::available_apps(&path) {
+        Ok(apps) => apps
+            .into_iter()
+            .map(|app| ScanTarget {
+                path: path.clone(),
+                kind: ScanTargetKind::Import(app),
+                fill_pct: None,
+                mtime_secs,
+            })
+            .collect(),
+        // A backup that cannot be opened (encrypted, unreadable manifest) is
+        // surfaced by the reader at read time; the sweep yields no targets.
+        Err(_) => Vec::new(),
+    }
 }
 
 fn resolve_ollama_db_path(settings: &HalluScribeSettings) -> Option<PathBuf> {

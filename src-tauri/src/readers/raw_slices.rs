@@ -2,7 +2,7 @@
 // sessions (chat exports, the Ollama DB). Used by the raw backfill to recover
 // correct raws for sessions archived before slicing existed.
 
-use super::{apple_messages, chatgpt, claudeai, gemini, grok, ollama_chat};
+use super::{apple_messages, chatgpt, claudeai, gemini, grok, ollama_chat, whatsapp, ChatProvider};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -14,7 +14,14 @@ use std::path::Path;
 pub fn is_multi_session_provider(provider_key: &str) -> bool {
     matches!(
         provider_key,
-        "chatgpt" | "claude_ai" | "gemini" | "grok" | "ollama_chat" | "apple_messages"
+        "chatgpt"
+            | "claude_ai"
+            | "gemini"
+            | "grok"
+            | "ollama_chat"
+            | "apple_messages"
+            | "whatsapp"
+            | "whatsapp_business"
     )
 }
 
@@ -41,6 +48,10 @@ pub fn raw_slices_for_source(
         "ollama_chat" => ollama_chat::read(source),
         // The Apple backup reader: `source` is the backup directory.
         "apple_messages" => apple_messages::read(source, default_cc),
+        // The WhatsApp readers: `source` is the backup directory, and the key
+        // selects the app's domain.
+        "whatsapp" => whatsapp::read(source, ChatProvider::WhatsApp, default_cc),
+        "whatsapp_business" => whatsapp::read(source, ChatProvider::WhatsAppBusiness, default_cc),
         _ => return None,
     };
 

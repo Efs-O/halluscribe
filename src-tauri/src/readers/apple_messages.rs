@@ -49,7 +49,7 @@ pub fn read(
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
 
-    let windows = apple_messages_window::windows(&db.messages);
+    let windows = apple_messages_window::windows(&db.messages, "apple_messages");
     let mut sessions = Vec::new();
     for window in windows {
         let conv = match db

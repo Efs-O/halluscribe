@@ -185,6 +185,11 @@ fn tool_slug(tool: &str) -> &str {
         // Explicit: the "continue" fallback is the unknown-tool bucket and must
         // never catch the business-messaging provider.
         "apple_messages"
+    } else if t == "whatsapp business" {
+        // Checked before the plain "whatsapp" arm (the longer display name).
+        "whatsapp_business"
+    } else if t == "whatsapp" {
+        "whatsapp"
     } else {
         "continue"
     }
