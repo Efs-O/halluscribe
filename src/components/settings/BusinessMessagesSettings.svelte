@@ -4,11 +4,19 @@
      import outcome, and "Run import now". -->
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import type { HalluScribeSettings } from "../../lib/types";
+  import { onMount } from "svelte";
+  import type {
+    HalluScribeSettings,
+    OwnerProfileStatusDto,
+    WorkspaceListDto,
+  } from "../../lib/types";
   import {
     sensitiveDataWarning,
     runImportEnabled,
     businessImportStatus,
+    profileTogglesVisible,
+    profileToggleNote,
+    ownerProfileMissingNote,
   } from "../../lib/businessMessages";
   import PathPickerField from "./PathPickerField.svelte";
   import type { SettingsNotify } from "./settingsSectionTypes";
@@ -22,12 +30,62 @@
   let { settings = $bindable(), onSave, onNotify }: Props = $props();
 
   let importing = $state(false);
+  // The owner-profile toggles (D13) are only meaningful in an import-only
+  // (non-host) workspace: the host already owns the profile. `active` is null
+  // when the default root (the host) is active, so that is never import-only.
+  let activeImportOnly = $state(false);
+  // A failed list_workspaces call must not be silently swallowed: surface it
+  // as a note while still defaulting the toggles to hidden (DEFECT 3).
+  let workspaceError = $state("");
+  // Per-scope owner-profile status from the business_profile_status command;
+  // the note under a toggle that is on but whose owner profile is missing
+  // (DEFECT 2) is derived from this.
+  let ownerStatus = $state<OwnerProfileStatusDto[]>([]);
+
+  async function loadProfileUi() {
+    try {
+      const list = await invoke<WorkspaceListDto>("list_workspaces");
+      if (list.active == null) return;
+      const active = list.workspaces.find((w) => w.path === list.active);
+      activeImportOnly = active?.import_only ?? false;
+    } catch (error) {
+      activeImportOnly = false;
+      workspaceError = `Could not detect the active workspace (${String(error)}); profile options are hidden.`;
+      return;
+    }
+    if (!activeImportOnly) return;
+    try {
+      ownerStatus = await invoke<OwnerProfileStatusDto[]>("business_profile_status");
+    } catch (error) {
+      workspaceError = `Could not check the owner profile status (${String(error)}).`;
+    }
+  }
+
+  onMount(() => {
+    void loadProfileUi();
+  });
 
   let status = $derived(businessImportStatus(settings.business_last_import, settings.business_last_error));
   let canRun = $derived(runImportEnabled(settings.business_ingestion_enabled));
+  let showProfileToggles = $derived(profileTogglesVisible(activeImportOnly));
+  let workMissingNote = $derived(
+    ownerProfileMissingNote(ownerStatus.find((s) => s.scope === "work")?.state ?? "off", "work"),
+  );
+  let personalMissingNote = $derived(
+    ownerProfileMissingNote(ownerStatus.find((s) => s.scope === "personal")?.state ?? "off", "personal"),
+  );
 
-  function onToggle() {
-    void onSave();
+  async function onToggle() {
+    await onSave();
+    // A toggle change can flip a scope into "on but owner profile missing",
+    // so refresh the per-scope status that drives the missing-profile note.
+    if (activeImportOnly) {
+      try {
+        ownerStatus = await invoke<OwnerProfileStatusDto[]>("business_profile_status");
+      } catch {
+        // The note simply stays as-is; the save already succeeded.
+      }
+    }
   }
 
   async function onFieldChange() {
@@ -74,6 +132,37 @@
           note="The backup folder that holds Manifest.db."
           onchange={onFieldChange}
         />
+
+        {#if workspaceError}
+          <p class="field-note field-note-warn">{workspaceError}</p>
+        {/if}
+
+        {#if showProfileToggles}
+          <label class="row-label">
+            <span>Read your Work profile</span>
+            <input
+              type="checkbox"
+              bind:checked={settings.business_use_work_profile}
+              onchange={onToggle}
+            />
+          </label>
+          <p class="field-note">{profileToggleNote("work")}</p>
+          {#if workMissingNote}
+            <p class="field-note field-note-warn">{workMissingNote}</p>
+          {/if}
+          <label class="row-label">
+            <span>Read your Personal profile</span>
+            <input
+              type="checkbox"
+              bind:checked={settings.business_use_personal_profile}
+              onchange={onToggle}
+            />
+          </label>
+          <p class="field-note">{profileToggleNote("personal")}</p>
+          {#if personalMissingNote}
+            <p class="field-note field-note-warn">{personalMissingNote}</p>
+          {/if}
+        {/if}
 
         <label class="row-label">
           <span>Default country code</span>

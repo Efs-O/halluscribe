@@ -135,6 +135,12 @@ pub struct HalluScribeSettings {
     /// The error from the last failed business import (or an unsupported-schema
     /// note), empty = none. Surfaced next to the last import time.
     pub business_last_error: String,
+    /// Lets the business assistant read the host owner's Work profile (D13).
+    /// Read-only: business chats never change profiles. Off by default.
+    pub business_use_work_profile: bool,
+    /// Lets the business assistant read the host owner's Personal profile (D13).
+    /// Read-only: business chats never change profiles. Off by default.
+    pub business_use_personal_profile: bool,
 }
 
 impl HalluScribeSettings {
@@ -215,6 +221,8 @@ impl Default for HalluScribeSettings {
             business_ingestion_enabled: false,
             business_last_import: String::new(),
             business_last_error: String::new(),
+            business_use_work_profile: false,
+            business_use_personal_profile: false,
         }
     }
 }

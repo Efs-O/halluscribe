@@ -3,7 +3,7 @@
 // weekly digest.
 
 use crate::app_state::ProfileCancel;
-use crate::app_support::archive_dir;
+use crate::app_support::{archive_dir, default_archive_dir};
 use crate::profile::ProfileScope;
 use crate::{archive, gemma, pack, profile, settings};
 use serde::Serialize;
@@ -32,6 +32,23 @@ impl Drop for RefreshScopeGuard {
     fn drop(&mut self) {
         *lock_refresh_scope() = None;
     }
+}
+
+/// D13: a business (import-only) workspace must never be able to write a
+/// profile — no refresh, merge, watermark, or pending-facts change. The host
+/// owner's profile is read-only from here. Pure (paths in, verdict out) so the
+/// read-only guarantee is unit-tested without a Tauri handle.
+fn profile_refresh_gate(
+    default_root: &std::path::Path,
+    dir: &std::path::Path,
+) -> Result<(), String> {
+    if crate::workspace::is_active_import_only(default_root, dir)? {
+        return Err(
+            "Business workspaces are read-only for profiles. Switch to the host workspace to refresh a profile."
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 fn lock_refresh_scope() -> std::sync::MutexGuard<'static, Option<String>> {
@@ -87,6 +104,7 @@ pub(crate) fn run_profile_refresh(
 ) -> Result<(), String> {
     let profile_scope = parse_scope(&scope)?;
     let dir = archive_dir(&app)?;
+    profile_refresh_gate(&default_archive_dir(&app)?, &dir)?;
     archive::ensure_index_readable(&dir).map_err(|error| error.to_string())?;
     let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
     let backend = settings
@@ -265,6 +283,53 @@ pub(crate) fn get_latest_digest(
     Ok(profile::latest_digest(&dir, profile_scope))
 }
 
+/// One scope's owner-profile status for the business (D13) settings UI.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct OwnerProfileStatus {
+    pub scope: String,
+    /// "off" (toggle off), "loaded" (owner profile present), or
+    /// "owner_profile_not_found" (toggle on but the owner has no profile).
+    pub state: String,
+}
+
+/// The per-scope owner-profile status for the active workspace, so the
+/// settings UI can show "Owner profile not found" under a toggle that is on
+/// but whose owner profile is missing. Pure mapping in `businessProfileStatus`
+/// (src/lib) turns this into the note text.
+#[tauri::command]
+pub(crate) fn business_profile_status(
+    app: tauri::AppHandle,
+) -> Result<Vec<OwnerProfileStatus>, String> {
+    let dir = archive_dir(&app)?;
+    let default_root = default_archive_dir(&app)?;
+    let import_only = crate::workspace::is_active_import_only(&default_root, &dir)?;
+    let settings = settings::load_settings(&dir).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for scope in [ProfileScope::Work, ProfileScope::Personal] {
+        // The same resolver the chat uses, so the note can never disagree
+        // with what the prompt actually carries.
+        let resolved = profile::resolve_chat_profile(
+            &dir,
+            scope,
+            import_only,
+            settings.business_use_work_profile,
+            settings.business_use_personal_profile,
+        );
+        let state = match resolved {
+            _ if !import_only => "off",
+            profile::ChatProfile::Loaded(_) => "loaded",
+            profile::ChatProfile::Absent => "off",
+            profile::ChatProfile::OwnerProfileNotFound => "owner_profile_not_found",
+        }
+        .to_string();
+        out.push(OwnerProfileStatus {
+            scope: scope.dir_name().to_string(),
+            state,
+        });
+    }
+    Ok(out)
+}
+
 /// What a Persona Pack export produced, returned to the UI.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct PackResult {
@@ -354,4 +419,62 @@ pub(crate) fn count_available_raw(app: tauri::AppHandle, scope: String) -> Resul
 pub(crate) fn backfill_raw(app: tauri::AppHandle) -> Result<archive::BackfillResult, String> {
     let dir = archive_dir(&app)?;
     archive::backfill_raw(&dir).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace::{save_registry, Workspace, WorkspaceRegistry};
+    use std::path::PathBuf;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "halluscribe_refresh_gate_{}_{}_{}",
+            std::process::id(),
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn an_import_only_workspace_cannot_trigger_a_profile_refresh() {
+        let default_root = tmp("gate_default");
+        let guest = tmp("gate_guest");
+        let mut reg = WorkspaceRegistry::default();
+        let _ = crate::workspace::add_workspace(
+            &mut reg,
+            Workspace {
+                name: "business".to_string(),
+                path: guest.clone(),
+                import_only: true,
+            },
+        );
+        let _ = crate::workspace::set_active(&mut reg, Some(guest.clone()));
+        save_registry(&default_root, &reg).unwrap();
+        let err = profile_refresh_gate(&default_root, &guest).unwrap_err();
+        assert!(err.contains("read-only"), "{err}");
+    }
+
+    #[test]
+    fn a_normal_workspace_can_trigger_a_profile_refresh() {
+        let default_root = tmp("gate_default_ok");
+        let guest = tmp("gate_guest_ok");
+        let mut reg = WorkspaceRegistry::default();
+        let _ = crate::workspace::add_workspace(
+            &mut reg,
+            Workspace {
+                name: "person".to_string(),
+                path: guest.clone(),
+                import_only: false,
+            },
+        );
+        let _ = crate::workspace::set_active(&mut reg, Some(guest.clone()));
+        save_registry(&default_root, &reg).unwrap();
+        assert!(profile_refresh_gate(&default_root, &guest).is_ok());
+    }
 }

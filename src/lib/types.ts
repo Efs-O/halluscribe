@@ -84,6 +84,14 @@ export interface HalluScribeSettings {
   business_last_import: string;
   /** The last failed business import's error (or unsupported-schema note). Empty = none. */
   business_last_error: string;
+  /** Lets the business assistant read the host owner's Work profile (D13).
+   *  Read-only: business chats never change profiles. OFF by default. Shown
+   *  only in import-only (non-host) workspaces. */
+  business_use_work_profile: boolean;
+  /** Lets the business assistant read the host owner's Personal profile (D13).
+   *  Read-only: business chats never change profiles. OFF by default. Shown
+   *  only in import-only (non-host) workspaces. */
+  business_use_personal_profile: boolean;
 }
 
 /** Filters passed to run_briefing. Empty strings mean "no restriction". */
@@ -302,6 +310,14 @@ export interface ProfileDonePayload {
    * saved so the next run resumes from it.
    */
   cancelled: boolean;
+}
+
+/** One scope's owner-profile status (D13) for the business settings UI.
+ *  `state` is "off" (toggle off), "loaded" (owner profile present), or
+ *  "owner_profile_not_found" (toggle on but the owner has no profile). */
+export interface OwnerProfileStatusDto {
+  scope: string;
+  state: string;
 }
 
 /** One registered person/workspace (Persona Parity Phase E). */

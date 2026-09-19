@@ -54,6 +54,34 @@ export function businessImportStatus(
   return { text: `Last import: ${importTime}`, tone: "ok" };
 }
 
+// --- Owner profile access (D13, Phase 9b) ------------------------------------
+
+/** The two profile toggles are shown only in import-only (non-host)
+ *  workspaces: the host already owns the profile, so there is nothing to
+ *  "share" there. In a host workspace the toggles are absent, not hidden. */
+export function profileTogglesVisible(activeImportOnly: boolean): boolean {
+  return activeImportOnly;
+}
+
+/** The one-line note shown under each owner-profile toggle, per the plan. */
+export function profileToggleNote(scope: "work" | "personal"): string {
+  const which = scope === "work" ? "Work" : "Personal";
+  return `Lets the business assistant read your ${which} profile. Read-only; business chats never change your profiles.`;
+}
+
+/** The warning note shown under a toggle when it is on but the host owner has
+ *  no profile for that scope. `state` comes from the `business_profile_status`
+ *  command; only "owner_profile_not_found" produces a note — "off" and
+ *  "loaded" show nothing extra. */
+export function ownerProfileMissingNote(
+  state: string,
+  scope: "work" | "personal",
+): string {
+  if (state !== "owner_profile_not_found") return "";
+  const which = scope === "work" ? "Work" : "Personal";
+  return `Owner ${which} profile not found — the business assistant has nothing to read for this scope.`;
+}
+
 // --- Tests -------------------------------------------------------------------
 
 if (import.meta.vitest) {
@@ -103,6 +131,31 @@ if (import.meta.vitest) {
       const status = businessImportStatus("", "");
       expect(status.tone).toBe("quiet");
       expect(status.text).toBe("Not imported yet.");
+    });
+  });
+
+  describe("profileTogglesVisible", () => {
+    it("are visible only in import-only (non-host) workspaces", () => {
+      expect(profileTogglesVisible(true)).toBe(true);
+      expect(profileTogglesVisible(false)).toBe(false);
+    });
+  });
+
+  describe("profileToggleNote", () => {
+    it("names the scope and the read-only guarantee", () => {
+      expect(profileToggleNote("work")).toContain("Work profile");
+      expect(profileToggleNote("personal")).toContain("Personal profile");
+      expect(profileToggleNote("work")).toContain("Read-only");
+      expect(profileToggleNote("personal")).toContain("never change your profiles");
+    });
+  });
+
+  describe("ownerProfileMissingNote", () => {
+    it("returns a note only for owner_profile_not_found", () => {
+      expect(ownerProfileMissingNote("owner_profile_not_found", "work")).toContain("Owner Work profile not found");
+      expect(ownerProfileMissingNote("owner_profile_not_found", "personal")).toContain("Owner Personal profile not found");
+      expect(ownerProfileMissingNote("off", "work")).toBe("");
+      expect(ownerProfileMissingNote("loaded", "personal")).toBe("");
     });
   });
 }

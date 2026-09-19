@@ -157,6 +157,10 @@ pub(super) fn merge_host_owned(
         // shared across people.
         business_last_import,
         business_last_error,
+        // This person's consent to let the business assistant read the host
+        // owner's profiles (D13) - person-owned, never shared across people.
+        business_use_work_profile,
+        business_use_personal_profile,
     } = guest;
 
     HalluScribeSettings {
@@ -179,6 +183,8 @@ pub(super) fn merge_host_owned(
         business_ingestion_enabled,
         business_last_import,
         business_last_error,
+        business_use_work_profile,
+        business_use_personal_profile,
         ..host.clone()
     }
 }

@@ -28,6 +28,85 @@ use crate::gemma::GemmaError;
 use chrono::Utc;
 use std::fmt;
 use std::path::Path;
+
+/// The profile the chat prompt should carry, decided by the business toggles
+/// (D13). Three states so the UI can tell "no profile exists yet" (quiet) from
+/// "the owner has no profile to share" (a clear status, not an empty profile).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatProfile {
+    /// The profile text to put in the prompt.
+    Loaded(String),
+    /// No profile to load: the toggle is off, or (in a normal workspace) the
+    /// profile has not been built yet. The prompt simply carries no profile.
+    Absent,
+    /// A business toggle is on but the host owner's profile for that scope does
+    /// not exist. Not an empty profile — the UI surfaces a clear status.
+    OwnerProfileNotFound,
+}
+
+/// Resolve the profile the chat prompt should carry for the active workspace.
+///
+/// `import_only` is the workspace's identity, decided by the caller with the
+/// same predicate as the refresh gate (`is_active_import_only`); it is NOT
+/// derived from the toggles, which are consent, not identity. A business
+/// (import-only) workspace reads the host owner's profile via the existing
+/// host-root resolver, never its own; a toggle that is off means that scope is
+/// not loaded at all, so both off ⇒ no profile even if the guest has its own.
+/// A normal workspace reads its own profile; the toggles are ignored.
+pub fn resolve_chat_profile(
+    dir: &Path,
+    scope: ProfileScope,
+    import_only: bool,
+    use_work: bool,
+    use_personal: bool,
+) -> ChatProfile {
+    // A business workspace reads the host owner's profile, never its own; a
+    // normal workspace reads its own. `owning_dir` is the existing host-root
+    // resolver (the host root for a guest, the dir itself for the host).
+    let profile_dir = if import_only {
+        crate::settings::owning_dir(dir)
+    } else {
+        dir.to_path_buf()
+    };
+    let enabled = match scope {
+        ProfileScope::Work => use_work,
+        ProfileScope::Personal => use_personal,
+    };
+    resolve_chat_profile_core(&profile_dir, scope, import_only, enabled)
+}
+
+/// The pure core of [`resolve_chat_profile`], taking the profile directory
+/// explicitly so the logic is unit-tested without the process host-root global.
+/// `business` is the workspace's import-only identity (not a toggle): a
+/// disabled business scope is not loaded at all; a missing owner profile is a
+/// distinct status, not an empty profile.
+fn resolve_chat_profile_core(
+    profile_dir: &Path,
+    scope: ProfileScope,
+    business: bool,
+    enabled: bool,
+) -> ChatProfile {
+    if business && !enabled {
+        return ChatProfile::Absent;
+    }
+    let Some(md) = read_profile_md(profile_dir, scope) else {
+        // No profile file at all.
+        return if business {
+            ChatProfile::OwnerProfileNotFound
+        } else {
+            ChatProfile::Absent
+        };
+    };
+    if md.trim().is_empty() {
+        // A file that exists but is blank: the owner has nothing to share.
+        return if business {
+            ChatProfile::OwnerProfileNotFound
+        } else {
+            ChatProfile::Absent
+        };
+    }
+    ChatProfile::Loaded(md)
+}
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug)]
@@ -415,3 +494,7 @@ mod refresh_pending_tests;
 #[cfg(test)]
 #[path = "refresh_cancel_tests.rs"]
 mod refresh_cancel_tests;
+
+#[cfg(test)]
+#[path = "chat_profile_tests.rs"]
+mod chat_profile_tests;

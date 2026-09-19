@@ -54,8 +54,9 @@ use commands::{
 };
 use commands_capture::{cancel_capture, get_capture_status};
 use commands_profile::{
-    backfill_raw, cancel_profile_refresh, count_available_raw, export_persona_pack,
-    get_latest_digest, get_profile, get_profile_refresh_status, run_profile_refresh,
+    backfill_raw, business_profile_status, cancel_profile_refresh, count_available_raw,
+    export_persona_pack, get_latest_digest, get_profile, get_profile_refresh_status,
+    run_profile_refresh,
 };
 use commands_tts::{tts_list_voices, tts_speak, tts_status};
 use commands_workspace::{
@@ -325,6 +326,7 @@ pub fn run() {
             run_profile_refresh,
             cancel_profile_refresh,
             get_profile,
+            business_profile_status,
             get_latest_digest,
             get_profile_refresh_status,
             export_persona_pack,

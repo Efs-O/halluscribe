@@ -2,7 +2,7 @@
 
 use super::BUSY_MESSAGE;
 use crate::app_state::ChatCancel;
-use crate::app_support::{archive_dir, ChatMessage};
+use crate::app_support::{archive_dir, default_archive_dir, ChatMessage};
 use crate::chat_prompt::{build_chat_system_prompt, ChatPromptContext, SearchModePrompt};
 use crate::recorded_sessions::{SaveRecordedChatRequest, SaveRecordedChatResult};
 use crate::{archive, briefing, profile, retrieval, settings};
@@ -122,8 +122,22 @@ pub(crate) fn send_chat_message(
     let web_search_available =
         web_search_enabled && (!ollama_api_key.is_empty() || !tavily_api_key.is_empty());
     // Chat uses the Work profile unless the UI toggle selects Personal
-    // (Phase 2c sharing rule: Work is the default sharing scope).
-    let user_profile = profile::read_profile_md(&dir, profile_scope);
+    // (Phase 2c sharing rule: Work is the default sharing scope). The
+    // workspace's import-only identity — decided with the SAME predicate as the
+    // refresh gate, not from the toggles — decides whether the host owner's
+    // profile is read; a missing owner profile or a disabled scope simply
+    // carries no profile.
+    let import_only = crate::workspace::is_active_import_only(&default_archive_dir(&app)?, &dir)?;
+    let user_profile = match profile::resolve_chat_profile(
+        &dir,
+        profile_scope,
+        import_only,
+        settings.business_use_work_profile,
+        settings.business_use_personal_profile,
+    ) {
+        profile::ChatProfile::Loaded(md) => Some(md),
+        profile::ChatProfile::Absent | profile::ChatProfile::OwnerProfileNotFound => None,
+    };
     let mut final_messages = vec![serde_json::json!({
         "role": "system",
         "content": build_chat_system_prompt(&ChatPromptContext {
