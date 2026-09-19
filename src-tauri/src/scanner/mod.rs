@@ -57,6 +57,7 @@ pub fn scan_sessions(
         // import-only sweep must not read the host's iPhone backup.
         sessions.extend(scan_apple_backup(settings));
         sessions.extend(scan_whatsapp(settings));
+        sessions.extend(scan_viber(settings));
     }
     sessions.extend(scan_chat_imports(settings, lookback_secs));
     sessions.extend(scan_recorded_chat_sessions(archive_dir, lookback_secs));
@@ -157,6 +158,8 @@ pub fn chat_import_sources(settings: &HalluScribeSettings, provider_key: &str) -
         "whatsapp" | "whatsapp_business" => {
             return resolve_apple_backup_path(settings).into_iter().collect()
         }
+        // Viber reads the same configured backup directory (one app).
+        "viber" => return resolve_apple_backup_path(settings).into_iter().collect(),
         _ => return Vec::new(),
     };
     let trimmed = configured.trim();
@@ -418,6 +421,35 @@ fn scan_whatsapp(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
         // A backup that cannot be opened (encrypted, unreadable manifest) is
         // surfaced by the reader at read time; the sweep yields no targets.
         Err(_) => Vec::new(),
+    }
+}
+
+/// One `ScanTarget` for Viber in the configured Apple backup directory, when
+/// business ingestion is enabled and the backup actually has a `Contacts.data`.
+/// Viber is one app (no separate Business domain), so this yields at most one
+/// target. Shares the backup-path authority with `scan_apple_backup`, so the
+/// two can never disagree about which backup to read.
+fn scan_viber(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
+    let Some(path) = resolve_apple_backup_path(settings) else {
+        return Vec::new();
+    };
+    let Ok(meta) = fs::metadata(&path) else {
+        return Vec::new();
+    };
+    let Ok(modified) = meta.modified() else {
+        return Vec::new();
+    };
+    let mtime_secs = shared::mtime_secs(modified);
+    match crate::readers::viber::is_available(&path) {
+        Ok(true) => vec![ScanTarget {
+            path,
+            kind: ScanTargetKind::Import(ChatProvider::Viber),
+            fill_pct: None,
+            mtime_secs,
+        }],
+        // Absent or unreadable: no target (a backup that cannot be opened is
+        // surfaced by the reader at read time).
+        Ok(false) | Err(_) => Vec::new(),
     }
 }
 

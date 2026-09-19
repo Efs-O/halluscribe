@@ -124,6 +124,9 @@ fn main() {
                             if rel == "ChatStorage.sqlite" {
                                 whatsapp_message_stats(&rel, &conn);
                             }
+                            if rel.ends_with("Contacts.data") {
+                                viber_message_stats(&rel, &conn);
+                            }
                         }
                         Err(e) => println!("  {rel}: unreadable: {e}"),
                     },
@@ -139,6 +142,67 @@ fn main() {
 /// `ZGROUPEVENTTYPE` value distributions. Metadata only - never a message
 /// text, JID, name or number. This is the Phase 7 column/data recon the plan
 /// anticipated (I.3 is a guess, not a contract).
+/// Print the metadata of a Viber `Contacts.data` needed to build the reader:
+/// the `ZDATE` format (min/max as raw strings), the `ZCONVERSATION.ZCATEGORY`
+/// and `ZMEMBER.ZTYPE` distributions (to find the user's own member and the
+/// 1:1 vs group split), and the `ZVIBERMESSAGE.ZCALLTYPE` distribution.
+/// Metadata only: integer codes, counts and date strings, never text/names/numbers.
+fn viber_message_stats(rel: &str, conn: &Connection) {
+    if !table_has_column(conn, "ZVIBERMESSAGE", "Z_PK") {
+        return;
+    }
+    println!("  {rel}: VIBER stats");
+    if let Ok(mut s) = conn.prepare("SELECT MIN(ZDATE), MAX(ZDATE) FROM ZVIBERMESSAGE") {
+        if let Ok((lo, hi)) = s.query_row([], |r| {
+            Ok((
+                r.get::<_, Option<String>>(0)?,
+                r.get::<_, Option<String>>(1)?,
+            ))
+        }) {
+            println!("    ZDATE min: {:?} max: {:?}", lo, hi);
+        }
+    }
+    for (table, column) in [("ZCONVERSATION", "ZCATEGORY"), ("ZMEMBER", "ZTYPE")] {
+        if table_has_column(conn, table, column) {
+            if let Ok(mut s) = conn.prepare(&format!(
+                "SELECT {column}, COUNT(*) FROM {table} GROUP BY {column}"
+            )) {
+                if let Ok(rows) =
+                    s.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
+                {
+                    let mut dist: Vec<(i64, i64)> = rows.filter_map(|r| r.ok()).collect();
+                    dist.sort();
+                    let line: Vec<String> = dist.iter().map(|(k, v)| format!("{k}={v}")).collect();
+                    println!("    {table}.{column}: {}", line.join(" "));
+                }
+            }
+        }
+    }
+    if table_has_column(conn, "ZVIBERMESSAGE", "ZCALLTYPE") {
+        if let Ok(mut s) =
+            conn.prepare("SELECT ZCALLTYPE, COUNT(*) FROM ZVIBERMESSAGE GROUP BY ZCALLTYPE")
+        {
+            if let Ok(rows) = s.query_map([], |r| {
+                Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?))
+            }) {
+                let mut dist: Vec<(Option<String>, i64)> = rows.filter_map(|r| r.ok()).collect();
+                dist.sort_by(|a, b| a.0.cmp(&b.0));
+                let line: Vec<String> = dist.iter().map(|(k, v)| format!("{:?}={v}", k)).collect();
+                println!("    ZVIBERMESSAGE.ZCALLTYPE: {}", line.join(" "));
+            }
+        }
+    }
+    if table_has_column(conn, "ZVIBERMESSAGE", "ZTEXT") {
+        if let Ok(n) = conn.query_row(
+            "SELECT COUNT(*) FROM ZVIBERMESSAGE WHERE ZTEXT IS NULL OR TRIM(ZTEXT) = ''",
+            [],
+            |r| r.get::<_, i64>(0),
+        ) {
+            println!("    ZVIBERMESSAGE blank/NULL ZTEXT: {n}");
+        }
+    }
+}
+
 fn whatsapp_message_stats(rel: &str, conn: &Connection) {
     if !table_has_column(conn, "ZWAMESSAGE", "ZMESSAGEDATE") {
         return;

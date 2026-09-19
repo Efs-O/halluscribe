@@ -3,6 +3,7 @@ pub mod apple_messages;
 pub mod apple_messages_db;
 pub mod apple_messages_raw;
 pub mod apple_messages_window;
+mod business;
 mod chatgpt;
 mod chatgpt_content;
 mod claudeai;
@@ -15,15 +16,16 @@ mod project_label;
 #[cfg(test)]
 mod raw_slice_tests;
 mod raw_slices;
+pub mod viber;
+pub mod viber_db;
+pub mod viber_raw;
 pub mod whatsapp;
 pub mod whatsapp_db;
 pub mod whatsapp_raw;
 
 pub use raw_slices::{is_multi_session_provider, raw_slices_for_source};
 
-use crate::archive;
-use crate::preprocessor::{self, PreprocessError};
-use crate::scanner::{ScanTarget, ScanTargetKind, ToolSource};
+use crate::preprocessor::PreprocessError;
 use crate::tokens::TokenCount;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -53,6 +55,9 @@ pub enum ChatProvider {
     /// WhatsApp Business imported from an Apple backup. Phase 7a. Shares the
     /// reader with `WhatsApp`; the variant selects the backup domain.
     WhatsAppBusiness,
+    /// Viber imported from an Apple backup. Phase 7b. One app (no separate
+    /// Business domain); the reader reads `Contacts.data`.
+    Viber,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,6 +175,7 @@ impl ChatProvider {
             Self::AppleMessages => "Messages",
             Self::WhatsApp => "WhatsApp",
             Self::WhatsAppBusiness => "WhatsApp Business",
+            Self::Viber => "Viber",
         }
     }
 
@@ -198,6 +204,7 @@ impl ChatProvider {
             Self::AppleMessages => "Messages".to_string(),
             Self::WhatsApp => "WhatsApp".to_string(),
             Self::WhatsAppBusiness => "WhatsApp Business".to_string(),
+            Self::Viber => "Viber".to_string(),
         }
     }
 
@@ -219,6 +226,7 @@ impl ChatProvider {
             Self::AppleMessages => "apple_messages",
             Self::WhatsApp => "whatsapp",
             Self::WhatsAppBusiness => "whatsapp_business",
+            Self::Viber => "viber",
         }
     }
 }
@@ -275,84 +283,14 @@ impl ParsedSession {
     }
 }
 
-pub fn read_target(
-    target: &ScanTarget,
-    default_cc: Option<&str>,
-) -> Result<Vec<ParsedSession>, ReaderError> {
-    match &target.kind {
-        ScanTargetKind::Coding(tool) => read_coding_target(target, tool),
-        ScanTargetKind::Import(provider) => match provider {
-            ChatProvider::ChatGPT => chatgpt::read(&target.path),
-            ChatProvider::ClaudeAI => claudeai::read(&target.path),
-            ChatProvider::Gemini => gemini::read(&target.path),
-            ChatProvider::Grok => grok::read(&target.path),
-            ChatProvider::HalluScribeAgentChat => halluscribe_agent_chat::read(&target.path),
-            ChatProvider::OllamaChat => ollama_chat::read(&target.path),
-            // The Apple backup reader: `target.path` is the backup directory.
-            ChatProvider::AppleMessages => apple_messages::read(&target.path, default_cc),
-            // The WhatsApp readers: `target.path` is the backup directory and
-            // the provider selects the app's domain.
-            ChatProvider::WhatsApp | ChatProvider::WhatsAppBusiness => {
-                whatsapp::read(&target.path, provider.clone(), default_cc)
-            }
-            ChatProvider::ClaudeCode | ChatProvider::Codex | ChatProvider::Forge => Ok(Vec::new()),
-        },
-    }
-}
-
-fn read_coding_target(
-    target: &ScanTarget,
-    tool: &ToolSource,
-) -> Result<Vec<ParsedSession>, ReaderError> {
-    let preprocessed = preprocessor::preprocess_session_units(&target.path, tool)?;
-    let transcript = preprocessed.render();
-    let transcript = transcript.trim().to_string();
-    if transcript.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let provider = match tool {
-        ToolSource::ClaudeCode => ChatProvider::ClaudeCode,
-        ToolSource::Codex => ChatProvider::Codex,
-        ToolSource::Forge => ChatProvider::Forge,
-    };
-
-    let created_at = DateTime::from_timestamp(target.mtime_secs, 0).unwrap_or_else(Utc::now);
-    // A Forge session whose fill came from a compaction row is a real
-    // measurement, not an estimate; only a missing fill falls back to the
-    // character heuristic and is flagged estimated.
-    let fill_estimated = target.fill_pct.is_none();
-    let fill_pct = target
-        .fill_pct
-        .unwrap_or_else(|| estimate_fill_pct(&transcript));
-    Ok(vec![ParsedSession {
-        id: archive::session_id(&target.path),
-        title: String::new(),
-        created_at,
-        updated_at: None,
-        messages: vec![ParsedMessage {
-            role: MessageRole::Assistant,
-            text: transcript.clone(),
-            timestamp: Some(created_at),
-            speaker: None,
-        }],
-        source_path: target.path.clone(),
-        provider,
-        fill_pct,
-        fill_estimated,
-        // Taken from the preprocessor, never from `messages` below: a coding
-        // session is collapsed into one blob labelled `Assistant`, so estimating
-        // from it would count the user's own prompts and every tool result as
-        // model output.
-        tokens: preprocessed.tokens,
-        transcript_hash: stable_hash(&transcript),
-        // One JSONL file == one coding session, so the whole-file copy the
-        // sweep falls back to is already the correct raw for this session.
-        raw_slice: None,
-        project_override: None,
-        preprocessed_units: Some(preprocessed.units),
-    }])
-}
+/// Read the sessions for one `ScanTarget`: coding tools through the
+/// preprocessor, chat exports through their own readers, and the
+/// Apple-backup readers (Messages, WhatsApp, WhatsApp Business, Viber) through
+/// their readers. `default_cc` is the business-messaging default country code
+/// for phone normalization (D8); it is `None` outside business ingestion.
+/// The dispatch lives in `business.rs` so this module stays under the LOC
+/// ceiling as the business providers grow.
+pub use business::read_target;
 
 /// Chat exports carry no usage data, so this is the only number available for
 /// them. It is also blind to thinking tokens: providers strip reasoning traces

@@ -190,6 +190,8 @@ fn tool_slug(tool: &str) -> &str {
         "whatsapp_business"
     } else if t == "whatsapp" {
         "whatsapp"
+    } else if t == "viber" {
+        "viber"
     } else {
         "continue"
     }
