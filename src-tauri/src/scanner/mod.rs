@@ -418,9 +418,14 @@ fn scan_whatsapp(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
                 mtime_secs,
             })
             .collect(),
-        // A backup that cannot be opened (encrypted, unreadable manifest) is
-        // surfaced by the reader at read time; the sweep yields no targets.
-        Err(_) => Vec::new(),
+        // A backup that cannot be opened (encrypted, unreadable manifest) is a
+        // real discovery failure, not "not present". The read path surfaces the
+        // same error per-target, so log it here (count-only, no message content)
+        // so a provider-specific problem is not silently invisible in the preview.
+        Err(e) => {
+            eprintln!("scanner: WhatsApp discovery failed: {e}");
+            Vec::new()
+        }
     }
 }
 
@@ -447,9 +452,15 @@ fn scan_viber(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
             fill_pct: None,
             mtime_secs,
         }],
-        // Absent or unreadable: no target (a backup that cannot be opened is
-        // surfaced by the reader at read time).
-        Ok(false) | Err(_) => Vec::new(),
+        // Absent: no target. Unreadable is a real discovery failure, not
+        // "not present" — the read path surfaces the same error per-target, so
+        // log it here (count-only, no message content) so a provider-specific
+        // problem is not silently invisible in the preview.
+        Ok(false) => Vec::new(),
+        Err(e) => {
+            eprintln!("scanner: Viber discovery failed: {e}");
+            Vec::new()
+        }
     }
 }
 

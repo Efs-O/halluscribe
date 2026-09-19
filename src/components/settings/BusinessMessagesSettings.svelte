@@ -82,8 +82,10 @@
     if (activeImportOnly) {
       try {
         ownerStatus = await invoke<OwnerProfileStatusDto[]>("business_profile_status");
-      } catch {
-        // The note simply stays as-is; the save already succeeded.
+      } catch (error) {
+        // The save already succeeded, but the note may now be stale — say so
+        // rather than silently keeping a possibly-wrong status (CODEX_EVAL #3).
+        workspaceError = `Could not refresh the owner profile status (${String(error)}); the note below may be out of date.`;
       }
     }
   }

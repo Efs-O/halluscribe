@@ -168,9 +168,16 @@ fn load_contact_book(
     handle: &BackupHandle,
     default_cc: Option<&str>,
 ) -> Result<ContactBook, ReaderError> {
-    let Some(copy) = handle.copy_to_temp(HOME_DOMAIN, ADDRESS_BOOK).ok() else {
+    // An absent address book (no manifest row, or no hashed file) is not an
+    // error: unresolved numbers show verbatim (D7). A file that IS present but
+    // cannot be copied (permissions, damaged hashed file) is a real error, not
+    // a silent empty book.
+    if handle.resolve(HOME_DOMAIN, ADDRESS_BOOK).is_none() {
         return Ok(ContactBook::default());
-    };
+    }
+    let copy = handle
+        .copy_to_temp(HOME_DOMAIN, ADDRESS_BOOK)
+        .map_err(|e| ReaderError::Database(e.to_string()))?;
     let conn =
         open_sqlite_read_only(copy.path()).map_err(|e| ReaderError::Database(e.to_string()))?;
     ContactBook::from_connection(&conn, default_cc)
