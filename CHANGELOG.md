@@ -15,6 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Business "run import now" button no longer resets to idle when the menu is reopened mid-import
 - Settings no longer overwrite the business import status saved by a finished import
 - Dim and muted text is readable across all menus
+- Business import refuses with a clear error when no iPhone backup folder (with Manifest.db) is set, instead of reporting success having read nothing
 
 ## [0.3.33] - 2026-09-18
 

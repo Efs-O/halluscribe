@@ -30,11 +30,29 @@ pub(crate) fn trigger_business_import(app: tauri::AppHandle) -> Result<(), Strin
 }
 
 /// The business consent gate: a business import is refused while business
-/// ingestion is disabled. Pure (settings in, verdict out) so the one-consent-gate
-/// rule is unit-tested without a Tauri handle.
+/// ingestion is disabled, and also when there is no readable backup to import
+/// from. The scanner skips a missing backup silently (a nightly sweep must not
+/// fail over it), so without this check an explicit import would run a plain
+/// sweep and report success having read nothing from the phone. Settings in,
+/// verdict out, so it is unit-tested without a Tauri handle.
 fn business_import_gate(settings: &settings::HalluScribeSettings) -> Result<(), String> {
     if !settings.business_ingestion_enabled {
         return Err("Business ingestion is disabled. Enable it in Settings first.".to_string());
+    }
+    let configured = settings.apple_backup_path.trim();
+    if configured.is_empty() {
+        return Err("No iPhone backup folder is set. Choose it in Settings first.".to_string());
+    }
+    let backup = Path::new(configured);
+    if !backup.is_dir() {
+        return Err(format!(
+            "The iPhone backup folder does not exist: {configured}"
+        ));
+    }
+    if !backup.join("Manifest.db").is_file() {
+        return Err(format!(
+            "The iPhone backup folder has no Manifest.db (pick the folder that holds it): {configured}"
+        ));
     }
     Ok(())
 }
@@ -150,13 +168,42 @@ mod tests {
         assert!(err.contains("disabled"), "{err}");
     }
 
-    #[test]
-    fn the_business_gate_allows_when_ingestion_is_enabled() {
-        let settings = settings::HalluScribeSettings {
+    fn enabled_with_backup(path: &str) -> settings::HalluScribeSettings {
+        settings::HalluScribeSettings {
             business_ingestion_enabled: true,
+            apple_backup_path: path.to_string(),
             ..Default::default()
-        };
+        }
+    }
+
+    #[test]
+    fn the_business_gate_allows_an_enabled_import_with_a_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("Manifest.db"), b"").unwrap();
+        let settings = enabled_with_backup(dir.path().to_str().unwrap());
         assert!(business_import_gate(&settings).is_ok());
+    }
+
+    #[test]
+    fn the_business_gate_refuses_when_no_backup_folder_is_set() {
+        let err = business_import_gate(&enabled_with_backup("  ")).unwrap_err();
+        assert!(err.contains("No iPhone backup folder"), "{err}");
+    }
+
+    #[test]
+    fn the_business_gate_refuses_a_missing_backup_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("gone");
+        let err = business_import_gate(&enabled_with_backup(gone.to_str().unwrap())).unwrap_err();
+        assert!(err.contains("does not exist"), "{err}");
+    }
+
+    #[test]
+    fn the_business_gate_refuses_a_folder_without_manifest_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let err =
+            business_import_gate(&enabled_with_backup(dir.path().to_str().unwrap())).unwrap_err();
+        assert!(err.contains("Manifest.db"), "{err}");
     }
 
     #[test]

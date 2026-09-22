@@ -131,7 +131,8 @@
         <p class="field-note">
           Off by default. When on, the sweep reads customer conversations (Messages, WhatsApp,
           WhatsApp Business, Viber) from the backup below and archives them to <em>this</em>
-          workspace only — never the personal archive, and never the MCP.
+          workspace only. The MCP serves the default workspace, so chats imported there are
+          readable by connected agents.
         </p>
 
         <PathPickerField
