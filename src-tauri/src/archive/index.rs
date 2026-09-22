@@ -47,25 +47,61 @@ pub fn session_id(source: &Path) -> String {
 /// normal index/manifest writes, so its `DefaultHasher` value is never later
 /// recomputed as the authority for an existing session.
 pub fn resolve_session_id(archive_dir: &Path, source: &Path, proposed: &str) -> String {
-    let source_text = source.to_string_lossy();
-    let index_owner = load_index(archive_dir).ok().and_then(|index| {
-        index
-            .sessions
-            .into_iter()
-            .find(|entry| entry.id == proposed)
-            .map(|entry| entry.source_jsonl)
-    });
-    let manifest_owner = super::captured_manifest::load_captured(archive_dir)
-        .get(proposed)
-        .map(|record| record.source_path.clone());
-    let owners = [index_owner, manifest_owner];
-    if owners.iter().flatten().any(|owner| owner == &source_text) {
-        return proposed.to_string();
+    SessionLookup::load(archive_dir).resolve_session_id(source, proposed)
+}
+
+/// The archive's ownership data (the index and the captured manifest), read
+/// once. The sweep checks every discovered session against it; re-reading and
+/// re-parsing `index.json` per session made a 6,574-session phone import spend
+/// many minutes before inference started, and every later sweep paid it again.
+/// Nothing is written while the worklist is built, so one snapshot is exact.
+pub struct SessionLookup {
+    entries: std::collections::HashMap<String, IndexEntry>,
+    captured: super::CapturedManifest,
+}
+
+impl SessionLookup {
+    /// An unreadable index reads as empty, as `resolve_session_id` always did;
+    /// the sweep checks `ensure_index_readable` before building its worklist.
+    pub fn load(archive_dir: &Path) -> Self {
+        let mut entries = std::collections::HashMap::new();
+        if let Ok(index) = load_index(archive_dir) {
+            for entry in index.sessions {
+                // The first row wins, matching the old linear `find`.
+                entries.entry(entry.id.clone()).or_insert(entry);
+            }
+        }
+        Self {
+            entries,
+            captured: super::captured_manifest::load_captured(archive_dir),
+        }
     }
-    if owners.iter().flatten().next().is_some() {
-        format!("{proposed}-{}", path_hash(source))
-    } else {
-        proposed.to_string()
+
+    /// The index row for `id`, if archived.
+    pub fn find(&self, id: &str) -> Option<&IndexEntry> {
+        self.entries.get(id)
+    }
+
+    /// See the free function `resolve_session_id`.
+    pub fn resolve_session_id(&self, source: &Path, proposed: &str) -> String {
+        let source_text = source.to_string_lossy();
+        let index_owner = self
+            .entries
+            .get(proposed)
+            .map(|entry| entry.source_jsonl.as_str());
+        let manifest_owner = self
+            .captured
+            .get(proposed)
+            .map(|record| record.source_path.as_str());
+        let owners = [index_owner, manifest_owner];
+        if owners.iter().flatten().any(|owner| *owner == source_text) {
+            return proposed.to_string();
+        }
+        if owners.iter().flatten().next().is_some() {
+            format!("{proposed}-{}", path_hash(source))
+        } else {
+            proposed.to_string()
+        }
     }
 }
 

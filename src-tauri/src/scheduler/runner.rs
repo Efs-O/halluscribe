@@ -1,6 +1,6 @@
 // HalluScribe - scheduled sweep execution and completion reporting.
 
-use super::eligibility::is_low_signal_codex_session;
+use super::eligibility::{is_low_signal_business_session, is_low_signal_codex_session};
 use super::helpers::{
     backend_display_name, is_sweep_due, model_display_name, provider_display_name,
 };
@@ -85,6 +85,9 @@ pub fn run_sweep(
         config.import_only,
     );
     let mut worklist = Vec::new();
+    // One read of the index + captured manifest for the whole worklist, not
+    // one per session (see `archive::SessionLookup`).
+    let lookup = archive::SessionLookup::load(&config.archive_dir);
 
     for source in &sources {
         if cancel.load(Ordering::Relaxed) {
@@ -116,15 +119,19 @@ pub fn run_sweep(
         }
 
         for mut session in parsed_sessions {
-            session.id =
-                archive::resolve_session_id(&config.archive_dir, &session.source_path, &session.id);
-            if is_unchanged_session(&config.archive_dir, &session) {
+            session.id = lookup.resolve_session_id(&session.source_path, &session.id);
+            if is_unchanged_session(&lookup, &session) {
                 result.skipped += 1;
                 continue;
             }
             if is_low_signal_codex_session(&session) {
                 result.skipped += 1;
                 result.low_signal_skipped += 1;
+                continue;
+            }
+            if is_low_signal_business_session(&session) {
+                result.skipped += 1;
+                result.business_filtered += 1;
                 continue;
             }
             worklist.push(session);
@@ -332,8 +339,8 @@ fn record_sweep_errors(result: &SweepResult) {
     }
 }
 
-fn is_unchanged_session(archive_dir: &std::path::Path, session: &ParsedSession) -> bool {
-    let Some(existing) = archive::find_session(archive_dir, &session.id) else {
+fn is_unchanged_session(lookup: &archive::SessionLookup, session: &ParsedSession) -> bool {
+    let Some(existing) = lookup.find(&session.id) else {
         return false;
     };
 

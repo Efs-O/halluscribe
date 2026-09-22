@@ -224,6 +224,7 @@
         sweepProgress={sweep.progress}
         sweepToast={sweep.toast}
         onRunBusinessImport={() => sweep.runBusinessImport()}
+        onStopBusinessImport={() => sweep.cancel()}
       />
     {/if}
   </main>

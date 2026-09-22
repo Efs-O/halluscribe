@@ -38,6 +38,12 @@ pub fn sweep_done_message(result: &SweepResult, marker_errors: &[String]) -> Str
             result.low_signal_skipped
         ));
     }
+    if result.business_filtered > 0 {
+        message.push_str(&format!(
+            ", phone chats skipped: {} (you never replied, or under 3 messages)",
+            result.business_filtered
+        ));
+    }
     if !result.errors.is_empty() {
         message.push_str(&format!(", errors: {}", result.errors.len()));
     }

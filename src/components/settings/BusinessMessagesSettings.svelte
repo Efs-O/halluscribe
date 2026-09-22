@@ -33,6 +33,8 @@
     /** The last sweep message (the same toast the header shows on the Sessions tab). */
     sweepToast: { msg: string; ok: boolean } | null;
     onRunImport: () => Promise<string | null>;
+    /** Stop the running sweep after its current session (the header's stop). */
+    onStopImport: () => Promise<void>;
   }
 
   let {
@@ -43,7 +45,11 @@
     sweepProgress,
     sweepToast,
     onRunImport,
+    onStopImport,
   }: Props = $props();
+  // Set by the stop button; only read while a sweep runs, so it needs no reset
+  // beyond the next stop/start (see `stopImport` and `runImportNow`).
+  let stopRequested = $state(false);
   // The owner-profile toggles (D13) are only meaningful in an import-only
   // (non-host) workspace: the host already owns the profile. `active` is null
   // when the default root (the host) is active, so that is never import-only.
@@ -110,9 +116,20 @@
 
   async function runImportNow() {
     if (sweepRunning || !canRun) return;
+    stopRequested = false;
     const error = await onRunImport();
     if (error) onNotify(`Business import failed: ${error}`, "warn", 3200);
     else onNotify("Business import started — it runs in the background.");
+  }
+
+  async function stopImport() {
+    if (!sweepRunning || stopRequested) return;
+    try {
+      await onStopImport();
+      stopRequested = true;
+    } catch (error) {
+      onNotify(`Could not stop the import: ${String(error)}`, "warn", 3200);
+    }
   }
 </script>
 
@@ -200,6 +217,17 @@
           >
             {#if sweepRunning}sweep running...{:else}run import now{/if}
           </button>
+          {#if sweepRunning}
+            <button
+              class="action-btn"
+              type="button"
+              onclick={stopImport}
+              disabled={stopRequested}
+              title="Stop after the current chat finishes"
+            >
+              {#if stopRequested}stopping after this chat...{:else}stop{/if}
+            </button>
+          {/if}
           {#if sweepRunning && sweepProgress}
             <SweepProgressBar progress={sweepProgress} />
           {/if}

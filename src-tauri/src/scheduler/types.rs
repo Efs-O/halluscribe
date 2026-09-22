@@ -50,6 +50,9 @@ pub struct SweepResult {
     /// Skipped Codex transcripts that contain only a greeting or an external
     /// capability probe after preprocessing, rather than archive-worthy work.
     pub low_signal_skipped: u32,
+    /// Skipped phone chat sessions the owner never wrote in, or with fewer
+    /// than three messages (`eligibility::is_low_signal_business_session`).
+    pub business_filtered: u32,
     pub deferred: u32,
     /// Number of sessions written this sweep whose archived markdown matched
     /// at least one high-confidence secret shape (Phase 0b scan).

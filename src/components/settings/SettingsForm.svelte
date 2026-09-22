@@ -20,6 +20,7 @@
     sweepProgress: SweepProgress | null;
     sweepToast: { msg: string; ok: boolean } | null;
     onRunBusinessImport: () => Promise<string | null>;
+    onStopBusinessImport: () => Promise<void>;
   }
 
   let {
@@ -29,6 +30,7 @@
     sweepProgress,
     sweepToast,
     onRunBusinessImport,
+    onStopBusinessImport,
   }: Props = $props();
   let settings = $state<HalluScribeSettings | null>(null);
   let savedFlash = $state(false);
@@ -91,6 +93,7 @@
         {sweepProgress}
         {sweepToast}
         onRunImport={onRunBusinessImport}
+        onStopImport={onStopBusinessImport}
       />
       <BriefingSettings bind:settings onSave={save} />
       <TtsVoiceSettings

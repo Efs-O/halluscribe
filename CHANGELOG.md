@@ -10,6 +10,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Import iPhone Messages, WhatsApp, WhatsApp Business, and Viber conversations from Apple backups
 - Business import shows the sweep progress bar and its finish message in Settings
+- Stop button next to "run import now": the import stops after the current chat
+- Phone chats you never replied in, or with fewer than 3 messages, are skipped (spam, codes, notices) and counted in the finish message
 
 ### Fixed
 - Business "run import now" button no longer resets to idle when the menu is reopened mid-import
@@ -19,6 +21,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - iPhone Messages import no longer rejects real backups: the attachment join column is `attachment_id`, not `item_id`
 - Viber import no longer crashes on messages whose conversation was deleted; they are counted as orphans
 - A sweep that crashes now ends with an error message instead of leaving "sweep running" stuck until restart
+- Sweep preparation no longer re-reads the archive index for every session, so the model starts in seconds rather than 10–20 minutes on a large import
 
 ## [0.3.33] - 2026-09-18
 
