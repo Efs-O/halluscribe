@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.34] - 2026-09-22
+
+### Added
+- Import iPhone Messages, WhatsApp, WhatsApp Business, and Viber conversations from Apple backups
+- Business import shows the sweep progress bar and its finish message in Settings
+
+### Fixed
+- Business "run import now" button no longer resets to idle when the menu is reopened mid-import
+- Settings no longer overwrite the business import status saved by a finished import
+- Dim and muted text is readable across all menus
+
 ## [0.3.33] - 2026-09-18
 
 ### Fixed
