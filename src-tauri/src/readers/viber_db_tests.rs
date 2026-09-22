@@ -359,6 +359,42 @@ fn an_orphan_message_without_a_conversation_is_counted() {
 }
 
 #[test]
+fn a_message_whose_conversation_row_is_gone_is_an_orphan_not_a_panic() {
+    // Seen on a real backup: ZCONVERSATION points at a deleted conversation.
+    let c = conn();
+    add_conversation(&c, 1, None, Some("kept"));
+    add_message(
+        &c,
+        1,
+        Some(1),
+        1_700_000_000,
+        "received",
+        None,
+        None,
+        0,
+        0,
+        Some("hi"),
+    );
+    add_message(
+        &c,
+        2,
+        Some(99),
+        1_700_000_001,
+        "received",
+        None,
+        None,
+        0,
+        0,
+        Some("gone"),
+    );
+
+    let db = load(&c).expect("load");
+    assert_eq!(db.skipped.orphan_no_session, 1);
+    assert_eq!(db.messages.len(), 1);
+    assert_eq!(db.conversations.len(), 1);
+}
+
+#[test]
 fn a_bad_date_is_counted() {
     let c = conn();
     add_conversation(&c, 1, None, None);

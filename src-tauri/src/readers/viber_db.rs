@@ -75,7 +75,16 @@ pub fn load(conn: &Connection) -> Result<ViberDb, ReaderError> {
 
     let conversations_meta = load_conversations(conn).map_err(db_err)?;
     let phones = load_phones(conn).map_err(db_err)?;
-    let (messages, skipped) = load_messages(conn, &phones).map_err(db_err)?;
+    let (mut messages, mut skipped) = load_messages(conn, &phones).map_err(db_err)?;
+    // A message whose ZCONVERSATION row is gone (seen on a real backup) is an
+    // orphan too: count it like one with no conversation at all, so
+    // `build_conversations` only ever sees conversations that exist.
+    let before = messages.len();
+    messages.retain(|m| match m.conversation {
+        ConversationKey::Chat(pk) => conversations_meta.contains_key(&pk),
+        _ => true,
+    });
+    skipped.orphan_no_session += (before - messages.len()) as u64;
     let conversations = build_conversations(&messages, &conversations_meta);
 
     Ok(ViberDb {

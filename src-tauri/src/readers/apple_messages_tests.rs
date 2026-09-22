@@ -23,7 +23,7 @@ CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
 CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
 CREATE TABLE attachment (ROWID INTEGER PRIMARY KEY, filename TEXT, mime_type TEXT,
     transfer_name TEXT, total_bytes INTEGER);
-CREATE TABLE message_attachment_join (message_id INTEGER, item_id INTEGER);
+CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
 "#;
 
 const ADDR_SCHEMA: &str = r#"

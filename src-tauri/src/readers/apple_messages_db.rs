@@ -144,7 +144,7 @@ fn required_schema() -> Vec<(&'static str, &'static str)> {
         ("attachment", "transfer_name"),
         ("attachment", "total_bytes"),
         ("message_attachment_join", "message_id"),
-        ("message_attachment_join", "item_id"),
+        ("message_attachment_join", "attachment_id"),
     ]
     .to_vec()
 }
@@ -411,7 +411,7 @@ fn load_attachments(conn: &Connection, message_rowid: i64) -> rusqlite::Result<V
     let mut stmt = conn.prepare(
         "SELECT a.transfer_name, a.mime_type, a.total_bytes
          FROM message_attachment_join j
-         JOIN attachment a ON a.ROWID = j.item_id
+         JOIN attachment a ON a.ROWID = j.attachment_id
          WHERE j.message_id = ?1",
     )?;
     let rows = stmt.query_map([message_rowid], |r| {

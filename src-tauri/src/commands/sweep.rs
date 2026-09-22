@@ -91,7 +91,28 @@ fn spawn_sweep(
         .try_begin_run()
         .ok_or_else(|| "A sweep is already running.".to_string())?;
     std::thread::spawn(move || {
-        let result = scheduler::run_sweep(&app, &config, cancel.clone());
+        // A panic inside the sweep (e.g. a reader hitting data it did not
+        // expect) must still end the run: without this the run slot is never
+        // released and no sweep-done is emitted, so the UI shows "sweep
+        // running" until the app restarts.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            scheduler::run_sweep(&app, &config, cancel.clone())
+        }));
+        let result = match outcome {
+            Ok(result) => result,
+            Err(payload) => {
+                let message = format!("The sweep crashed: {}", panic_message(&payload));
+                eprintln!("[sweep] {message}");
+                if record_business {
+                    if let Err(error) = record_business_error(&dir, &message) {
+                        eprintln!("[sweep] {error}");
+                    }
+                }
+                let _ = app.emit("sweep-done", message);
+                app.state::<SweepCancel>().0.finish_run(&cancel);
+                return;
+            }
+        };
         if result.busy {
             let _ = app.emit(
                 "sweep-done",
@@ -150,6 +171,25 @@ fn record_business_outcome(dir: &Path, result: &scheduler::SweepResult) -> Resul
     Ok(())
 }
 
+/// Record a crashed business import as its last error, so the business settings
+/// section shows it instead of a stale outcome.
+fn record_business_error(dir: &Path, message: &str) -> Result<(), String> {
+    let mut settings = settings::load_settings(dir)
+        .map_err(|error| format!("could not record business import status: {error}"))?;
+    settings.business_last_error = message.to_string();
+    settings::save_settings(dir, &settings)
+        .map_err(|error| format!("could not record business import status: {error}"))
+}
+
+/// The text of a panic payload (`panic!` with a literal or a formatted string).
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic".to_string())
+}
+
 /// Signal the active sweep to stop after the current session finishes.
 #[tauri::command]
 pub(crate) fn cancel_sweep(app: tauri::AppHandle) {
@@ -204,6 +244,23 @@ mod tests {
         let err =
             business_import_gate(&enabled_with_backup(dir.path().to_str().unwrap())).unwrap_err();
         assert!(err.contains("Manifest.db"), "{err}");
+    }
+
+    #[test]
+    fn a_panic_message_is_read_from_either_payload_type() {
+        let literal = std::panic::catch_unwind(|| panic!("boom")).unwrap_err();
+        assert_eq!(panic_message(&*literal), "boom");
+        let formatted = std::panic::catch_unwind(|| panic!("key {}", 7)).unwrap_err();
+        assert_eq!(panic_message(&*formatted), "key 7");
+    }
+
+    #[test]
+    fn a_crashed_business_import_is_recorded_as_its_last_error() {
+        let dir = tempfile::tempdir().unwrap();
+        settings::save_settings(dir.path(), &settings::HalluScribeSettings::default()).unwrap();
+        record_business_error(dir.path(), "The sweep crashed: boom").unwrap();
+        let saved = settings::load_settings(dir.path()).unwrap();
+        assert_eq!(saved.business_last_error, "The sweep crashed: boom");
     }
 
     #[test]

@@ -16,6 +16,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Settings no longer overwrite the business import status saved by a finished import
 - Dim and muted text is readable across all menus
 - Business import refuses with a clear error when no iPhone backup folder (with Manifest.db) is set, instead of reporting success having read nothing
+- iPhone Messages import no longer rejects real backups: the attachment join column is `attachment_id`, not `item_id`
+- Viber import no longer crashes on messages whose conversation was deleted; they are counted as orphans
+- A sweep that crashes now ends with an error message instead of leaving "sweep running" stuck until restart
 
 ## [0.3.33] - 2026-09-18
 

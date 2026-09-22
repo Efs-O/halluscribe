@@ -40,7 +40,7 @@ CREATE TABLE attachment (
     transfer_name TEXT,
     total_bytes INTEGER
 );
-CREATE TABLE message_attachment_join (message_id INTEGER, item_id INTEGER);
+CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
 "#;
 
 fn conn() -> Connection {
@@ -154,10 +154,10 @@ fn add_attachment(c: &Connection, rowid: i64, transfer: &str, mime: &str, bytes:
     .expect("insert attachment");
 }
 
-fn join_message_attachment(c: &Connection, message_id: i64, item_id: i64) {
+fn join_message_attachment(c: &Connection, message_id: i64, attachment_id: i64) {
     c.execute(
-        "INSERT INTO message_attachment_join (message_id, item_id) VALUES (?1, ?2)",
-        params![message_id, item_id],
+        "INSERT INTO message_attachment_join (message_id, attachment_id) VALUES (?1, ?2)",
+        params![message_id, attachment_id],
     )
     .expect("join attachment");
 }
