@@ -8,6 +8,7 @@
   import type {
     HalluScribeSettings,
     OwnerProfileStatusDto,
+    SweepProgress,
     WorkspaceListDto,
   } from "../../lib/types";
   import {
@@ -19,17 +20,30 @@
     ownerProfileMissingNote,
   } from "../../lib/businessMessages";
   import PathPickerField from "./PathPickerField.svelte";
+  import SweepProgressBar from "../SweepProgressBar.svelte";
   import type { SettingsNotify } from "./settingsSectionTypes";
 
   interface Props {
     settings: HalluScribeSettings;
     onSave: (message?: string) => Promise<boolean>;
     onNotify: SettingsNotify;
+    /** The shared sweep state (App's SweepController): a business import is a sweep. */
+    sweepRunning: boolean;
+    sweepProgress: SweepProgress | null;
+    /** The last sweep message (the same toast the header shows on the Sessions tab). */
+    sweepToast: { msg: string; ok: boolean } | null;
+    onRunImport: () => Promise<string | null>;
   }
 
-  let { settings = $bindable(), onSave, onNotify }: Props = $props();
-
-  let importing = $state(false);
+  let {
+    settings = $bindable(),
+    onSave,
+    onNotify,
+    sweepRunning,
+    sweepProgress,
+    sweepToast,
+    onRunImport,
+  }: Props = $props();
   // The owner-profile toggles (D13) are only meaningful in an import-only
   // (non-host) workspace: the host already owns the profile. `active` is null
   // when the default root (the host) is active, so that is never import-only.
@@ -95,16 +109,10 @@
   }
 
   async function runImportNow() {
-    if (importing || !canRun) return;
-    importing = true;
-    try {
-      await invoke("trigger_business_import");
-      onNotify("Business import started — it runs in the background.");
-    } catch (error) {
-      onNotify(`Business import failed: ${String(error)}`, "warn", 3200);
-    } finally {
-      importing = false;
-    }
+    if (sweepRunning || !canRun) return;
+    const error = await onRunImport();
+    if (error) onNotify(`Business import failed: ${error}`, "warn", 3200);
+    else onNotify("Business import started — it runs in the background.");
   }
 </script>
 
@@ -187,10 +195,17 @@
             class="action-btn"
             type="button"
             onclick={runImportNow}
-            disabled={importing || !canRun}
+            disabled={sweepRunning || !canRun}
           >
-            {#if importing}importing...{:else}run import now{/if}
+            {#if sweepRunning}sweep running...{:else}run import now{/if}
           </button>
+          {#if sweepRunning && sweepProgress}
+            <SweepProgressBar progress={sweepProgress} />
+          {/if}
+          {#if !sweepRunning && sweepToast}
+            <!-- The sweep-done message; otherwise it only shows on the Sessions tab. -->
+            <p class="field-note" class:field-note-warn={!sweepToast.ok}>{sweepToast.msg}</p>
+          {/if}
           <p class="field-note" class:field-note-warn={status.tone === "warn"}>
             {status.text}
           </p>

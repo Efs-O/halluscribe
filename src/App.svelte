@@ -44,7 +44,11 @@
   let settingsSnapshot = $state<HalluScribeSettings | null>(null);
   const briefing = new BriefingController();
   const chat = new ChatController(() => settingsSnapshot, () => briefing.scope);
-  const sweep = new SweepController();
+  const sweep = new SweepController(() => {
+    refreshSettingsSnapshot().catch((error) => {
+      console.error("[sweep] settings reload after sweep failed:", error);
+    });
+  });
   let isMaximized = $state(false);
   const appWindow = getCurrentWindow();
 
@@ -216,6 +220,10 @@
       <SettingsForm
         initialSettings={settingsSnapshot}
         onSaved={() => { void refreshSettingsSnapshot(); }}
+        sweepRunning={sweep.running}
+        sweepProgress={sweep.progress}
+        sweepToast={sweep.toast}
+        onRunBusinessImport={() => sweep.runBusinessImport()}
       />
     {/if}
   </main>

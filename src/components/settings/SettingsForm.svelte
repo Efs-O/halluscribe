@@ -2,7 +2,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
-  import type { HalluScribeSettings } from "../../lib/types";
+  import type { HalluScribeSettings, SweepProgress } from "../../lib/types";
   import "./SettingsForm.css";
   import BriefingSettings from "./BriefingSettings.svelte";
   import BusinessMessagesSettings from "./BusinessMessagesSettings.svelte";
@@ -16,9 +16,20 @@
   interface Props {
     initialSettings?: HalluScribeSettings | null;
     onSaved?: (settings: HalluScribeSettings) => void;
+    sweepRunning: boolean;
+    sweepProgress: SweepProgress | null;
+    sweepToast: { msg: string; ok: boolean } | null;
+    onRunBusinessImport: () => Promise<string | null>;
   }
 
-  let { initialSettings = null, onSaved }: Props = $props();
+  let {
+    initialSettings = null,
+    onSaved,
+    sweepRunning,
+    sweepProgress,
+    sweepToast,
+    onRunBusinessImport,
+  }: Props = $props();
   let settings = $state<HalluScribeSettings | null>(null);
   let savedFlash = $state(false);
   let savedMessage = $state("saved");
@@ -72,7 +83,15 @@
       <SemanticSearchSettings bind:settings onSave={save} onNotify={showFlash} />
       <SweepSettings bind:settings onSave={save} onNotify={showFlash} />
       <ChatImportSettings bind:settings onSave={save} />
-      <BusinessMessagesSettings bind:settings onSave={save} onNotify={showFlash} />
+      <BusinessMessagesSettings
+        bind:settings
+        onSave={save}
+        onNotify={showFlash}
+        {sweepRunning}
+        {sweepProgress}
+        {sweepToast}
+        onRunImport={onRunBusinessImport}
+      />
       <BriefingSettings bind:settings onSave={save} />
       <TtsVoiceSettings
         bind:piperBin={settings.tts_piper_bin}
