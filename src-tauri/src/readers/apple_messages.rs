@@ -8,7 +8,7 @@
 // names, handles or text; skip counts are surfaced in one line.
 
 use crate::apple_backup::contacts::ContactBook;
-use crate::apple_backup::manifest::{open_backup, open_sqlite_read_only};
+use crate::apple_backup::manifest::open_backup;
 use crate::readers::apple_messages_db::{self, RawMessage};
 use crate::readers::apple_messages_raw::{
     attachment_line, conversation_org, conversation_title, render_raw,
@@ -43,8 +43,9 @@ pub fn read(
     let sms_copy = handle
         .copy_to_temp(HOME_DOMAIN, SMS_DB)
         .map_err(|e| ReaderError::Database(e.to_string()))?;
-    let sms_conn =
-        open_sqlite_read_only(sms_copy.path()).map_err(|e| ReaderError::Database(e.to_string()))?;
+    let sms_conn = sms_copy
+        .open()
+        .map_err(|e| ReaderError::Database(e.to_string()))?;
     let db = apple_messages_db::load(&sms_conn)?;
 
     // The address book is optional: absent ⇒ an empty book, and unresolved
@@ -185,8 +186,9 @@ fn load_contact_book(
     let copy = handle
         .copy_to_temp(HOME_DOMAIN, ADDRESS_BOOK)
         .map_err(|e| ReaderError::Database(e.to_string()))?;
-    let conn =
-        open_sqlite_read_only(copy.path()).map_err(|e| ReaderError::Database(e.to_string()))?;
+    let conn = copy
+        .open()
+        .map_err(|e| ReaderError::Database(e.to_string()))?;
     ContactBook::from_connection(&conn, default_cc)
         .map_err(|e| ReaderError::Database(e.to_string()))
 }

@@ -79,6 +79,11 @@ pub fn run_sweep(
         record_sweep_errors(&result);
         return result;
     }
+    // Keep the backup's manifest index alive for the whole sweep, so the scan
+    // and every backup reader share one read of `Manifest.db`. A failure here
+    // is not reported: each reader opens the backup and surfaces its own error.
+    let _backup_manifest = crate::scanner::resolve_apple_backup_path(&config.settings)
+        .and_then(|dir| crate::apple_backup::open_backup(&dir).ok());
     let sources = scan_sessions(
         &config.archive_dir,
         &config.settings,

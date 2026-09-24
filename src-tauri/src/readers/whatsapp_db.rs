@@ -15,7 +15,10 @@
 // Schema (verified against the real backup, 2026-09-18): `ZWAMESSAGE` is keyed
 // by `Z_PK`, carries `ZCHATSESSION` (its `ZWACHATSESSION.Z_PK`), `ZISFROMME`,
 // `ZMESSAGEDATE` (REAL, seconds since 2001-01-01 UTC), `ZTEXT`, `ZFROMJID`,
-// `ZMESSAGETYPE` (0 = text) and `ZGROUPEVENTTYPE` (0 = none). `ZWAPROFILEPUSHNAME`
+// `ZMESSAGETYPE` (0 = text) and `ZGROUPEVENTTYPE` (0 = none). In a group,
+// `ZFROMJID` on an incoming message is the GROUP's JID; the real sender is
+// `ZGROUPMEMBER` -> `ZWAGROUPMEMBER.ZMEMBERJID`, read when those columns exist.
+// `ZWAPROFILEPUSHNAME`
 // is a `JID -> push_name` map (WhatsApp's own name for a contact); it is the
 // first name source, ahead of the address book.
 
@@ -179,6 +182,30 @@ struct MessageRow {
     group_event_type: i64,
     text: Option<String>,
     from_jid: Option<String>,
+    /// `ZWAGROUPMEMBER.ZMEMBERJID` via `ZGROUPMEMBER`: a group message's sender.
+    member_jid: Option<String>,
+}
+
+/// The sender's JID: `None` for my own messages; else the group member JID
+/// when there is one; else `ZFROMJID`, unless that is a group JID (`@g.us`),
+/// which names the chat, not the person - then `None`, rendered "Unknown"
+/// rather than crediting the group. A 1:1 chat with no `ZFROMJID` falls back to
+/// the session's contact JID in the reader.
+fn sender_jid(row: &MessageRow) -> Option<String> {
+    if row.is_from_me {
+        return None;
+    }
+    if let Some(member) = non_blank(&row.member_jid) {
+        return Some(member.to_string());
+    }
+    non_blank(&row.from_jid)
+        .filter(|jid| !jid.ends_with("@g.us"))
+        .map(str::to_string)
+}
+
+/// A JID trimmed, or `None` when it is missing or blank.
+fn non_blank(jid: &Option<String>) -> Option<&str> {
+    jid.as_deref().map(str::trim).filter(|j| !j.is_empty())
 }
 
 /// Read and resolve every message row, skipping the non-text rows and counting
@@ -190,11 +217,23 @@ fn load_messages(
     let mut messages: Vec<RawMessage> = Vec::new();
     let mut skipped = SkipCounts::default();
 
-    let mut stmt = conn.prepare(
-        "SELECT Z_PK, ZCHATSESSION, ZISFROMME, ZMESSAGEDATE, ZMESSAGETYPE, ZGROUPEVENTTYPE,
-                ZTEXT, ZFROMJID
-         FROM ZWAMESSAGE",
-    )?;
+    // `ZGROUPMEMBER` is optional: without it, group senders fall back to
+    // `ZFROMJID` (see `sender_jid`).
+    let has_group_member = table_has_column(conn, "ZWAMESSAGE", "ZGROUPMEMBER")?
+        && table_has_column(conn, "ZWAGROUPMEMBER", "Z_PK")?;
+    let (member_col, member_join) = if has_group_member {
+        (
+            "g.ZMEMBERJID",
+            "LEFT JOIN ZWAGROUPMEMBER g ON g.Z_PK = m.ZGROUPMEMBER",
+        )
+    } else {
+        ("NULL", "")
+    };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT m.Z_PK, m.ZCHATSESSION, m.ZISFROMME, m.ZMESSAGEDATE, m.ZMESSAGETYPE,
+                m.ZGROUPEVENTTYPE, m.ZTEXT, m.ZFROMJID, {member_col}
+         FROM ZWAMESSAGE m {member_join}"
+    ))?;
     let rows = stmt.query_map([], |r| {
         Ok(MessageRow {
             rowid: r.get::<_, i64>(0)?,
@@ -205,6 +244,7 @@ fn load_messages(
             group_event_type: r.get::<_, i64>(5)?,
             text: r.get::<_, Option<String>>(6)?,
             from_jid: r.get::<_, Option<String>>(7)?,
+            member_jid: r.get::<_, Option<String>>(8)?,
         })
     })?;
 
@@ -245,14 +285,7 @@ fn load_messages(
             continue;
         };
 
-        // The sender's JID: `None` for my own messages; otherwise the message's
-        // `ZFROMJID` (a 1:1 chat's sender is also the session's contact JID,
-        // which the reader falls back to).
-        let sender_jid = if row.is_from_me {
-            None
-        } else {
-            row.from_jid.clone()
-        };
+        let sender_jid = sender_jid(&row);
 
         messages.push(RawMessage {
             rowid: row.rowid,
@@ -371,3 +404,7 @@ fn wa_date_to_utc(value: f64) -> Option<DateTime<Utc>> {
 #[cfg(test)]
 #[path = "whatsapp_db_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "whatsapp_db_group_tests.rs"]
+mod group_tests;

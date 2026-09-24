@@ -1,8 +1,8 @@
 // HalluScribe - reader for Viber from an Apple backup.
 //
 // Phase 7b of the Business Messaging ingestion plan. It opens the backup
-// (Phase 1), temp-copies and opens `Contacts.data` read-only (Phase 1's
-// `open_sqlite_read_only`), loads the rows (this crate's `viber_db`), splits
+// (Phase 1), temp-copies and opens `Contacts.data` (`TempCopy::open`, which also
+// replays a backed-up WAL), loads the rows (this crate's `viber_db`), splits
 // them into windows (the shared `apple_messages_window`), and builds one
 // `ParsedSession` per window. Names resolve the sender's phone number via the
 // iPhone address book and `phone.rs` (D7: an unresolved number shows verbatim,
@@ -10,7 +10,7 @@
 // surfaced in one line.
 
 use crate::apple_backup::contacts::ContactBook;
-use crate::apple_backup::manifest::{open_backup, open_sqlite_read_only, BackupHandle};
+use crate::apple_backup::manifest::{open_backup, BackupHandle};
 use crate::readers::apple_messages_window::{self, Window};
 use crate::readers::viber_db::{self, ViberDb};
 use crate::readers::viber_raw;
@@ -48,7 +48,8 @@ pub fn read(
     let chat_copy = handle
         .copy_to_temp(VIBER_DOMAIN, CONTACTS_DATA)
         .map_err(|e| ReaderError::Database(e.to_string()))?;
-    let chat_conn = open_sqlite_read_only(chat_copy.path())
+    let chat_conn = chat_copy
+        .open()
         .map_err(|e| ReaderError::Database(e.to_string()))?;
     let db = viber_db::load(&chat_conn)?;
 
@@ -178,8 +179,9 @@ fn load_contact_book(
     let copy = handle
         .copy_to_temp(HOME_DOMAIN, ADDRESS_BOOK)
         .map_err(|e| ReaderError::Database(e.to_string()))?;
-    let conn =
-        open_sqlite_read_only(copy.path()).map_err(|e| ReaderError::Database(e.to_string()))?;
+    let conn = copy
+        .open()
+        .map_err(|e| ReaderError::Database(e.to_string()))?;
     ContactBook::from_connection(&conn, default_cc)
         .map_err(|e| ReaderError::Database(e.to_string()))
 }

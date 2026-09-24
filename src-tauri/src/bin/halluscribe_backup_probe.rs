@@ -10,9 +10,7 @@
 // or any column value other than counts and dates. The path comes only from
 // argv - there is no default and no hardcoded path.
 
-use app_lib::apple_backup::{
-    decode_attributed_body, open_backup, open_sqlite_read_only, plist_value, BackupError,
-};
+use app_lib::apple_backup::{decode_attributed_body, open_backup, plist_value, BackupError};
 use chrono::TimeZone;
 use chrono::Utc;
 use rusqlite::Connection;
@@ -96,7 +94,7 @@ fn main() {
     // sms.db stats - only if it resolves.
     if handle.resolve("HomeDomain", "Library/SMS/sms.db").is_some() {
         match handle.copy_to_temp("HomeDomain", "Library/SMS/sms.db") {
-            Ok(sms) => match open_sqlite_read_only(sms.path()) {
+            Ok(sms) => match sms.open() {
                 Ok(conn) => print_sms_stats(&conn),
                 Err(e) => println!("sms.db: unreadable: {e}"),
             },
@@ -118,7 +116,7 @@ fn main() {
                     continue;
                 }
                 match handle.copy_to_temp(&domain, &rel) {
-                    Ok(copy) => match open_sqlite_read_only(copy.path()) {
+                    Ok(copy) => match copy.open() {
                         Ok(conn) => {
                             print_table_list(&rel, &conn);
                             if rel == "ChatStorage.sqlite" {

@@ -358,7 +358,7 @@ fn scan_ollama_chat(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
 /// the path is set, and the directory exists. One authority for both the sweep
 /// (`scan_apple_backup`) and the raw backfill (`chat_import_sources`), so the
 /// two can never disagree about which backup to read.
-fn resolve_apple_backup_path(settings: &HalluScribeSettings) -> Option<PathBuf> {
+pub(crate) fn resolve_apple_backup_path(settings: &HalluScribeSettings) -> Option<PathBuf> {
     if !settings.business_ingestion_enabled {
         return None;
     }

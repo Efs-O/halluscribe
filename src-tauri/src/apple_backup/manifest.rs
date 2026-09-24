@@ -4,8 +4,11 @@
 // the phone backed up) plus hashed payload files at `<dir>/<fileID[0..2]>/<fileID>`.
 // `open_backup` reads the manifest into an in-memory index; `resolve` maps a
 // (domain, relativePath) pair to the on-disk path if the file actually exists;
-// `copy_to_temp` copies a file out so its SQLite can be opened read-only on a
-// temp copy with `immutable=1`, never touching the backup directory.
+// `copy_to_temp` copies a file out so its SQLite can be opened on a temp copy,
+// never touching the backup directory. A `-wal` the backup holds beside the
+// database is copied with it, so rows written since the last checkpoint are
+// read too. Handles alive at the same time share one manifest index, so a
+// sweep that keeps one handle open copies and reads `Manifest.db` once.
 //
 // This is the Phase 1 probe layer: it reports metadata only.
 
@@ -14,7 +17,12 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::time::SystemTime;
+
+#[path = "temp_copy.rs"]
+mod temp_copy;
+pub use temp_copy::TempCopy;
 
 /// Errors from opening or reading a backup.
 #[derive(Debug)]
@@ -47,52 +55,31 @@ impl std::error::Error for BackupError {}
 #[derive(Debug)]
 pub struct BackupHandle {
     dir: PathBuf,
+    manifest: Arc<ManifestIndex>,
+}
+
+/// The in-memory manifest, shared by every handle open on the same unchanged
+/// `Manifest.db`.
+#[derive(Debug)]
+struct ManifestIndex {
     /// (domain, relativePath) -> fileID, from the `Files` table.
     index: HashMap<(String, String), String>,
     /// Every distinct domain seen in the manifest.
     domains: Vec<String>,
 }
 
-/// A temp copy of a backup file. Deletes itself on drop.
-pub struct TempCopy {
-    path: PathBuf,
+/// Identifies one version of one backup's `Manifest.db`: a rewritten backup
+/// changes its size or mtime, so a stale index is never reused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ManifestKey {
+    dir: PathBuf,
+    len: u64,
+    modified: Option<SystemTime>,
 }
 
-impl TempCopy {
-    fn new(source: &Path) -> Result<TempCopy, BackupError> {
-        let dest = unique_temp_path();
-        fs::copy(source, &dest).map_err(|e| BackupError::Io(e.to_string()))?;
-        Ok(TempCopy { path: dest })
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TempCopy {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
-}
-
-static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// A unique path under `std::env::temp_dir()`: pid + nanos + a per-process
-/// counter, so concurrent copies never collide.
-fn unique_temp_path() -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "halluscribe-backup-{}-{}-{}",
-        std::process::id(),
-        nanos,
-        counter
-    ))
-}
+/// The manifests read so far, held weakly: one is reused only while some handle
+/// still owns it, so nothing stays in memory after the last one drops.
+static SHARED_MANIFESTS: Mutex<Vec<(ManifestKey, Weak<ManifestIndex>)>> = Mutex::new(Vec::new());
 
 /// Open a backup directory, reading its manifest into memory.
 ///
@@ -116,14 +103,38 @@ pub fn open_backup(dir: &Path) -> Result<BackupHandle, BackupError> {
         return Err(BackupError::Encrypted);
     }
 
+    // Reuse the index another live handle already read from this unchanged
+    // manifest, instead of copying and reading it again.
+    let meta = fs::metadata(&manifest_path).map_err(|e| BackupError::Io(e.to_string()))?;
+    let key = ManifestKey {
+        dir: dir.to_path_buf(),
+        len: meta.len(),
+        modified: meta.modified().ok(),
+    };
+    let mut shared = SHARED_MANIFESTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    // Forget dropped indexes and older versions of this backup's manifest.
+    shared.retain(|(k, weak)| weak.strong_count() > 0 && (k.dir != key.dir || *k == key));
+    if let Some(manifest) = shared
+        .iter()
+        .find(|(k, _)| *k == key)
+        .and_then(|(_, w)| w.upgrade())
+    {
+        return Ok(BackupHandle {
+            dir: key.dir,
+            manifest,
+        });
+    }
+
     // Read the Files table through a temp copy so the original is never
     // opened (Apple Devices may be writing it).
     let temp = TempCopy::new(&manifest_path)?;
-    let (index, domains) = read_files_table(temp.path())?;
+    let manifest = Arc::new(read_files_table(temp.path())?);
+    shared.push((key, Arc::downgrade(&manifest)));
     Ok(BackupHandle {
         dir: dir.to_path_buf(),
-        index,
-        domains,
+        manifest,
     })
 }
 
@@ -132,6 +143,7 @@ impl BackupHandle {
     /// for it AND the hashed file exists in the backup directory.
     pub fn resolve(&self, domain: &str, relative_path: &str) -> Option<PathBuf> {
         let file_id = self
+            .manifest
             .index
             .get(&(domain.to_string(), relative_path.to_string()))?;
         let hashed = hashed_path(&self.dir, file_id)?;
@@ -147,6 +159,7 @@ impl BackupHandle {
     pub fn domains_matching(&self, needle: &str) -> Vec<String> {
         let needle = needle.to_ascii_lowercase();
         let mut out: Vec<String> = self
+            .manifest
             .domains
             .iter()
             .filter(|d| d.to_ascii_lowercase().contains(&needle))
@@ -162,6 +175,7 @@ impl BackupHandle {
     /// resolver itself only needs `resolve`/`copy_to_temp`.
     pub fn files_in_domain(&self, domain: &str) -> Vec<String> {
         let mut out: Vec<String> = self
+            .manifest
             .index
             .keys()
             .filter(|(d, _)| d == domain)
@@ -173,15 +187,20 @@ impl BackupHandle {
     }
 
     /// Copy a logical file to a unique temp path and return a guard that
-    /// deletes it on drop. Errors if the file does not resolve or the copy
-    /// fails.
+    /// deletes it on drop. When the backup also holds the file's `-wal`, that
+    /// is copied beside it (see `TempCopy::open`). Errors if the file does not
+    /// resolve or a copy fails.
     pub fn copy_to_temp(&self, domain: &str, relative_path: &str) -> Result<TempCopy, BackupError> {
         let source = self.resolve(domain, relative_path).ok_or_else(|| {
             BackupError::Io(format!(
                 "file not found in backup: {domain}/{relative_path}"
             ))
         })?;
-        TempCopy::new(&source)
+        let mut copy = TempCopy::new(&source)?;
+        if let Some(wal) = self.resolve(domain, &format!("{relative_path}-wal")) {
+            copy.attach_wal(&wal)?;
+        }
+        Ok(copy)
     }
 }
 
@@ -191,13 +210,9 @@ fn hashed_path(dir: &Path, file_id: &str) -> Option<PathBuf> {
     Some(dir.join(sub).join(file_id))
 }
 
-/// The in-memory manifest: a (domain, relativePath) -> fileID index plus the
-/// distinct domain list.
-type ManifestData = (HashMap<(String, String), String>, Vec<String>);
-
 /// Read the `Files` table of a (temp-copy) manifest into an index plus the
 /// distinct domain list.
-fn read_files_table(path: &Path) -> Result<ManifestData, BackupError> {
+fn read_files_table(path: &Path) -> Result<ManifestIndex, BackupError> {
     let conn =
         open_sqlite_read_only(path).map_err(|e| BackupError::ManifestUnreadable(e.to_string()))?;
     let mut stmt = conn
@@ -221,7 +236,7 @@ fn read_files_table(path: &Path) -> Result<ManifestData, BackupError> {
         domains.push(domain.clone());
         index.insert((domain, rel), file_id);
     }
-    Ok((index, domains))
+    Ok(ManifestIndex { index, domains })
 }
 
 /// Open a SQLite file read-only via an `immutable=1` URI. The file is treated
@@ -260,3 +275,7 @@ fn path_to_uri(path: &Path) -> String {
 #[cfg(test)]
 #[path = "manifest_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "manifest_wal_tests.rs"]
+mod wal_tests;
