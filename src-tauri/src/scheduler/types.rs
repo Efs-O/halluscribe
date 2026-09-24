@@ -15,11 +15,6 @@ pub struct SweepConfig {
     pub max_tokens: u32,
     pub min_fill_pct: f64,
     pub lookback_secs: u64,
-    pub force: bool,
-    pub schedule_time: String,
-    /// Date (`YYYY-MM-DD`, local) of the last successful sweep, copied from
-    /// settings. Used by the catch-up scheduler to run at most once per day.
-    pub last_sweep_date: String,
     /// When true, this is a guest/import-only workspace: the sweep skips the
     /// host's local coding-tool scan and ingests only configured chat imports
     /// + recorded in-app chats.

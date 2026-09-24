@@ -3,7 +3,6 @@
 use super::{ArchiveError, IndexEntry};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 
 /// Outcome of a best-effort bulk delete. A failure leaves that session's index
@@ -21,112 +20,8 @@ pub struct DeleteSessionFailure {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct Index {
-    sessions: Vec<IndexEntry>,
-}
-
-pub fn session_id(source: &Path) -> String {
-    if let Some(stem) = source.file_stem().and_then(|s| s.to_str()) {
-        if !stem.is_empty() {
-            return stem.to_string();
-        }
-    }
-    // A path with no usable stem (trailing dot, non-UTF-8 filename, a path
-    // ending in `..`) must not collapse onto a single literal id: `append_index`
-    // does `retain(|e| e.id != entry.id)` before pushing, so every such session
-    // would evict the previous one. Fall back to a stable per-path hash so the
-    // ids stay distinct and idempotent.
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    source.hash(&mut hasher);
-    format!("unknown-{:016x}", hasher.finish())
-}
-
-/// Resolve a proposed session ID against durable archive ownership. A legacy
-/// bare stem remains its existing owner's ID; a different source requesting
-/// that stem receives a deterministic suffix. The suffix is persisted by the
-/// normal index/manifest writes, so its `DefaultHasher` value is never later
-/// recomputed as the authority for an existing session.
-pub fn resolve_session_id(archive_dir: &Path, source: &Path, proposed: &str) -> String {
-    SessionLookup::load(archive_dir).resolve_session_id(source, proposed)
-}
-
-/// The archive's ownership data (the index and the captured manifest), read
-/// once. The sweep checks every discovered session against it; re-reading and
-/// re-parsing `index.json` per session made a 6,574-session phone import spend
-/// many minutes before inference started, and every later sweep paid it again.
-/// Nothing is written while the worklist is built, so one snapshot is exact.
-pub struct SessionLookup {
-    entries: std::collections::HashMap<String, IndexEntry>,
-    captured: super::CapturedManifest,
-    deleted: std::collections::BTreeMap<String, super::Tombstone>,
-}
-
-impl SessionLookup {
-    /// An unreadable index reads as empty, as `resolve_session_id` always did;
-    /// the sweep checks `ensure_index_readable` before building its worklist.
-    pub fn load(archive_dir: &Path) -> Self {
-        let mut entries = std::collections::HashMap::new();
-        if let Ok(index) = load_index(archive_dir) {
-            for entry in index.sessions {
-                // The first row wins, matching the old linear `find`.
-                entries.entry(entry.id.clone()).or_insert(entry);
-            }
-        }
-        Self {
-            entries,
-            captured: super::captured_manifest::load_captured(archive_dir),
-            // Unreadable records read as none here; the sweep and capture
-            // refuse to start on them via `ensure_deleted_readable`.
-            deleted: super::tombstones::load_deleted(archive_dir).unwrap_or_default(),
-        }
-    }
-
-    /// Whether the user permanently deleted the session `id` read from `source`.
-    pub fn is_deleted(&self, id: &str, source: &Path) -> bool {
-        self.deleted
-            .get(id)
-            .is_some_and(|tombstone| tombstone.covers(source))
-    }
-
-    /// The index row for `id`, if archived.
-    pub fn find(&self, id: &str) -> Option<&IndexEntry> {
-        self.entries.get(id)
-    }
-
-    /// See the free function `resolve_session_id`.
-    pub fn resolve_session_id(&self, source: &Path, proposed: &str) -> String {
-        let source_text = source.to_string_lossy();
-        let index_owner = self
-            .entries
-            .get(proposed)
-            .map(|entry| entry.source_jsonl.as_str());
-        let manifest_owner = self
-            .captured
-            .get(proposed)
-            .map(|record| record.source_path.as_str());
-        // A deleted session still owns its id, so another source proposing
-        // the same id gets its own instead of inheriting the delete.
-        let deleted_owner = self
-            .deleted
-            .get(proposed)
-            .map(|tombstone| tombstone.source_path.as_str())
-            .filter(|owner| !owner.is_empty());
-        let owners = [index_owner, manifest_owner, deleted_owner];
-        if owners.iter().flatten().any(|owner| *owner == source_text) {
-            return proposed.to_string();
-        }
-        if owners.iter().flatten().next().is_some() {
-            format!("{proposed}-{}", path_hash(source))
-        } else {
-            proposed.to_string()
-        }
-    }
-}
-
-fn path_hash(source: &Path) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    source.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+pub(super) struct Index {
+    pub(super) sessions: Vec<IndexEntry>,
 }
 
 /// Serialise the read-modify-write cycle of every index mutation within this
@@ -332,7 +227,7 @@ fn save_index(archive_dir: &Path, index: &Index) -> Result<(), ArchiveError> {
     Ok(())
 }
 
-fn load_index(archive_dir: &Path) -> Result<Index, ArchiveError> {
+pub(super) fn load_index(archive_dir: &Path) -> Result<Index, ArchiveError> {
     let p = archive_dir.join("index.json");
     if !p.exists() {
         return Ok(Index::default());
@@ -421,22 +316,6 @@ mod tests {
         }
         let entries = read_sessions(&dir);
         assert_eq!(entries.len(), 8, "every concurrent append must survive");
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn collision_resolver_keeps_legacy_owner_and_suffixes_the_new_source() {
-        let dir = test_dir("collision_resolver");
-        let first = Path::new("C:/one/session.jsonl");
-        let second = Path::new("C:/two/session.jsonl");
-        let mut legacy = sample_entry("session");
-        legacy.source_jsonl = first.to_string_lossy().to_string();
-        append_index(&dir, legacy).unwrap();
-
-        assert_eq!(resolve_session_id(&dir, first, "session"), "session");
-        let second_id = resolve_session_id(&dir, second, "session");
-        assert!(second_id.starts_with("session-"));
-        assert_ne!(second_id, "session");
         let _ = fs::remove_dir_all(&dir);
     }
 }

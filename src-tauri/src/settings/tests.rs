@@ -317,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn sweep_config_propagates_force_and_schedule_time() {
+    fn sweep_config_propagates_limits() {
         let settings = HalluScribeSettings {
             backend: BackendKind::Ollama,
             first_run: false,
@@ -331,8 +331,6 @@ mod tests {
         let cfg = settings
             .to_sweep_config(PathBuf::from("/tmp/hs"), true)
             .unwrap();
-        assert!(cfg.force);
-        assert_eq!(cfg.schedule_time, "03:45");
         assert_eq!(cfg.min_fill_pct, 60.0);
         assert_eq!(cfg.lookback_secs, 48 * 3600);
     }

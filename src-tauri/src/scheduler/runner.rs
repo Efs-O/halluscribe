@@ -1,16 +1,14 @@
 // HalluScribe - scheduled sweep execution and completion reporting.
 
 use super::eligibility::{is_low_signal_business_session, is_low_signal_codex_session};
-use super::helpers::{
-    backend_display_name, is_sweep_due, model_display_name, provider_display_name,
-};
+use super::helpers::{backend_display_name, model_display_name, provider_display_name};
 use super::{SweepConfig, SweepProgress, SweepResult};
 use crate::archive::{self, ArchiveError, SessionMeta};
 use crate::gemma::GemmaError;
 use crate::readers::{self, ChatProvider, ParsedSession};
 use crate::retrieval;
 use crate::scanner::{scan_sessions, ScanTargetKind};
-use chrono::{Local, Timelike, Utc};
+use chrono::Utc;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{
@@ -40,19 +38,8 @@ pub fn run_sweep(
     config: &SweepConfig,
     cancel: Arc<AtomicBool>,
 ) -> SweepResult {
-    let now = Local::now();
-    let today = now.format("%Y-%m-%d").to_string();
-    if !config.force
-        && !is_sweep_due(
-            now.hour(),
-            now.minute(),
-            &today,
-            &config.schedule_time,
-            &config.last_sweep_date,
-        )
-    {
-        return SweepResult::default();
-    }
+    // Whether an automatic run is due is decided before this is called, by
+    // the persisted admission in `scheduler::automatic`.
 
     // CLAUDE.md: never run inference concurrently. Hold the process-wide
     // inference lock for the whole sweep so a manual "Run Now", a second

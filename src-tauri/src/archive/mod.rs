@@ -14,6 +14,9 @@ mod raw;
 mod raw_tests;
 mod read_raw_session;
 mod redact;
+mod session_ids;
+#[cfg(test)]
+mod session_ids_tests;
 mod tombstones;
 #[cfg(test)]
 mod tombstones_tests;
@@ -58,8 +61,8 @@ pub use capture::{run_capture, CaptureStatus};
 pub use captured_manifest::{load_captured, save_captured, CapturedManifest, CapturedRecord};
 pub use index::{
     archived_source_size, delete_sessions, ensure_index_readable, find_session, index_stamp,
-    is_archived, read_sessions, resolve_session_id, session_id, set_raw_path, set_secret_flags,
-    DeleteSessionFailure, DeleteSessionsResult, IndexStamp, SessionLookup,
+    is_archived, read_sessions, set_raw_path, set_secret_flags, DeleteSessionFailure,
+    DeleteSessionsResult, IndexStamp,
 };
 pub use raw::{
     preserve_raw, preserve_raw_bytes, raw_rel_path, read_raw, read_raw_at, PreservedRaw, RAW_DIR,
@@ -70,5 +73,6 @@ pub use redact::{
     apply_redaction, load_rules, preview_redaction, rules_for_session, RedactionOutcome,
     RedactionPreview, RedactionRule,
 };
+pub use session_ids::{resolve_session_id, session_id, SessionLookup};
 pub use tombstones::{ensure_deleted_readable, load_deleted, Tombstone, DELETED_SESSIONS_FILE};
 pub use writer::write_session;

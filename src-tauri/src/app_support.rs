@@ -66,8 +66,17 @@ pub(crate) fn sweep_config(
     let default_root = default_archive_dir(app)?;
     let import_only = crate::workspace::is_active_import_only(&default_root, &dir)?;
     let settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
-    let Some(mut config) = settings.to_sweep_config(dir, force) else {
+    if !force && !settings.scheduled_processing_enabled {
         return Ok(None);
+    }
+    // Enabled but unusable is an error, not "off": the scheduler reports it
+    // instead of skipping every minute without a word.
+    if settings.to_inference_backend().is_none() {
+        return Err("backend not configured (check Settings)".to_string());
+    }
+    settings.generation_limits()?;
+    let Some(mut config) = settings.to_sweep_config(dir, force) else {
+        return Err("sweep settings are incomplete (check Settings)".to_string());
     };
     config.import_only = import_only;
     Ok(Some(config))
@@ -150,16 +159,30 @@ pub(crate) fn automatic_sweep_admission(
     Ok(scheduler::admit(&settings, scheduler::now_fixed()))
 }
 
-/// Persist an automatic attempt before it competes for inference. A busy run
-/// spends the same bounded budget as a failed run, so it cannot become a
-/// tight retry loop.
-pub(crate) fn mark_auto_sweep_attempt(app: &tauri::AppHandle) -> Result<(), String> {
+/// Persist an automatic attempt before it competes for inference, returning
+/// the state it replaced so a run that finds the sweep or the model busy can
+/// give the attempt back with `release_auto_sweep_attempt`.
+pub(crate) fn mark_auto_sweep_attempt(
+    app: &tauri::AppHandle,
+) -> Result<scheduler::AttemptState, String> {
     let dir = archive_dir(app)?;
     let mut settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
+    let previous = scheduler::AttemptState::of(&settings);
     let admission = scheduler::admit(&settings, scheduler::now_fixed());
     scheduler::record_attempt(&mut settings, scheduler::now_fixed(), admission);
     settings::save_settings(&dir, &settings).map_err(|error| error.to_string())?;
-    Ok(())
+    Ok(previous)
+}
+
+/// Undo `mark_auto_sweep_attempt` for an attempt that never ran.
+pub(crate) fn release_auto_sweep_attempt(
+    app: &tauri::AppHandle,
+    previous: scheduler::AttemptState,
+) -> Result<(), String> {
+    let dir = archive_dir(app)?;
+    let mut settings = settings::load_settings(&dir).map_err(|error| error.to_string())?;
+    previous.restore(&mut settings);
+    settings::save_settings(&dir, &settings).map_err(|error| error.to_string())
 }
 
 /// Persist the once-per-day terminal exhaustion notification state.

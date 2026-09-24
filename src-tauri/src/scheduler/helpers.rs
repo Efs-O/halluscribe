@@ -3,7 +3,6 @@
 use super::types::SweepResult;
 use crate::gemma::InferenceBackend;
 use crate::readers::ChatProvider;
-use crate::settings::parse_schedule_time;
 
 /// Build the human-readable `sweep-done` message for a finished sweep.
 ///
@@ -64,27 +63,6 @@ pub fn sweep_done_message(result: &SweepResult, marker_errors: &[String]) -> Str
         ));
     }
     message
-}
-
-/// Returns true when a sweep has not completed today and the current local time
-/// is at or after the scheduled time. The application-level scheduler adds the
-/// separate persisted one-attempt-per-day guard before calling this runner.
-/// `today` and `last_sweep_date` are `YYYY-MM-DD` local dates. Extracted for
-/// unit-testability (no real clock).
-pub(crate) fn is_sweep_due(
-    current_hour: u32,
-    current_minute: u32,
-    today: &str,
-    schedule_time: &str,
-    last_sweep_date: &str,
-) -> bool {
-    let Some((target_hour, target_minute)) = parse_schedule_time(schedule_time) else {
-        return false;
-    };
-    if last_sweep_date == today {
-        return false;
-    }
-    (current_hour, current_minute) >= (target_hour, target_minute)
 }
 
 /// Map InferenceBackend to the short label stored in archive metadata.

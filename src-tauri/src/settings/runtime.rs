@@ -113,9 +113,6 @@ impl HalluScribeSettings {
             max_tokens,
             min_fill_pct: self.summary_min_fill_pct,
             lookback_secs,
-            force,
-            schedule_time: self.schedule_time.clone(),
-            last_sweep_date: self.last_sweep_date.clone(),
             import_only: false,
         })
     }
