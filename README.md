@@ -211,7 +211,7 @@ Both backends use native function-calling (no prompt-engineering hacks) — vali
 
 ## Download
 
-Go to [Releases](https://github.com/Efs-O/halluscribe/releases) and download the latest installer for your platform. The current release is **v0.3.33**.
+Go to [Releases](https://github.com/Efs-O/halluscribe/releases) and download the latest installer for your platform. The current release is **v0.3.35**.
 
 | Platform | File |
 |---|---|
