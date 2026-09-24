@@ -11,7 +11,7 @@
 // Nothing here logs names, numbers or text.
 
 use super::{
-    apple_messages, chatgpt, claudeai, estimate_fill_pct, gemini, grok, halluscribe_agent_chat,
+    apple_messages, chatgpt, claudeai, estimate_fill_pct, gemini, grok, halluscribe_chat,
     ollama_chat, stable_hash, viber, whatsapp, ChatProvider, MessageRole, ParsedMessage,
     ParsedSession, ReaderError,
 };
@@ -34,7 +34,7 @@ pub fn read_target(
             ChatProvider::ClaudeAI => claudeai::read(&target.path),
             ChatProvider::Gemini => gemini::read(&target.path),
             ChatProvider::Grok => grok::read(&target.path),
-            ChatProvider::HalluScribeAgentChat => halluscribe_agent_chat::read(&target.path),
+            ChatProvider::HalluScribeAgentChat => halluscribe_chat::read(&target.path),
             ChatProvider::OllamaChat => ollama_chat::read(&target.path),
             // The Apple-backup readers (Messages, WhatsApp, WhatsApp Business,
             // Viber): one dispatch, the provider selects the app's domain.

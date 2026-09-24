@@ -79,6 +79,12 @@ pub fn run_sweep(
         record_sweep_errors(&result);
         return result;
     }
+    // Unreadable delete records would let every deleted session back in.
+    if let Err(error) = archive::ensure_deleted_readable(&config.archive_dir) {
+        result.push_error(format!("deleted sessions: {error}"), true);
+        record_sweep_errors(&result);
+        return result;
+    }
     // Keep the backup's manifest index alive for the whole sweep, so the scan
     // and every backup reader share one read of `Manifest.db`. A failure here
     // is not reported: each reader opens the backup and surfaces its own error.
@@ -126,6 +132,11 @@ pub fn run_sweep(
 
         for mut session in parsed_sessions {
             session.id = lookup.resolve_session_id(&session.source_path, &session.id);
+            // The user deleted this session for good; its source is still here.
+            if lookup.is_deleted(&session.id, &session.source_path) {
+                result.skipped += 1;
+                continue;
+            }
             if is_unchanged_session(&lookup, &session) {
                 result.skipped += 1;
                 continue;
@@ -307,6 +318,16 @@ pub fn run_sweep(
                 result.processed += 1;
                 if !written.secret_flags.is_empty() {
                     result.flagged += 1;
+                }
+                for warning in &written.warnings {
+                    result.push_error(
+                        format!(
+                            "{} ({}): {warning}",
+                            session.id,
+                            session.source_path.display()
+                        ),
+                        session.provider.is_business(),
+                    );
                 }
                 written_ids.push(session.id.clone());
                 if session.provider.is_business() {

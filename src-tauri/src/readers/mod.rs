@@ -9,8 +9,7 @@ mod chatgpt_content;
 mod claudeai;
 mod gemini;
 mod grok;
-#[path = "halluscribe_gemma_chat.rs"]
-mod halluscribe_agent_chat;
+mod halluscribe_chat;
 mod ollama_chat;
 mod project_label;
 #[cfg(test)]
@@ -170,7 +169,7 @@ impl ChatProvider {
             Self::ClaudeAI => "Claude.ai",
             Self::Gemini => "Gemini",
             Self::Grok => "Grok",
-            Self::HalluScribeAgentChat => "HalluScribe Agent",
+            Self::HalluScribeAgentChat => "HalluScribe Chat",
             Self::OllamaChat => "Ollama Chat",
             Self::AppleMessages => "Messages",
             Self::WhatsApp => "WhatsApp",

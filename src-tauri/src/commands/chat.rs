@@ -179,16 +179,29 @@ pub(crate) fn send_chat_message(
 
     let app_clone = app.clone();
     std::thread::spawn(move || {
-        briefing::run_chat_turn(
-            &app_clone,
-            &backend,
-            ctx_size,
-            max_tokens,
-            final_messages,
-            &dir,
-            runtime,
-            cancel.clone(),
-        );
+        let turn = crate::app_state::catch_job_panic(|| {
+            briefing::run_chat_turn(
+                &app_clone,
+                &backend,
+                ctx_size,
+                max_tokens,
+                final_messages,
+                &dir,
+                runtime,
+                cancel.clone(),
+            )
+        });
+        if let Err(message) = turn {
+            eprintln!("[chat] the chat turn crashed: {message}");
+            let _ = app_clone.emit(
+                "chat-token",
+                briefing::TokenPayload {
+                    text: format!("\n\n[Error: the chat crashed: {message}]"),
+                    is_thinking: false,
+                },
+            );
+            let _ = app_clone.emit("chat-done", ());
+        }
         app_clone.state::<ChatCancel>().0.finish_run(&cancel);
     });
     Ok(())

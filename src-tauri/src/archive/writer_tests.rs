@@ -244,6 +244,8 @@ fn tool_slug_variants() {
     assert_eq!(tool_slug("Codex"), "codex");
     assert_eq!(tool_slug("Forge"), "forge");
     assert_eq!(tool_slug("Gemma 4"), "gemma4");
+    assert_eq!(tool_slug("HalluScribe Chat"), "halluscribe_chat");
+    assert_eq!(tool_slug("HalluScribe Agent"), "halluscribe_chat");
     assert_eq!(tool_slug("Continue"), "continue");
     assert_eq!(tool_slug("Unknown"), "continue");
 }
@@ -277,7 +279,7 @@ fn delete_sessions_purges_raw_history_and_redaction_backups() {
     let meta = sample_meta(source);
     let written = write_session(&dir, &meta, &sample_output(), fixed_now()).unwrap();
     let raw = dir.join("raw/private-session.jsonl.zst");
-    let superseded = dir.join("raw/superseded/private-session.20260909.jsonl.zst");
+    let superseded = dir.join("raw/superseded/private-session.20260909T101010.000Z.jsonl.zst");
     fs::create_dir_all(superseded.parent().unwrap()).unwrap();
     fs::write(&raw, "raw secret").unwrap();
     fs::write(&superseded, "old raw secret").unwrap();

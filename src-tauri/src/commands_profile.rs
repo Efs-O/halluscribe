@@ -122,124 +122,118 @@ pub(crate) fn run_profile_refresh(
         .ok_or_else(|| "A profile refresh is already running.".to_string())?;
 
     std::thread::spawn(move || {
-        // Top-level inference lock, exactly like the sweep: the profile code
-        // below never re-acquires it (the guard is non-reentrant). The batch
-        // variant also reclaims a warm interactive server first, so a long
-        // refresh never runs beside an idle chat model the watchdog cannot
-        // unload while this lock is held.
-        let Some(_inference_guard) = crate::infer_lock::acquire_for_batch() else {
-            let _ = app.emit(
-                "profile-done",
-                ProfileDonePayload {
+        let job = crate::app_state::catch_job_panic(|| -> ProfileDonePayload {
+            // Top-level inference lock, exactly like the sweep: the profile code
+            // below never re-acquires it (the guard is non-reentrant). The batch
+            // variant also reclaims a warm interactive server first, so a long
+            // refresh never runs beside an idle chat model the watchdog cannot
+            // unload while this lock is held.
+            let Some(_inference_guard) = crate::infer_lock::acquire_for_batch() else {
+                return ProfileDonePayload {
                     busy: true,
                     scope: scope.clone(),
                     ..Default::default()
-                },
-            );
-            app.state::<ProfileCancel>().0.finish_run(&cancel);
-            return;
-        };
+                };
+            };
 
-        // Skip the model load entirely when an incremental run has nothing new
-        // to distill (checked under the lock so a concurrent sweep can't be
-        // mid-write while we count) — unless a pending-facts snapshot from a
-        // failed run exists, in which case the reduce must still run.
-        if profile::pending_session_count(&dir, profile_scope, &profile_sources, full) == 0
-            && !profile::has_pending_facts(&dir, profile_scope)
-        {
-            let _ = app.emit(
-                "profile-done",
-                ProfileDonePayload {
+            // Skip the model load entirely when an incremental run has nothing new
+            // to distill (checked under the lock so a concurrent sweep can't be
+            // mid-write while we count) — unless a pending-facts snapshot from a
+            // failed run exists, in which case the reduce must still run.
+            if profile::pending_session_count(&dir, profile_scope, &profile_sources, full) == 0
+                && !profile::has_pending_facts(&dir, profile_scope)
+            {
+                return ProfileDonePayload {
                     scope: scope.clone(),
                     ..Default::default()
-                },
-            );
-            app.state::<ProfileCancel>().0.finish_run(&cancel);
-            return;
-        }
+                };
+            }
 
-        // Published for `get_profile_refresh_status`; cleared on drop (RAII)
-        // so this thread can never leave a stale "running" status behind.
-        let _refresh_scope_guard = RefreshScopeGuard::set(&scope);
+            // Published for `get_profile_refresh_status`; cleared on drop (RAII)
+            // so this thread can never leave a stale "running" status behind.
+            let _refresh_scope_guard = RefreshScopeGuard::set(&scope);
 
-        // One warm model serves every map batch plus the reduce call, then is
-        // unloaded when `session` drops at the end (sweep unload policy).
-        let session = match gemma::start_tool_session(&backend, ctx_size) {
-            Ok(session) => session,
-            Err(error) => {
-                let _ = app.emit(
-                    "profile-done",
-                    // The run never reached a single batch — the exact case
-                    // that used to look like "nothing happened" in the panel.
-                    ProfileDonePayload {
+            // One warm model serves every map batch plus the reduce call, then is
+            // unloaded when `session` drops at the end (sweep unload policy).
+            let session = match gemma::start_tool_session(&backend, ctx_size) {
+                Ok(session) => session,
+                // The run never reached a single batch — the exact case that used
+                // to look like "nothing happened" in the panel.
+                Err(error) => {
+                    return ProfileDonePayload {
                         errors: vec![format!("failed to start model: {error}")],
                         failed_batches: 1,
                         scope: scope.clone(),
                         ..Default::default()
-                    },
-                );
-                app.state::<ProfileCancel>().0.finish_run(&cancel);
-                return;
+                    };
+                }
+            };
+
+            let tool_call = |system_prompt: &str,
+                             user_content: &str,
+                             tool: &Value,
+                             call_max_tokens: u32|
+             -> Result<Value, profile::ProfileError> {
+                session
+                    .call_tool(
+                        system_prompt,
+                        user_content,
+                        tool,
+                        call_max_tokens.min(max_tokens),
+                    )
+                    .map_err(profile::ProfileError::from)
+            };
+
+            let app_progress = app.clone();
+            let progress_scope = scope.clone();
+            let result = profile::run_refresh(
+                &dir,
+                profile_scope,
+                &profile_sources,
+                full,
+                &tool_call,
+                &cancel,
+                move |current, total, stage| {
+                    let _ = app_progress.emit(
+                        "profile-progress",
+                        ProfileProgressPayload {
+                            current,
+                            total,
+                            stage: stage.as_str().to_string(),
+                            scope: progress_scope.clone(),
+                        },
+                    );
+                },
+            );
+            drop(session);
+
+            match result {
+                Ok(outcome) => ProfileDonePayload {
+                    busy: false,
+                    session_count: outcome.session_count,
+                    facts_count: outcome.facts_count,
+                    errors: outcome.errors,
+                    failed_batches: outcome.failed_batches,
+                    scope: scope.clone(),
+                    cancelled: outcome.cancelled,
+                },
+                // The refresh aborted before producing an outcome: nothing was
+                // written, so this is unambiguously a failed run.
+                Err(error) => ProfileDonePayload {
+                    errors: vec![error.to_string()],
+                    failed_batches: 1,
+                    scope: scope.clone(),
+                    ..Default::default()
+                },
             }
-        };
-
-        let tool_call = |system_prompt: &str,
-                         user_content: &str,
-                         tool: &Value,
-                         call_max_tokens: u32|
-         -> Result<Value, profile::ProfileError> {
-            session
-                .call_tool(
-                    system_prompt,
-                    user_content,
-                    tool,
-                    call_max_tokens.min(max_tokens),
-                )
-                .map_err(profile::ProfileError::from)
-        };
-
-        let app_progress = app.clone();
-        let progress_scope = scope.clone();
-        let result = profile::run_refresh(
-            &dir,
-            profile_scope,
-            &profile_sources,
-            full,
-            &tool_call,
-            &cancel,
-            move |current, total, stage| {
-                let _ = app_progress.emit(
-                    "profile-progress",
-                    ProfileProgressPayload {
-                        current,
-                        total,
-                        stage: stage.as_str().to_string(),
-                        scope: progress_scope.clone(),
-                    },
-                );
-            },
-        );
-        drop(session);
-
-        let payload = match result {
-            Ok(outcome) => ProfileDonePayload {
-                busy: false,
-                session_count: outcome.session_count,
-                facts_count: outcome.facts_count,
-                errors: outcome.errors,
-                failed_batches: outcome.failed_batches,
-                scope: scope.clone(),
-                cancelled: outcome.cancelled,
-            },
-            // The refresh aborted before producing an outcome: nothing was
-            // written, so this is unambiguously a failed run.
-            Err(error) => ProfileDonePayload {
-                errors: vec![error.to_string()],
-                failed_batches: 1,
-                scope: scope.clone(),
-                ..Default::default()
-            },
-        };
+        });
+        // A panic must still end the run: report it and free the run slot.
+        let payload = job.unwrap_or_else(|message| ProfileDonePayload {
+            errors: vec![format!("the profile refresh crashed: {message}")],
+            failed_batches: 1,
+            scope: scope.clone(),
+            ..Default::default()
+        });
         let _ = app.emit("profile-done", payload);
         app.state::<ProfileCancel>().0.finish_run(&cancel);
     });

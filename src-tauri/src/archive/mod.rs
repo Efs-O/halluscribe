@@ -6,11 +6,17 @@ mod backfill_tests;
 mod capture;
 mod captured_manifest;
 mod index;
+mod purge;
+#[cfg(test)]
+mod purge_tests;
 mod raw;
 #[cfg(test)]
 mod raw_tests;
 mod read_raw_session;
 mod redact;
+mod tombstones;
+#[cfg(test)]
+mod tombstones_tests;
 mod types;
 mod writer;
 
@@ -64,4 +70,5 @@ pub use redact::{
     apply_redaction, load_rules, preview_redaction, rules_for_session, RedactionOutcome,
     RedactionPreview, RedactionRule,
 };
+pub use tombstones::{ensure_deleted_readable, load_deleted, Tombstone, DELETED_SESSIONS_FILE};
 pub use writer::write_session;

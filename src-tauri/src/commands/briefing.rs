@@ -84,18 +84,31 @@ pub(crate) fn run_briefing(
 
     let app_clone = app.clone();
     std::thread::spawn(move || {
-        briefing::run_briefing_stream(
-            &app_clone,
-            &backend,
-            ctx_size,
-            max_tokens,
-            session_count,
-            &content,
-            &header,
-            min_word_limit,
-            max_word_limit,
-            cancel.clone(),
-        );
+        let stream = crate::app_state::catch_job_panic(|| {
+            briefing::run_briefing_stream(
+                &app_clone,
+                &backend,
+                ctx_size,
+                max_tokens,
+                session_count,
+                &content,
+                &header,
+                min_word_limit,
+                max_word_limit,
+                cancel.clone(),
+            )
+        });
+        if let Err(message) = stream {
+            eprintln!("[briefing] the briefing crashed: {message}");
+            let _ = app_clone.emit(
+                "briefing-token",
+                briefing::TokenPayload {
+                    text: format!("\n\n[Error: the briefing crashed: {message}]"),
+                    is_thinking: false,
+                },
+            );
+            let _ = app_clone.emit("briefing-done", ());
+        }
         app_clone.state::<BriefingCancel>().0.finish_run(&cancel);
     });
     Ok(())

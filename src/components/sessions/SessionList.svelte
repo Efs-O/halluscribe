@@ -232,8 +232,14 @@
   async function confirmDelete() {
     const n = checkedIds.size;
     const label = n === 1 ? "1 session" : `${n} sessions`;
-    if (!confirm(`Permanently delete ${label}? This cannot be undone.`)) return;
-    const result = await invoke<{ deleted_ids: string[]; failures: { id: string; error: string }[] }>("delete_sessions", { ids: [...checkedIds] });
+    if (!confirm(`Permanently delete ${label}? Its summary and private copies are removed, and future sweeps will not archive it again. This cannot be undone.`)) return;
+    let result: { deleted_ids: string[]; failures: { id: string; error: string }[] };
+    try {
+      result = await invoke("delete_sessions", { ids: [...checkedIds] });
+    } catch (error) {
+      deleteWarning = `Could not delete: ${error}`;
+      return;
+    }
     checkedIds = new Set(result.failures.map((failure) => failure.id));
     deleteWarning = result.failures.length
       ? `Could not delete ${result.failures.map((failure) => failure.id).join(", ")}. Close any program using the session and retry.`

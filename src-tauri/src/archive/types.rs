@@ -75,4 +75,7 @@ fn default_true() -> bool {
 pub struct WrittenSession {
     pub path: PathBuf,
     pub secret_flags: Vec<String>,
+    /// Problems that did not stop the write, such as a replaced summary that
+    /// could not be removed. The session is archived; these are for the log.
+    pub warnings: Vec<String>,
 }

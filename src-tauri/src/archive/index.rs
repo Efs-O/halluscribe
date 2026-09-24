@@ -58,6 +58,7 @@ pub fn resolve_session_id(archive_dir: &Path, source: &Path, proposed: &str) -> 
 pub struct SessionLookup {
     entries: std::collections::HashMap<String, IndexEntry>,
     captured: super::CapturedManifest,
+    deleted: std::collections::BTreeMap<String, super::Tombstone>,
 }
 
 impl SessionLookup {
@@ -74,7 +75,17 @@ impl SessionLookup {
         Self {
             entries,
             captured: super::captured_manifest::load_captured(archive_dir),
+            // Unreadable records read as none here; the sweep and capture
+            // refuse to start on them via `ensure_deleted_readable`.
+            deleted: super::tombstones::load_deleted(archive_dir).unwrap_or_default(),
         }
+    }
+
+    /// Whether the user permanently deleted the session `id` read from `source`.
+    pub fn is_deleted(&self, id: &str, source: &Path) -> bool {
+        self.deleted
+            .get(id)
+            .is_some_and(|tombstone| tombstone.covers(source))
     }
 
     /// The index row for `id`, if archived.
@@ -93,7 +104,14 @@ impl SessionLookup {
             .captured
             .get(proposed)
             .map(|record| record.source_path.as_str());
-        let owners = [index_owner, manifest_owner];
+        // A deleted session still owns its id, so another source proposing
+        // the same id gets its own instead of inheriting the delete.
+        let deleted_owner = self
+            .deleted
+            .get(proposed)
+            .map(|tombstone| tombstone.source_path.as_str())
+            .filter(|owner| !owner.is_empty());
+        let owners = [index_owner, manifest_owner, deleted_owner];
         if owners.iter().flatten().any(|owner| *owner == source_text) {
             return proposed.to_string();
         }
@@ -183,6 +201,15 @@ pub fn delete_sessions(
 ) -> Result<DeleteSessionsResult, ArchiveError> {
     let _guard = index_mutation_lock();
     let mut idx = load_index(archive_dir)?;
+    // Record the deletes before removing anything: a delete whose record was
+    // lost would come back on the next sweep, since its source is still there.
+    let doomed: Vec<(String, String)> = idx
+        .sessions
+        .iter()
+        .filter(|entry| ids.contains(&entry.id))
+        .map(|entry| (entry.id.clone(), entry.source_jsonl.clone()))
+        .collect();
+    super::tombstones::record_deleted(archive_dir, &doomed, chrono::Utc::now())?;
     let mut result = DeleteSessionsResult::default();
     for id in ids {
         if let Some(pos) = idx.sessions.iter().position(|e| &e.id == id) {
@@ -198,7 +225,8 @@ pub fn delete_sessions(
             // Delete private source material first. If that fails, leave the
             // summary and its index entry intact so the operation is retryable.
             let entry = &idx.sessions[pos];
-            if let Err(error) = remove_private_session_files(archive_dir, entry, &md) {
+            if let Err(error) = super::purge::remove_private_session_files(archive_dir, entry, &md)
+            {
                 eprintln!("[archive] could not purge private files for {id}: {error}");
                 result.failures.push(DeleteSessionFailure {
                     id: id.clone(),
@@ -246,53 +274,6 @@ pub(super) fn archive_path(archive_dir: &Path, relative: &str) -> Result<PathBuf
     Ok(archive_dir.join(path))
 }
 
-fn remove_private_session_files(
-    archive_dir: &Path,
-    entry: &IndexEntry,
-    markdown: &Path,
-) -> Result<(), ArchiveError> {
-    remove_if_file(&archive_dir.join(super::raw_rel_path(&entry.id)))?;
-    if !entry.raw_path.is_empty() {
-        remove_if_file(&archive_path(archive_dir, &entry.raw_path)?)?;
-    }
-    let superseded = archive_dir.join("raw").join("superseded");
-    if let Ok(files) = fs::read_dir(superseded) {
-        let prefix = format!("{}.", entry.id);
-        for file in files.flatten() {
-            let name = file.file_name();
-            if name.to_string_lossy().starts_with(&prefix) {
-                remove_if_file(&file.path())?;
-            }
-        }
-    }
-    let Some(parent) = markdown.parent() else {
-        return Ok(());
-    };
-    let Some(file_name) = markdown.file_name().and_then(|name| name.to_str()) else {
-        return Ok(());
-    };
-    let backup_prefix = format!("{file_name}.bak-");
-    if let Ok(files) = fs::read_dir(parent) {
-        for file in files.flatten() {
-            if file
-                .file_name()
-                .to_string_lossy()
-                .starts_with(&backup_prefix)
-            {
-                remove_if_file(&file.path())?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn remove_if_file(path: &Path) -> Result<(), ArchiveError> {
-    if path.exists() {
-        fs::remove_file(path)?;
-    }
-    Ok(())
-}
-
 /// Replace the `secret_flags` on the index entry matching `id`. No-op (Ok) if
 /// the id is not present in the index - used after a redaction rewrites a
 /// session so the badge clears/updates immediately, not just on next sweep.
@@ -325,17 +306,22 @@ pub fn set_raw_path(archive_dir: &Path, id: &str, rel: String) -> Result<(), Arc
     Ok(())
 }
 
-pub(super) fn append_index(archive_dir: &Path, entry: IndexEntry) -> Result<(), ArchiveError> {
+/// Insert or replace the row for `entry.id`, returning the row it replaced.
+pub(super) fn append_index(
+    archive_dir: &Path,
+    entry: IndexEntry,
+) -> Result<Option<IndexEntry>, ArchiveError> {
     let _guard = index_mutation_lock();
     fs::create_dir_all(archive_dir)?;
     // `load_index` already treats an absent index as a new empty archive. Do
     // not extend that recovery to a corrupt or unreadable existing file: doing
     // so would replace every prior entry with just this new one.
     let mut idx = load_index(archive_dir)?;
+    let replaced = idx.sessions.iter().find(|e| e.id == entry.id).cloned();
     idx.sessions.retain(|e| e.id != entry.id);
     idx.sessions.push(entry);
     save_index(archive_dir, &idx)?;
-    Ok(())
+    Ok(replaced)
 }
 
 fn save_index(archive_dir: &Path, index: &Index) -> Result<(), ArchiveError> {

@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 const RECORDED_PROJECT: &str = "HalluScribe";
-const RECORDED_TOOL: &str = "HalluScribe Agent";
+const RECORDED_TOOL: &str = "HalluScribe Chat";
 const RECORDED_PROVIDER: &str = "halluscribe_agent_chat";
 const RECORDED_ORIGIN: &str = "recorded_chat";
 const RECORDED_VERSION: u32 = 1;
@@ -304,7 +304,7 @@ mod tests {
         assert!(result.absolute_path.contains("recorded_sessions"));
         assert!(result.absolute_path.contains("HalluScribe"));
         assert!(result.absolute_path.contains("agent-chat"));
-        assert!(text.contains("\"tool\": \"HalluScribe Agent\""));
+        assert!(text.contains("\"tool\": \"HalluScribe Chat\""));
         assert!(text.contains("\"provider\": \"halluscribe_agent_chat\""));
         assert!(text.contains("\"boundary_reason\": \"clear\""));
         assert!(text.contains("\"search_mode\": \"archive\""));

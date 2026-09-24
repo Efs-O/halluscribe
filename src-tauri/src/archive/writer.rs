@@ -1,6 +1,7 @@
 // HalluScribe - markdown archive writer and archive-specific tests.
 
 use super::index::{append_index, ensure_index_readable};
+use super::purge::remove_replaced_summary;
 use super::redact::{apply_rules, rules_for_session};
 use super::{ArchiveError, IndexEntry, SessionMeta, WrittenSession};
 use crate::gemma::{GemmaOutput, SessionType};
@@ -64,7 +65,8 @@ pub fn write_session(
 
     let secret_flags = scan_for_secrets(&markdown);
 
-    append_index(
+    let archive_rel = rel.to_string_lossy().replace('\\', "/");
+    let replaced = append_index(
         archive_dir,
         IndexEntry {
             id: meta.id.clone(),
@@ -81,7 +83,7 @@ pub fn write_session(
             session_type: session_type_str(&output.session_type),
             error_tags: output.error_tags.clone(),
             topic_tags: output.topic_tags.clone(),
-            archive_path: rel.to_string_lossy().replace('\\', "/"),
+            archive_path: archive_rel.clone(),
             source_jsonl: meta.source.to_string_lossy().into_owned(),
             source_size_bytes: fs::metadata(&meta.source).map(|m| m.len()).unwrap_or(0),
             provider: meta.provider.clone(),
@@ -94,9 +96,24 @@ pub fn write_session(
         },
     )?;
 
+    // A re-sweep names the summary after the new sweep time, so the previous
+    // file is no longer indexed. Left behind, it would outlive a later delete
+    // and keep the old text on disk. Failing to remove it does not undo the
+    // new summary, which is already indexed.
+    let mut warnings = Vec::new();
+    if let Some(previous) = replaced.filter(|previous| previous.archive_path != archive_rel) {
+        if let Err(error) = remove_replaced_summary(archive_dir, &previous.archive_path) {
+            warnings.push(format!(
+                "could not remove the previous summary {}: {error}",
+                previous.archive_path
+            ));
+        }
+    }
+
     Ok(WrittenSession {
         path: abs,
         secret_flags,
+        warnings,
     })
 }
 
@@ -165,7 +182,10 @@ fn highlights_section(highlights: &[String]) -> String {
 
 fn tool_slug(tool: &str) -> &str {
     let t = tool.to_lowercase();
-    if t.contains("claude") {
+    if t.starts_with("halluscribe") {
+        // The in-app chat, under its current and earlier display names.
+        "halluscribe_chat"
+    } else if t.contains("claude") {
         "claudecode"
     } else if t.contains("codex") {
         "codex"

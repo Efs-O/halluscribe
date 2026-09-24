@@ -3,15 +3,15 @@
 // The registry stores an absolute path, so a workspace could never be moved
 // after creation: un-register + re-register would have overwritten its
 // settings.json with freshly seeded values. This copies the archive to the new
-// location, verifies the copy file-for-file and byte-for-byte, and only then
-// repoints the registry.
+// location, verifies that the copy holds the same number of files and bytes as
+// the source, and only then repoints the registry.
 //
 // The ORIGINAL IS NEVER DELETED. A verified copy leaves two intact archives;
 // sending the old folder to the Recycle Bin is the user's call, made after they
 // have seen the app read the new one. See docs/internal/IMPORT_PATHS_PLAN.md §B5.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// What a relocation copied, so the caller can report it and the user can
 /// check it against the folder they are about to bin.
@@ -66,10 +66,47 @@ pub fn tree_stats(dir: &Path) -> Result<CopyStats, String> {
     Ok(stats)
 }
 
+/// `path` with every part that exists on disk resolved (symlinks, `..`, and
+/// the real letter case where the file system ignores case). The parts that
+/// do not exist yet are appended as given.
+fn resolve_existing(path: &Path) -> Result<PathBuf, String> {
+    let mut existing = path;
+    let mut missing = Vec::new();
+    loop {
+        match existing.canonicalize() {
+            Ok(mut real) => {
+                // Parts that do not exist cannot be symlinks, so `..` among
+                // them can be applied by hand.
+                for part in missing.iter().rev() {
+                    match part {
+                        Component::ParentDir => {
+                            real.pop();
+                        }
+                        Component::CurDir => {}
+                        other => real.push(other.as_os_str()),
+                    }
+                }
+                return Ok(real);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let (Some(parent), Some(last)) =
+                    (existing.parent(), existing.components().next_back())
+                else {
+                    return Err(format!("cannot resolve {}: {error}", path.display()));
+                };
+                missing.push(last);
+                existing = parent;
+            }
+            Err(error) => return Err(format!("cannot resolve {}: {error}", path.display())),
+        }
+    }
+}
+
 /// Whether `candidate` is `base` or sits inside it - copying a folder into
-/// itself would recurse forever.
-fn is_inside(candidate: &Path, base: &Path) -> bool {
-    candidate.starts_with(base)
+/// itself would recurse forever. Compared on resolved paths, so a symlink, a
+/// `..` or a different letter case cannot disguise the source.
+fn is_inside(candidate: &Path, base: &Path) -> Result<bool, String> {
+    Ok(resolve_existing(candidate)?.starts_with(resolve_existing(base)?))
 }
 
 /// Copy the archive at `from` to `to` and verify it. Refuses to write into an
@@ -79,10 +116,10 @@ pub fn copy_archive(from: &Path, to: &Path) -> Result<CopyStats, String> {
     if !from.is_dir() {
         return Err(format!("{} is not a folder on disk", from.display()));
     }
-    if from == to {
+    if resolve_existing(from)? == resolve_existing(to)? {
         return Err("the workspace is already there".to_string());
     }
-    if is_inside(to, from) {
+    if is_inside(to, from)? {
         return Err("the new folder cannot be inside the current one".to_string());
     }
     if to.exists() {
@@ -198,6 +235,24 @@ mod tests {
         let from = base.join("old");
         seed_archive(&from);
         let err = copy_archive(&from, &from.join("inner")).unwrap_err();
+        assert!(err.contains("cannot be inside"), "{err}");
+        // A `..` detour that lands back inside the source is still inside it.
+        let detour = base.join("elsewhere").join("..").join("old").join("inner");
+        let err = copy_archive(&from, &detour).unwrap_err();
+        assert!(err.contains("cannot be inside"), "{err}");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_archive_refuses_a_destination_reached_through_a_symlink() {
+        let base = tmp_dir("symlinked");
+        let from = base.join("old");
+        seed_archive(&from);
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&from, &link).unwrap();
+        let err = copy_archive(&from, &link.join("inner")).unwrap_err();
         assert!(err.contains("cannot be inside"), "{err}");
 
         let _ = fs::remove_dir_all(&base);

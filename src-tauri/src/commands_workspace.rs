@@ -3,10 +3,16 @@
 // registry from the DEFAULT archive root, mutate it, and persist. All business
 // logic lives in `workspace` and `settings` so these commands stay untestable-thin.
 
+use crate::app_state::{
+    BriefingCancel, CancelState, CaptureCancel, ChatCancel, ProfileCancel, SweepCancel,
+};
 use crate::app_support::default_archive_dir;
 use crate::workspace::Workspace;
 use crate::{settings, workspace};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use tauri::Manager;
 
 /// Snapshot of the workspace registry for the frontend switcher.
 #[derive(serde::Serialize)]
@@ -110,16 +116,29 @@ pub struct MoveWorkspaceResult {
 
 /// Move a registered workspace's archive to `new_path`.
 ///
-/// The archive is COPIED and verified file-for-file before the registry is
-/// repointed; the old folder is never deleted, so a failed or half-trusted move
-/// always leaves an intact archive behind. Settings, index and raws travel with
+/// The archive is COPIED and its file count and total size are checked against
+/// the source before the registry is repointed; the old folder is never
+/// deleted, so a failed or half-trusted move always leaves an intact archive
+/// behind. No background job may run during the move. Settings, index and raws travel with
 /// the folder untouched - unlike un-register + re-register, which would seed a
 /// fresh settings.json over them.
 #[tauri::command]
-pub(crate) fn move_workspace(
+pub(crate) async fn move_workspace(
     app: tauri::AppHandle,
     path: String,
     new_path: String,
+) -> Result<MoveWorkspaceResult, String> {
+    // Copying a large archive takes a while; off the UI thread it cannot
+    // freeze the window.
+    tauri::async_runtime::spawn_blocking(move || move_workspace_blocking(&app, &path, &new_path))
+        .await
+        .map_err(|error| format!("the workspace move stopped unexpectedly: {error}"))?
+}
+
+fn move_workspace_blocking(
+    app: &tauri::AppHandle,
+    path: &str,
+    new_path: &str,
 ) -> Result<MoveWorkspaceResult, String> {
     let from = PathBuf::from(path.trim());
     let to = PathBuf::from(new_path.trim());
@@ -127,7 +146,7 @@ pub(crate) fn move_workspace(
         return Err("the new folder must be an absolute path".to_string());
     }
 
-    let default_root = default_archive_dir(&app)?;
+    let default_root = default_archive_dir(app)?;
     if to == default_root {
         return Err("cannot move a workspace onto the default archive root".to_string());
     }
@@ -137,6 +156,9 @@ pub(crate) fn move_workspace(
         return Err("no workspace registered at that path".to_string());
     }
 
+    // A job writing into the archive mid-copy would make the copy miss its
+    // writes (or fail verification), so no job may run until the move is done.
+    let _held = hold_all_jobs(app)?;
     let stats = workspace::copy_archive(&from, &to)?;
     workspace::set_workspace_path(&mut reg, &from, to.clone())?;
     workspace::save_registry(&default_root, &reg)?;
@@ -147,6 +169,40 @@ pub(crate) fn move_workspace(
         old_path: from.to_string_lossy().into_owned(),
         new_path: to.to_string_lossy().into_owned(),
     })
+}
+
+/// Every background job's run slot, held so none can start; released on drop.
+struct HeldJobs<'a>(Vec<(&'a CancelState, Arc<AtomicBool>)>);
+
+impl Drop for HeldJobs<'_> {
+    fn drop(&mut self) {
+        for (slot, token) in &self.0 {
+            slot.finish_run(token);
+        }
+    }
+}
+
+/// Claim the run slot of every job that writes into the archive, or say which
+/// one is running. Slots claimed before a busy one are released on return.
+fn hold_all_jobs(app: &tauri::AppHandle) -> Result<HeldJobs<'_>, String> {
+    let slots: [(&str, &CancelState); 5] = [
+        ("A sweep", &app.state::<SweepCancel>().inner().0),
+        ("A profile refresh", &app.state::<ProfileCancel>().inner().0),
+        ("A briefing", &app.state::<BriefingCancel>().inner().0),
+        ("A chat reply", &app.state::<ChatCancel>().inner().0),
+        (
+            "The startup raw capture",
+            &app.state::<CaptureCancel>().inner().0,
+        ),
+    ];
+    let mut held = HeldJobs(Vec::new());
+    for (job, slot) in slots {
+        let token = slot.try_begin_run().ok_or_else(|| {
+            format!("{job} is running. Let it finish or cancel it, then move the workspace.")
+        })?;
+        held.0.push((slot, token));
+    }
+    Ok(held)
 }
 
 /// Switch the active workspace. `None` selects the default root. A `Some(path)`

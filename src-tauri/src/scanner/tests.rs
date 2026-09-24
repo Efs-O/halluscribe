@@ -274,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_sessions_includes_recorded_gemma_chats() {
+    fn scan_sessions_includes_recorded_halluscribe_chats() {
         let dir = tempdir().unwrap();
         let archive_dir = dir.path().join(".halluscribe");
         let recorded_dir = archive_dir

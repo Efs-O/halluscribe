@@ -74,6 +74,20 @@ pub fn run_capture(
         on_progress(&status);
         return status;
     }
+    // Sessions the user deleted for good must not have their raw copied back.
+    let deleted = match super::load_deleted(archive_dir) {
+        Ok(deleted) => deleted,
+        Err(error) => {
+            let status = CaptureStatus::Failed {
+                done: 0,
+                total: 0,
+                captured: 0,
+                errors: vec![format!("deleted sessions: {error}")],
+            };
+            on_progress(&status);
+            return status;
+        }
+    };
     let mut manifest: CapturedManifest = captured_manifest::load_captured(archive_dir);
 
     // Load the index ONCE for membership checks: `is_archived` re-parses the
@@ -106,6 +120,18 @@ pub fn run_capture(
         done += 1;
         let base_id = session_id(&target.path);
         let id = resolve_session_id(archive_dir, &target.path, &base_id);
+        if deleted
+            .get(&id)
+            .is_some_and(|tombstone| tombstone.covers(&target.path))
+        {
+            on_progress(&CaptureStatus::Running {
+                done,
+                total,
+                captured,
+                failed: errors.len(),
+            });
+            continue;
+        }
 
         let Ok(meta) = std::fs::metadata(&target.path) else {
             // Source vanished between discovery and capture (pruned mid-scan) -

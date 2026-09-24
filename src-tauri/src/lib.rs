@@ -275,21 +275,27 @@ pub fn run() {
                 };
                 let status_state = capture_handle.state::<CaptureStatusState>().0.clone();
                 let progress_handle = capture_handle.clone();
+                let publish = move |status: &archive::CaptureStatus| {
+                    *status_state
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) = status.clone();
+                    let _ = progress_handle.emit("raw-capture-progress", status.clone());
+                };
                 // `run_capture` calls this once per file plus once more with the
                 // final Done/Cancelled status, so managed state and the event
                 // are always in sync - no separate "after it returns" emit needed.
-                archive::run_capture(
-                    &dir,
-                    &loaded_settings,
-                    import_only,
-                    &cancel,
-                    move |status| {
-                        *status_state
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner()) = status.clone();
-                        let _ = progress_handle.emit("raw-capture-progress", status.clone());
-                    },
-                );
+                let pass = crate::app_state::catch_job_panic(|| {
+                    archive::run_capture(&dir, &loaded_settings, import_only, &cancel, &publish)
+                });
+                if let Err(message) = pass {
+                    eprintln!("[capture] the capture pass crashed: {message}");
+                    publish(&archive::CaptureStatus::Failed {
+                        done: 0,
+                        total: 0,
+                        captured: 0,
+                        errors: vec![format!("the capture pass crashed: {message}")],
+                    });
+                }
                 capture_handle
                     .state::<CaptureCancel>()
                     .0

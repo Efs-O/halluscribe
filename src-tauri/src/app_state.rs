@@ -75,6 +75,15 @@ impl CancelState {
     }
 }
 
+/// Run a background job's body, turning a panic into its message. A job thread
+/// must always reach its `finish_run` and its done event: a panic that skipped
+/// them would keep the run slot claimed ("already running") and leave the UI
+/// waiting until the app restarts.
+pub(crate) fn catch_job_panic<R>(job: impl FnOnce() -> R) -> Result<R, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+        .map_err(|payload| crate::scheduler::panic_message(&*payload))
+}
+
 // Each job keeps its own `CancelState` so cancelling one job never touches
 // another. The shared logic lives in `CancelState`; these are distinct types
 // purely so a command cancels exactly the job it names.

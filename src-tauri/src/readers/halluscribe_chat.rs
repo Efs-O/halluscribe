@@ -1,4 +1,4 @@
-// HalluScribe - reader for internally recorded agent chat session JSON files.
+// HalluScribe - reader for chat sessions recorded by HalluScribe's own chat panel.
 
 use super::{
     build_session, file_stem_or_hash, parse_rfc3339, read_json, ChatProvider, MessageRole,
