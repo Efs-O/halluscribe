@@ -25,6 +25,13 @@ const SMS_DB: &str = "Library/SMS/sms.db";
 const ADDRESS_BOOK: &str = "Library/AddressBook/AddressBook.sqlitedb";
 const HOME_DOMAIN: &str = "HomeDomain";
 
+/// Whether a backup has a Messages `sms.db`. The scanner uses this so a backup
+/// without one (e.g. a partial or app-only backup) yields no Messages target.
+pub fn is_available(backup_dir: &Path) -> Result<bool, ReaderError> {
+    let handle = open_backup(backup_dir).map_err(|e| ReaderError::Database(e.to_string()))?;
+    Ok(handle.resolve(HOME_DOMAIN, SMS_DB).is_some())
+}
+
 /// Read every Messages session out of an Apple backup directory.
 pub fn read(
     backup_dir: &Path,
@@ -193,11 +200,20 @@ fn surface_skip_counts(db: &apple_messages_db::MessagesDb) {
         + s.orphan_no_handle
         + s.bad_date
         + s.row_errors
+        + s.duplicate_joins
+        + s.attachment_errors
         > 0
     {
         eprintln!(
-            "apple_messages: skipped tapbacks={} group_events={} unusable_text={} orphan_no_handle={} bad_date={} row_errors={}",
-            s.tapbacks, s.group_events, s.unusable_text, s.orphan_no_handle, s.bad_date, s.row_errors
+            "apple_messages: skipped tapbacks={} group_events={} unusable_text={} orphan_no_handle={} bad_date={} row_errors={} duplicate_joins={} attachment_errors={}",
+            s.tapbacks,
+            s.group_events,
+            s.unusable_text,
+            s.orphan_no_handle,
+            s.bad_date,
+            s.row_errors,
+            s.duplicate_joins,
+            s.attachment_errors
         );
     }
 }

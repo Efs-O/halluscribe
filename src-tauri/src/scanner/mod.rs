@@ -3,6 +3,7 @@
 // computes fill_pct from the last usage line, and filters by threshold.
 // No inference dependency - pure filesystem + JSON/YAML parsing.
 
+mod apple_backup_tests;
 mod claude;
 mod codex;
 mod forge;
@@ -370,8 +371,12 @@ fn resolve_apple_backup_path(settings: &HalluScribeSettings) -> Option<PathBuf> 
 }
 
 /// One `ScanTarget` for the configured Apple backup directory, when it is
-/// enabled, set and present. Modelled on `scan_ollama_chat` (a single local
-/// source yielding one target), but gated by the business-ingestion toggle.
+/// enabled, set, present and has a Messages `sms.db`. Modelled on
+/// `scan_ollama_chat` (a single local source yielding one target), but gated by
+/// the business-ingestion toggle. A backup that cannot be opened (encrypted,
+/// unreadable or missing manifest) still yields the target, so the read path
+/// surfaces that error in the sweep instead of every backup provider
+/// vanishing silently.
 fn scan_apple_backup(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
     let Some(path) = resolve_apple_backup_path(settings) else {
         return Vec::new();
@@ -382,6 +387,9 @@ fn scan_apple_backup(settings: &HalluScribeSettings) -> Vec<ScanTarget> {
     let Ok(modified) = meta.modified() else {
         return Vec::new();
     };
+    if let Ok(false) = crate::readers::apple_messages::is_available(&path) {
+        return Vec::new();
+    }
     vec![ScanTarget {
         path,
         kind: ScanTargetKind::Import(ChatProvider::AppleMessages),

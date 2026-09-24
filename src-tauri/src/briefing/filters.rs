@@ -2,6 +2,7 @@
 
 use super::prompt::{build_content, build_header, session_datetime};
 use crate::archive::{read_sessions, IndexEntry};
+use crate::search::fold_for_search;
 use std::path::Path;
 
 #[derive(Clone)]
@@ -118,17 +119,24 @@ fn session_matches(entry: &IndexEntry, filters: &BriefingFilters, archive_dir: &
     true
 }
 
+/// Case- and Greek-accent-insensitive keyword match (D9): the keyword and the
+/// index fields go through the same `fold_for_search` the body cache uses, so
+/// `καλημερα` finds `Καλημέρα` in the title or the body alike.
 fn keyword_matches(entry: &IndexEntry, archive_dir: &Path, keyword: &str) -> bool {
-    let kw_lower = keyword.to_lowercase();
-    let index_haystack = format!(
+    let needle = fold_for_search(keyword);
+    let index_haystack = fold_for_search(&format!(
         "{} {} {} {}",
-        entry.title.to_lowercase(),
-        entry.session_type.to_lowercase(),
-        entry.error_tags.join(" ").to_lowercase(),
-        entry.topic_tags.join(" ").to_lowercase(),
-    );
-    if index_haystack.contains(&kw_lower) {
+        entry.title,
+        entry.session_type,
+        entry.error_tags.join(" "),
+        entry.topic_tags.join(" "),
+    ));
+    if index_haystack.contains(&needle) {
         return true;
     }
-    crate::search::body_contains(archive_dir, entry, &kw_lower)
+    crate::search::body_contains(archive_dir, entry, &needle)
 }
+
+#[cfg(test)]
+#[path = "filters_tests.rs"]
+mod tests;

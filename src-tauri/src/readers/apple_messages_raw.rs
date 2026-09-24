@@ -8,7 +8,7 @@
 // never guessed (D7). No names, numbers or text are logged.
 
 use crate::apple_backup::contacts::ContactBook;
-use crate::apple_backup::phone::{national_form, normalize};
+use crate::apple_backup::phone::national_form;
 use crate::readers::apple_messages_db::{Conversation, RawAttachment, RawMessage};
 use chrono::{DateTime, Local, Utc};
 
@@ -145,11 +145,8 @@ fn participant_label(handle: &str, book: &ContactBook, default_cc: Option<&str>)
             None => handle.to_string(),
         };
     }
-    match book.resolve(handle, default_cc) {
-        Some(contact) => {
-            let e164 = normalize(handle, default_cc).unwrap_or_else(|| handle.to_string());
-            format!("{} ({})", contact.name, e164)
-        }
+    match book.resolve_phone(handle, default_cc) {
+        Some((contact, e164)) => format!("{} ({})", contact.name, e164),
         None => handle.to_string(),
     }
 }
@@ -179,9 +176,8 @@ fn speaker_line(msg: &RawMessage, book: &ContactBook, default_cc: Option<&str>) 
             None => handle.to_string(),
         };
     }
-    match book.resolve(handle, default_cc) {
-        Some(contact) => {
-            let e164 = normalize(handle, default_cc).unwrap_or_else(|| handle.to_string());
+    match book.resolve_phone(handle, default_cc) {
+        Some((contact, e164)) => {
             let mut line = format!("{} | {}", contact.name, e164);
             if let Some(national) = national_form(&e164, default_cc) {
                 line.push_str(&format!(" | {national}"));

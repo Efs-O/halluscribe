@@ -1,7 +1,7 @@
 // HalluScribe - tests for phone normalization (D8: verbatim match only, no
 // guessing). All inputs are synthetic.
 
-use super::{national_form, normalize};
+use super::{bare_international, national_form, normalize};
 
 const CC_GR: Option<&str> = Some("30");
 const CC_UK: Option<&str> = Some("44");
@@ -103,4 +103,35 @@ fn national_form_none_when_cc_does_not_match() {
     assert_eq!(national_form("+306912345678", CC_UK), None);
     // No cc at all.
     assert_eq!(national_form("+306912345678", NO_CC), None);
+}
+
+#[test]
+fn a_plus_followed_by_the_00_prefix_is_rejected() {
+    // `+0030…` is malformed: no country code starts with 0.
+    assert_eq!(normalize("+0030 6912345678", CC_GR), None);
+    assert_eq!(normalize("+06912345678", NO_CC), None);
+    // The plain `00` prefix is still the international prefix.
+    assert_eq!(
+        normalize("00306912345678", NO_CC).as_deref(),
+        Some("+306912345678")
+    );
+}
+
+#[test]
+fn bare_international_reads_digits_as_already_international() {
+    // A WhatsApp/Viber-style number: country code, no `+`.
+    assert_eq!(
+        bare_international("306912345678").as_deref(),
+        Some("+306912345678")
+    );
+    // `normalize` would add the default cc again - the bug this guards.
+    assert_eq!(
+        normalize("306912345678", CC_GR).as_deref(),
+        Some("+30306912345678")
+    );
+    // Already-marked or non-numeric values are not bare numbers.
+    assert_eq!(bare_international("+306912345678"), None);
+    assert_eq!(bare_international("00306912345678"), None);
+    assert_eq!(bare_international("someone@example.com"), None);
+    assert_eq!(bare_international("12345"), None);
 }

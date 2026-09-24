@@ -1,7 +1,8 @@
 <!-- HalluScribe - settings form composition, persistence, and save feedback. -->
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
+  import { canAdoptIncomingSettings } from "../../lib/settingsSync";
   import type { HalluScribeSettings, SweepProgress } from "../../lib/types";
   import "./SettingsForm.css";
   import BriefingSettings from "./BriefingSettings.svelte";
@@ -37,15 +38,30 @@
   let savedMessage = $state("saved");
   let savedTone = $state<"ok" | "warn">("ok");
   let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  // The last settings copy adopted from the parent (or loaded), used to tell
+  // whether the form holds unsaved edits.
+  let lastAdopted: HalluScribeSettings | null = null;
 
   onMount(() => {
     if (!initialSettings) {
-      invoke<HalluScribeSettings>("get_settings").then((value) => { settings = value; });
+      invoke<HalluScribeSettings>("get_settings").then((value) => {
+        settings = value;
+        lastAdopted = toPlainSettings(value);
+      });
     }
   });
 
+  // Adopt a new copy from the parent only when it will not clobber unsaved
+  // edits (e.g. a half-typed country code when a sweep refreshes settings).
   $effect(() => {
-    if (initialSettings) settings = initialSettings;
+    const incoming = initialSettings;
+    if (!incoming) return;
+    untrack(() => {
+      const current = settings ? toPlainSettings(settings) : null;
+      if (!canAdoptIncomingSettings(current, lastAdopted, incoming)) return;
+      settings = incoming;
+      lastAdopted = toPlainSettings(incoming);
+    });
   });
 
   function showFlash(message: string, tone: "ok" | "warn" = "ok", duration = 2200) {

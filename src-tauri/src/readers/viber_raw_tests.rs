@@ -23,6 +23,7 @@ fn book() -> ContactBook {
     by_phone.insert("+306912345678".to_string(), 1);
     ContactBook {
         by_phone,
+        by_phone_alt: HashMap::new(),
         by_email: HashMap::new(),
         people,
     }
@@ -201,4 +202,13 @@ fn the_raw_slice_renders_header_and_messages() {
     assert!(raw.contains("Me"), "got:\n{raw}");
     assert!(raw.contains("Hello"), "got:\n{raw}");
     assert!(raw.contains("Hi, how can I help?"), "got:\n{raw}");
+}
+
+#[test]
+fn a_bare_international_sender_resolves_through_the_address_book() {
+    // Viber stores numbers without the leading '+'; they must still match.
+    let conv = one2one();
+    let m = msg(false, Some("306912345678"), Some("hi"), at());
+    let speaker = speaker_for(&m, &conv, &book(), Some("30"));
+    assert_eq!(speaker, "Nikos Papadopoulos | +306912345678 | 6912345678");
 }

@@ -7,7 +7,7 @@
 // people) are dropped, never guessed (D7/D8). No names, numbers or emails are
 // logged.
 
-use crate::apple_backup::phone::normalize;
+use crate::apple_backup::phone::{bare_international, normalize};
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
 
@@ -30,6 +30,10 @@ pub struct Contact {
 pub struct ContactBook {
     /// Normalized E.164 phone (or verbatim, when unnormalizable) -> person.
     pub by_phone: HashMap<String, ContactId>,
+    /// Secondary phone index: a value saved as bare international digits
+    /// (`306912345678`, no `+`) keyed as `+306912345678`. Only consulted after
+    /// `by_phone` misses, so it can never shadow a primary match.
+    pub by_phone_alt: HashMap<String, ContactId>,
     /// Lowercased email -> person.
     pub by_email: HashMap<String, ContactId>,
     /// Person id -> person.
@@ -45,38 +49,68 @@ impl ContactBook {
         // Each key -> the set of distinct people that claim it. A key claimed
         // by two different people is ambiguous and is dropped, not guessed.
         let mut phone_claims: HashMap<String, HashSet<ContactId>> = HashMap::new();
+        let mut alt_claims: HashMap<String, HashSet<ContactId>> = HashMap::new();
         let mut email_claims: HashMap<String, HashSet<ContactId>> = HashMap::new();
         collect_values(
             conn,
             &people,
             default_cc,
-            &mut phone_claims,
-            &mut email_claims,
+            &mut Claims {
+                phone: &mut phone_claims,
+                alt: &mut alt_claims,
+                email: &mut email_claims,
+            },
         )?;
 
         Ok(ContactBook {
             by_phone: resolve_claims(&phone_claims),
+            by_phone_alt: resolve_claims(&alt_claims),
             by_email: resolve_claims(&email_claims),
             people,
         })
     }
 
     /// Resolve a raw SMS handle to a person. A handle containing `@` is looked
-    /// up as an email (trim + lowercase); otherwise it is normalized to E.164
-    /// and, if that fails, matched verbatim (whitespace stripped) - exactly as
-    /// when the book was built. Returns `None` for an unresolved handle.
+    /// up as an email (trim + lowercase); otherwise see `resolve_phone`.
+    /// Returns `None` for an unresolved handle.
     pub fn resolve(&self, handle: &str, default_cc: Option<&str>) -> Option<&Contact> {
         let handle = handle.trim();
         if handle.contains('@') {
             let key = handle.to_lowercase();
             return self.by_email.get(&key).and_then(|id| self.people.get(id));
         }
+        self.resolve_phone(handle, default_cc)
+            .map(|(contact, _)| contact)
+    }
+
+    /// Resolve a phone handle to a person plus the phone key it matched (the
+    /// E.164 form, or the verbatim value for an unnormalizable one), so a
+    /// label shows the number that actually matched. Candidates, in order:
+    /// the normalized form, the verbatim value (whitespace stripped), the
+    /// handle read as bare international digits (WhatsApp/Viber style), then
+    /// the secondary index of address-book values saved that way.
+    pub fn resolve_phone(
+        &self,
+        handle: &str,
+        default_cc: Option<&str>,
+    ) -> Option<(&Contact, String)> {
+        let handle = handle.trim();
+        let normalized = normalize(handle, default_cc);
         let verbatim: String = handle.chars().filter(|c| !c.is_whitespace()).collect();
-        let id = normalize(handle, default_cc)
-            .as_ref()
-            .and_then(|n| self.by_phone.get(n))
-            .or_else(|| self.by_phone.get(&verbatim))?;
-        self.people.get(id)
+        let bare = bare_international(handle);
+        let candidates = [
+            (normalized.as_deref(), &self.by_phone),
+            (Some(verbatim.as_str()), &self.by_phone),
+            (bare.as_deref(), &self.by_phone),
+            (normalized.as_deref(), &self.by_phone_alt),
+            (bare.as_deref(), &self.by_phone_alt),
+        ];
+        let found = candidates.into_iter().find_map(|(key, index)| {
+            let key = key?;
+            let contact = index.get(key).and_then(|id| self.people.get(id))?;
+            Some((contact, key.to_string()))
+        });
+        found
     }
 }
 
@@ -112,6 +146,13 @@ fn read_people(conn: &Connection) -> rusqlite::Result<HashMap<ContactId, Contact
     Ok(people)
 }
 
+/// The claim maps `collect_values` fills: key -> the distinct people claiming it.
+struct Claims<'a> {
+    phone: &'a mut HashMap<String, HashSet<ContactId>>,
+    alt: &'a mut HashMap<String, HashSet<ContactId>>,
+    email: &'a mut HashMap<String, HashSet<ContactId>>,
+}
+
 /// Read `ABMultiValue` phone (property 3) and email (property 4) rows and add
 /// them to the claim maps. Values whose `record_id` is not a known person are
 /// ignored.
@@ -119,8 +160,7 @@ fn collect_values(
     conn: &Connection,
     people: &HashMap<ContactId, Contact>,
     default_cc: Option<&str>,
-    phone_claims: &mut HashMap<String, HashSet<ContactId>>,
-    email_claims: &mut HashMap<String, HashSet<ContactId>>,
+    claims: &mut Claims<'_>,
 ) -> rusqlite::Result<()> {
     let mut stmt = conn
         .prepare("SELECT record_id, property, value FROM ABMultiValue WHERE property IN (3, 4)")?;
@@ -140,14 +180,17 @@ fn collect_values(
         match property {
             3 => {
                 let key = phone_key(&value, default_cc);
-                phone_claims.entry(key).or_default().insert(record_id);
+                claims.phone.entry(key).or_default().insert(record_id);
+                if let Some(alt) = bare_international(&value) {
+                    claims.alt.entry(alt).or_default().insert(record_id);
+                }
             }
             4 => {
                 let key = value.trim().to_lowercase();
                 if key.is_empty() {
                     continue;
                 }
-                email_claims.entry(key).or_default().insert(record_id);
+                claims.email.entry(key).or_default().insert(record_id);
             }
             _ => {}
         }

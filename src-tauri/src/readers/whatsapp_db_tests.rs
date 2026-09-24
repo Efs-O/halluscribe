@@ -292,6 +292,59 @@ fn an_orphan_message_without_a_session_is_counted() {
 }
 
 #[test]
+fn a_message_naming_a_missing_session_is_an_orphan_not_a_panic() {
+    // ZCHATSESSION points at a session row that does not exist (deleted chat).
+    let c = conn();
+    add_session(&c, 1, "111@s.whatsapp.net", None, false);
+    add_message(
+        &c,
+        1,
+        Some(1),
+        false,
+        1_700_000_000,
+        0,
+        0,
+        Some("kept"),
+        None,
+    );
+    add_message(
+        &c,
+        2,
+        Some(99),
+        false,
+        1_700_000_000,
+        0,
+        0,
+        Some("lost"),
+        None,
+    );
+
+    let db = load(&c).expect("load");
+    assert_eq!(db.skipped.orphan_no_session, 1);
+    assert_eq!(db.messages.len(), 1);
+    assert_eq!(db.conversations.len(), 1);
+}
+
+#[test]
+fn a_null_session_type_reads_as_a_one_to_one() {
+    let c = conn();
+    c.execute(
+        "INSERT INTO ZWACHATSESSION (Z_PK, ZCONTACTJID, ZPARTNERNAME, ZSESSIONTYPE)
+         VALUES (1, '111@s.whatsapp.net', NULL, NULL)",
+        [],
+    )
+    .expect("insert session");
+    add_message(&c, 1, Some(1), false, 1_700_000_000, 0, 0, Some("hi"), None);
+
+    let db = load(&c).expect("load");
+    assert_eq!(db.messages.len(), 1);
+    assert_eq!(
+        db.conversations[0].participants,
+        vec!["111@s.whatsapp.net".to_string()]
+    );
+}
+
+#[test]
 fn a_bad_date_is_counted() {
     let c = conn();
     add_session(&c, 1, "111@s.whatsapp.net", None, false);

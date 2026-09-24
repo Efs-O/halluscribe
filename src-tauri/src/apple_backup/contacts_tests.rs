@@ -159,3 +159,47 @@ fn contact_id_is_an_i64_rowid() {
     let id: ContactId = 1;
     assert!(b.people.contains_key(&id));
 }
+
+#[test]
+fn a_bare_international_handle_resolves_to_a_normalized_entry() {
+    // WhatsApp/Viber give the number with its country code but no `+`.
+    // Normalizing it as national would prepend the cc twice (+30306...).
+    let b = book(
+        &[("Nikos", "Papadopoulos", "")],
+        &[(0, "+30 6912345678")],
+        &[],
+    );
+    let (c, key) = b.resolve_phone("306912345678", CC_GR).expect("resolve");
+    assert_eq!(c.name, "Nikos Papadopoulos");
+    assert_eq!(key, "+306912345678");
+    // With no default cc too.
+    assert!(b.resolve("306912345678", None).is_some());
+}
+
+#[test]
+fn an_entry_saved_as_bare_international_resolves_from_e164() {
+    // The address book holds `306912345678` (cc, no `+`); an iMessage handle
+    // arrives as `+306912345678`. The secondary index bridges the two.
+    let b = book(
+        &[("Nikos", "Papadopoulos", "")],
+        &[(0, "306912345678")],
+        &[],
+    );
+    let (c, key) = b.resolve_phone("+306912345678", CC_GR).expect("resolve");
+    assert_eq!(c.name, "Nikos Papadopoulos");
+    assert_eq!(key, "+306912345678");
+}
+
+#[test]
+fn the_secondary_index_never_shadows_a_primary_match() {
+    // Alice is saved as the national `6912345678` (primary +306912345678);
+    // Bob as the bare `306912345678` (secondary +306912345678). The primary
+    // key wins for Alice's number.
+    let b = book(
+        &[("Alice", "A", ""), ("Bob", "B", "")],
+        &[(0, "6912345678"), (1, "306912345678")],
+        &[],
+    );
+    let c = b.resolve("+306912345678", CC_GR).expect("resolve");
+    assert_eq!(c.name, "Alice A");
+}

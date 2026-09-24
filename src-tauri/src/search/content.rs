@@ -35,7 +35,7 @@ pub(crate) fn body_find_with_stamp(
 
 /// Single-needle convenience wrapper over `body_find`, kept for callers that
 /// only ever test one term (briefing keyword filter, quoted-phrase mode).
-/// `query` must already be lowercased.
+/// `query` must already be folded with `fold_for_search`.
 pub(crate) fn body_contains(archive_dir: &Path, entry: &IndexEntry, query: &str) -> bool {
     body_find(archive_dir, entry, &[query])
         .into_iter()

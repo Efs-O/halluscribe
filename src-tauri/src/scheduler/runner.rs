@@ -9,8 +9,9 @@ use crate::archive::{self, ArchiveError, SessionMeta};
 use crate::gemma::GemmaError;
 use crate::readers::{self, ChatProvider, ParsedSession};
 use crate::retrieval;
-use crate::scanner::scan_sessions;
+use crate::scanner::{scan_sessions, ScanTargetKind};
 use chrono::{Local, Timelike, Utc};
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -73,7 +74,8 @@ pub fn run_sweep(
         ..Default::default()
     };
     if let Err(error) = archive::ensure_index_readable(&config.archive_dir) {
-        result.errors.push(format!("archive index: {error}"));
+        // Global: every source, the business ones included, is affected.
+        result.push_error(format!("archive index: {error}"), true);
         record_sweep_errors(&result);
         return result;
     }
@@ -100,18 +102,17 @@ pub fn run_sweep(
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("source");
-        let parsed_sessions =
-            match readers::read_target(source, config.settings.business_default_country_code_opt())
-            {
-                Ok(parsed_sessions) => parsed_sessions,
-                Err(error) => {
-                    result.errors.push(format!(
-                        "{source_label} ({}): parse: {error}",
-                        source.path.display()
-                    ));
-                    continue;
-                }
-            };
+        let default_cc = config.settings.business_default_country_code_opt();
+        let parsed_sessions = match read_source_guarded(source_label, &source.path, || {
+            readers::read_target(source, default_cc)
+        }) {
+            Ok(parsed_sessions) => parsed_sessions,
+            Err(error) => {
+                let business = matches!(&source.kind, ScanTargetKind::Import(p) if p.is_business());
+                result.push_error(error, business);
+                continue;
+            }
+        };
 
         if parsed_sessions.is_empty() {
             result.skipped += 1;
@@ -167,6 +168,9 @@ pub fn run_sweep(
 
     // Sessions written this sweep, embedded in one batched pass at the end.
     let mut written_ids: Vec<String> = Vec::new();
+    // The written business sessions, so an embedding failure on one counts as
+    // a business error too.
+    let mut business_written: HashSet<String> = HashSet::new();
 
     for (idx, session) in worklist.into_iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
@@ -216,11 +220,14 @@ pub fn run_sweep(
                 continue;
             }
             Err(error) => {
-                result.errors.push(format!(
-                    "{} ({}): inference: {error}",
-                    session.id,
-                    session.source_path.display()
-                ));
+                result.push_error(
+                    format!(
+                        "{} ({}): inference: {error}",
+                        session.id,
+                        session.source_path.display()
+                    ),
+                    session.provider.is_business(),
+                );
                 emit_progress(app, current, total, &session.id, "error");
                 continue;
             }
@@ -256,11 +263,14 @@ pub fn run_sweep(
         let raw_path = match preserved {
             Ok(rel) => Some(rel),
             Err(error) => {
-                result.errors.push(format!(
-                    "{} ({}): raw preserve: {error}",
-                    session.id,
-                    session.source_path.display()
-                ));
+                result.push_error(
+                    format!(
+                        "{} ({}): raw preserve: {error}",
+                        session.id,
+                        session.source_path.display()
+                    ),
+                    session.provider.is_business(),
+                );
                 None
             }
         };
@@ -294,22 +304,31 @@ pub fn run_sweep(
                     result.flagged += 1;
                 }
                 written_ids.push(session.id.clone());
+                if session.provider.is_business() {
+                    business_written.insert(session.id.clone());
+                }
                 emit_progress(app, current, total, &session.id, "done");
             }
             Err(ArchiveError::Io(error)) => {
-                result.errors.push(format!(
-                    "{} ({}): archive I/O: {error}",
-                    session.id,
-                    session.source_path.display()
-                ));
+                result.push_error(
+                    format!(
+                        "{} ({}): archive I/O: {error}",
+                        session.id,
+                        session.source_path.display()
+                    ),
+                    session.provider.is_business(),
+                );
                 emit_progress(app, current, total, &session.id, "error");
             }
             Err(error) => {
-                result.errors.push(format!(
-                    "{} ({}): archive: {error}",
-                    session.id,
-                    session.source_path.display()
-                ));
+                result.push_error(
+                    format!(
+                        "{} ({}): archive: {error}",
+                        session.id,
+                        session.source_path.display()
+                    ),
+                    session.provider.is_business(),
+                );
                 emit_progress(app, current, total, &session.id, "error");
             }
         }
@@ -322,13 +341,38 @@ pub fn run_sweep(
     for (session_id, error) in
         retrieval::index_sessions(&config.archive_dir, &config.settings, &written_ids)
     {
-        result
-            .errors
-            .push(format!("{session_id}: embedding: {error}"));
+        let business = business_written.contains(&session_id);
+        result.push_error(format!("{session_id}: embedding: {error}"), business);
     }
 
     record_sweep_errors(&result);
     result
+}
+
+/// Run one source's reader, turning both a reader error and a reader panic
+/// (data the reader did not expect) into a per-source sweep error. A panic in
+/// one source must not abort the whole sweep: the other sources still run and
+/// the run still reaches its `sweep-done`.
+fn read_source_guarded<F>(
+    source_label: &str,
+    path: &Path,
+    read: F,
+) -> Result<Vec<ParsedSession>, String>
+where
+    F: FnOnce() -> Result<Vec<ParsedSession>, readers::ReaderError>,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)) {
+        Ok(Ok(parsed_sessions)) => Ok(parsed_sessions),
+        Ok(Err(error)) => Err(format!(
+            "{source_label} ({}): parse: {error}",
+            path.display()
+        )),
+        Err(payload) => Err(format!(
+            "{source_label} ({}): reader crashed: {}",
+            path.display(),
+            super::panic_message(&*payload)
+        )),
+    }
 }
 
 /// Persist all per-session errors because the UI completion toast deliberately
@@ -383,8 +427,8 @@ fn emit_progress(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_project;
-    use crate::readers::ChatProvider;
+    use super::{read_source_guarded, resolve_project};
+    use crate::readers::{ChatProvider, ReaderError};
     use std::path::Path;
 
     fn path() -> &'static Path {
@@ -410,5 +454,22 @@ mod tests {
         // Even when the provider has a label, a set override wins.
         let project = resolve_project(&ChatProvider::AppleMessages, path(), Some("Other"));
         assert_eq!(project, "Other");
+    }
+
+    #[test]
+    fn a_reader_panic_becomes_a_per_source_error() {
+        let err =
+            read_source_guarded("backup", path(), || panic!("index out of bounds")).unwrap_err();
+        assert!(err.contains("reader crashed: index out of bounds"), "{err}");
+        assert!(err.starts_with("backup ("), "{err}");
+    }
+
+    #[test]
+    fn a_reader_error_keeps_the_parse_prefix() {
+        let err = read_source_guarded("backup", path(), || {
+            Err(ReaderError::Database("bad".to_string()))
+        })
+        .unwrap_err();
+        assert!(err.contains("): parse: "), "{err}");
     }
 }

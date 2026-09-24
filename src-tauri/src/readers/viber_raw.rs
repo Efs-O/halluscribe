@@ -10,7 +10,7 @@
 // offset. No names, numbers or text are logged.
 
 use crate::apple_backup::contacts::ContactBook;
-use crate::apple_backup::phone::{national_form, normalize};
+use crate::apple_backup::phone::national_form;
 use crate::readers::apple_messages_db::{Conversation, RawMessage};
 use chrono::{DateTime, Local, Utc};
 
@@ -137,8 +137,7 @@ fn participants_line(conv: &Conversation, book: &ContactBook, default_cc: Option
 /// One participant's header label: `<name> (<E164>)` for a resolved phone, or
 /// the raw phone when it does not resolve.
 fn participant_label(phone: &str, book: &ContactBook, default_cc: Option<&str>) -> String {
-    if book.resolve(phone, default_cc).is_some() {
-        let e164 = normalize(phone, default_cc).unwrap_or_else(|| phone.to_string());
+    if let Some((_, e164)) = book.resolve_phone(phone, default_cc) {
         format!("{} ({})", resolve_name(phone, book, default_cc), e164)
     } else {
         resolve_name(phone, book, default_cc)
@@ -181,8 +180,7 @@ pub fn speaker_for(
             .unwrap_or_else(|| "Unknown".to_string());
     };
     let phone = phone.trim();
-    if book.resolve(phone, default_cc).is_some() {
-        let e164 = normalize(phone, default_cc).unwrap_or_else(|| phone.to_string());
+    if let Some((_, e164)) = book.resolve_phone(phone, default_cc) {
         let mut line = format!("{} | {}", resolve_name(phone, book, default_cc), e164);
         if let Some(national) = national_form(&e164, default_cc) {
             line.push_str(&format!(" | {national}"));

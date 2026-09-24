@@ -17,5 +17,5 @@ pub mod typedstream;
 pub use contacts::{Contact, ContactBook, ContactId};
 pub use info_plist::plist_value;
 pub use manifest::{open_backup, open_sqlite_read_only, BackupError, BackupHandle, TempCopy};
-pub use phone::{national_form, normalize};
+pub use phone::{bare_international, national_form, normalize};
 pub use typedstream::decode_attributed_body;

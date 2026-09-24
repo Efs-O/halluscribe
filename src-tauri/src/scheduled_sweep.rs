@@ -76,7 +76,22 @@ pub(crate) fn start(handle: AppHandle) {
                 );
                 continue;
             };
-            let result = scheduler::run_sweep(&handle, &config, cancel.clone());
+            // A panic inside the sweep must still release the run slot and
+            // report, or every later sweep is refused as "busy" until restart.
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scheduler::run_sweep(&handle, &config, cancel.clone())
+            }));
+            let result = match outcome {
+                Ok(result) => result,
+                Err(payload) => {
+                    let message =
+                        format!("The sweep crashed: {}", scheduler::panic_message(&*payload));
+                    eprintln!("[scheduler] {message}");
+                    let _ = handle.emit("sweep-done", message);
+                    handle.state::<SweepCancel>().0.finish_run(&cancel);
+                    continue;
+                }
+            };
             {
                 let marker_errors = if result.completed_successfully() {
                     mark_auto_sweep_success(&handle)

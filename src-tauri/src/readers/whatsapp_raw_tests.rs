@@ -23,6 +23,7 @@ fn book() -> ContactBook {
     by_phone.insert("+306912345678".to_string(), 1);
     ContactBook {
         by_phone,
+        by_phone_alt: HashMap::new(),
         by_email: HashMap::new(),
         people,
     }
@@ -222,4 +223,52 @@ fn the_raw_slice_renders_header_and_messages() {
     assert!(raw.contains("Me"), "got:\n{raw}");
     assert!(raw.contains("Hello"), "got:\n{raw}");
     assert!(raw.contains("Hi, how can I help?"), "got:\n{raw}");
+}
+
+#[test]
+fn a_real_jid_without_a_plus_resolves_through_the_address_book() {
+    // Real iOS JIDs carry the country code but no `+`. Before the fix the
+    // number was read as national and got `+30` prepended a second time.
+    let jid = "306912345678@s.whatsapp.net";
+    let conv = Conversation {
+        key: ConversationKey::Chat(1),
+        chat_guid: Some(jid.to_string()),
+        display_name: None,
+        service: None,
+        participants: vec![jid.to_string()],
+    };
+    let empty: HashMap<String, String> = HashMap::new();
+    assert_eq!(
+        conversation_title(&conv, &empty, &book(), Some("30")),
+        "Nikos Papadopoulos"
+    );
+    assert_eq!(
+        conversation_org(&conv, &book(), Some("30")).as_deref(),
+        Some("ABC Marble Ltd")
+    );
+    let speaker = speaker_for(
+        &msg(false, Some(jid), Some("hi"), at()),
+        &conv,
+        &empty,
+        &book(),
+        Some("30"),
+    );
+    assert_eq!(speaker, "Nikos Papadopoulos | +306912345678 | 6912345678");
+}
+
+#[test]
+fn a_group_jid_is_never_read_as_a_phone_number() {
+    // A group id is all digits too, but only `@s.whatsapp.net` JIDs are phones.
+    let conv = Conversation {
+        key: ConversationKey::Chat(1),
+        chat_guid: Some("306912345678@g.us".to_string()),
+        display_name: None,
+        service: None,
+        participants: vec!["306912345678@g.us".to_string()],
+    };
+    let empty: HashMap<String, String> = HashMap::new();
+    assert_eq!(
+        conversation_title(&conv, &empty, &book(), Some("30")),
+        "306912345678@g.us"
+    );
 }

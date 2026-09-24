@@ -290,7 +290,7 @@ pub(crate) fn scan_text(text: &str, needle: &str, max_excerpts: usize) -> RawSca
         if outcome.excerpts.len() < max_excerpts {
             outcome.excerpts.push(RawExcerpt {
                 line_no: line_index + 1,
-                excerpt: excerpt_around(&lowered, hit_byte, hit_chars),
+                excerpt: excerpt_around(line, &lowered, hit_byte, hit_chars),
             });
         } else {
             outcome.excerpts_truncated = true;
@@ -300,13 +300,24 @@ pub(crate) fn scan_text(text: &str, needle: &str, max_excerpts: usize) -> RawSca
     outcome
 }
 
-fn excerpt_around(line: &str, hit_byte: usize, hit_chars: usize) -> String {
+/// Cut the excerpt from the ORIGINAL line so the user sees the text as it was
+/// written (case and accents intact); the hit position comes from the folded
+/// line. The fold keeps char count for real text, so char offsets carry over;
+/// in the rare case it does not (e.g. `İ` lowercases to two chars), the folded
+/// line is used instead so the excerpt still frames the hit.
+fn excerpt_around(original: &str, folded: &str, hit_byte: usize, hit_chars: usize) -> String {
+    let hit_start = folded[..hit_byte].chars().count();
+    let total_chars = original.chars().count();
+    let line = if total_chars == folded.chars().count() {
+        original
+    } else {
+        folded
+    };
     let total_chars = line.chars().count();
     if total_chars <= EXCERPT_CHARS {
         return line.to_owned();
     }
 
-    let hit_start = line[..hit_byte].chars().count();
     let hit_center = hit_start + hit_chars / 2;
     let mut start = hit_center.saturating_sub(EXCERPT_CHARS / 2);
     start = start.min(total_chars - EXCERPT_CHARS);

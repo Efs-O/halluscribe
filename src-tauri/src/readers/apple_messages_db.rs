@@ -11,16 +11,11 @@
 // in; this module never opens files. It streams rows with `query_map`, never
 // `unwrap`s on row data, and never logs text, handles or names.
 
-use crate::apple_backup::decode_attributed_body;
 use crate::readers::ReaderError;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
+use rows::{ios_date_to_utc, load_attachments, resolve_text, ATTACHMENTS_SQL};
 use rusqlite::Connection;
 use std::collections::{BTreeMap, BTreeSet};
-
-/// iOS core-data epoch: 2001-01-01 00:00:00 UTC, in unix seconds.
-const IOS_EPOCH_SECS: i64 = 978_307_200;
-/// Above this, `message.date` is nanoseconds since 2001-01-01; below it, seconds.
-const NS_THRESHOLD: i64 = 1_000_000_000_000;
 
 /// The conversation a message belongs to: a `chat` row, or (for the ~10% of
 /// messages with no `chat_message_join` row) a single `handle`.
@@ -81,6 +76,11 @@ pub struct SkipCounts {
     /// Rows that failed to read (a column type mismatch, e.g. a NULL where a
     /// non-null type is required). Counted, not swallowed.
     pub row_errors: u64,
+    /// Extra `chat_message_join` rows for a message already loaded (a message
+    /// joined to more than one chat is kept once, in its first chat).
+    pub duplicate_joins: u64,
+    /// Attachment rows that failed to read. The message is kept without them.
+    pub attachment_errors: u64,
 }
 
 /// The loaded Messages database.
@@ -217,8 +217,11 @@ fn load_messages(
         "SELECT m.ROWID, m.guid, j.chat_id, m.handle_id, m.date, m.is_from_me, m.service,
                 m.text, m.attributedBody, m.associated_message_type, m.item_type
          FROM message m
-         LEFT JOIN chat_message_join j ON j.message_id = m.ROWID",
+         LEFT JOIN chat_message_join j ON j.message_id = m.ROWID
+         ORDER BY m.ROWID, j.chat_id",
     )?;
+    let mut attachment_stmt = conn.prepare(ATTACHMENTS_SQL)?;
+    let mut last_rowid: Option<i64> = None;
     let rows = stmt.query_map([], |r| {
         Ok(MessageRow {
             rowid: r.get::<_, i64>(0)?,
@@ -245,6 +248,14 @@ fn load_messages(
                 continue;
             }
         };
+
+        // A message joined to several chats comes back once per join; keep
+        // the first (lowest chat_id) and count the rest.
+        if last_rowid == Some(row.rowid) {
+            skipped.duplicate_joins += 1;
+            continue;
+        }
+        last_rowid = Some(row.rowid);
 
         // Tapbacks and group events are not messages.
         if row.associated_message_type != 0 {
@@ -274,7 +285,7 @@ fn load_messages(
 
         // Text: the `text` column, else the decoded attributedBody.
         let text = resolve_text(&row.text, &row.attributed_body);
-        let attachments = load_attachments(conn, row.rowid)?;
+        let attachments = load_attachments(&mut attachment_stmt, row.rowid, &mut skipped);
 
         // No text and no attachments: unusable.
         if text.is_none() && attachments.is_empty() {
@@ -387,47 +398,6 @@ fn handle_lookup(conn: &Connection, handle_id: i64) -> Option<String> {
     .ok()
 }
 
-/// Resolve the message text: the `text` column if non-blank, else the decoded
-/// `attributedBody` if non-blank, else `None`.
-fn resolve_text(text: &Option<String>, attributed_body: &Option<Vec<u8>>) -> Option<String> {
-    if let Some(t) = text {
-        let t = t.trim();
-        if !t.is_empty() {
-            return Some(t.to_string());
-        }
-    }
-    if let Some(blob) = attributed_body {
-        if let Some(decoded) = decode_attributed_body(blob) {
-            if !decoded.is_empty() {
-                return Some(decoded);
-            }
-        }
-    }
-    None
-}
-
-/// The attachments on a message, via `message_attachment_join`.
-fn load_attachments(conn: &Connection, message_rowid: i64) -> rusqlite::Result<Vec<RawAttachment>> {
-    let mut stmt = conn.prepare(
-        "SELECT a.transfer_name, a.mime_type, a.total_bytes
-         FROM message_attachment_join j
-         JOIN attachment a ON a.ROWID = j.attachment_id
-         WHERE j.message_id = ?1",
-    )?;
-    let rows = stmt.query_map([message_rowid], |r| {
-        Ok(RawAttachment {
-            transfer_name: r.get::<_, Option<String>>(0)?,
-            mime_type: r.get::<_, Option<String>>(1)?,
-            total_bytes: r.get::<_, Option<i64>>(2)?,
-        })
-    })?;
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row?);
-    }
-    Ok(out)
-}
-
 /// The sender's `handle.id`: `None` for my own messages; for a group chat, the
 /// message's `handle_id`; for a 1:1 chat with no `handle_id`, the chat's single
 /// participant; otherwise `None` (Phase 5b renders it unresolved).
@@ -455,20 +425,13 @@ fn resolve_sender_handle(
     Ok(None)
 }
 
-/// Convert an iOS `message.date` (nanoseconds or seconds since 2001-01-01 UTC)
-/// to a `DateTime<Utc>`. Returns `None` for an unconvertible value.
-fn ios_date_to_utc(value: i64) -> Option<DateTime<Utc>> {
-    if value < 0 {
-        return None;
-    }
-    let (secs, nanos) = if value > NS_THRESHOLD {
-        (value / 1_000_000_000, (value % 1_000_000_000) as u32)
-    } else {
-        (value, 0)
-    };
-    Utc.timestamp_opt(IOS_EPOCH_SECS + secs, nanos).single()
-}
+#[path = "apple_messages_db_rows.rs"]
+mod rows;
 
 #[cfg(test)]
 #[path = "apple_messages_db_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "apple_messages_db_join_tests.rs"]
+mod join_tests;

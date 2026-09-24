@@ -67,10 +67,10 @@ fn giant_single_line_is_trimmed_around_hit() {
     let outcome = scan_text(&text, "unique_needle", 20);
     assert_eq!(outcome.total_hits, 1);
     assert_eq!(outcome.excerpts[0].excerpt.chars().count(), 200);
-    assert!(outcome.excerpts[0].excerpt.contains("unique_needle"));
+    assert!(outcome.excerpts[0].excerpt.contains("UNIQUE_NEEDLE"));
     let before = outcome.excerpts[0]
         .excerpt
-        .split("unique_needle")
+        .split("UNIQUE_NEEDLE")
         .next()
         .unwrap()
         .chars()
@@ -87,7 +87,16 @@ fn greek_context_and_greek_needle_are_char_safe() {
 
     assert_eq!(outcome.total_hits, 1);
     assert_eq!(outcome.excerpts[0].excerpt.chars().count(), 200);
-    assert!(outcome.excerpts[0].excerpt.contains("δοκιμη"));
+    assert!(outcome.excerpts[0].excerpt.contains("ΔΟΚΙΜΗ στόχος"));
+}
+
+#[test]
+fn the_excerpt_keeps_the_original_case_and_accents() {
+    let text = r#"{"type":"user","message":{"content":"Καλημέρα, NETSH Winsock"}}"#;
+    let outcome = scan_text(text, "καλημερα", 20);
+
+    assert_eq!(outcome.total_hits, 1);
+    assert_eq!(outcome.excerpts[0].excerpt, text);
 }
 
 #[test]

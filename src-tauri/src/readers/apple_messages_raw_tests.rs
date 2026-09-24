@@ -34,6 +34,7 @@ fn book() -> ContactBook {
     by_email.insert("maria@example.com".to_string(), 2);
     ContactBook {
         by_phone,
+        by_phone_alt: HashMap::new(),
         by_email,
         people,
     }

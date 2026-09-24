@@ -2,6 +2,7 @@
 
 use crate::app_state::SweepCancel;
 use crate::app_support::{archive_dir, default_archive_dir, mark_sweep_success};
+use crate::scheduler::panic_message;
 use crate::{scheduler, settings};
 use std::path::Path;
 use tauri::{Emitter, Manager};
@@ -144,9 +145,12 @@ fn spawn_sweep(
     Ok(())
 }
 
-/// Write the outcome of a business import back to the settings: the UTC
-/// completion time on a clean run, or the first error otherwise. A busy or
-/// cancelled run writes neither — it is not an import result (a legit `Ok(())`).
+/// Write the outcome of a business import back to the settings: the first
+/// business error when a business source or session failed, else the UTC
+/// completion time once every business source has been read (errors from
+/// unrelated sources, e.g. a Claude log, are the sweep's, not the import's).
+/// Deferred work leaves the import incomplete. A busy or cancelled run writes
+/// neither — it is not an import result (a legit `Ok(())`).
 /// A settings load or save failure is surfaced, not swallowed: the caller folds
 /// it into the sweep-done message so the user is told the last-import/last-error
 /// could not be updated.
@@ -156,15 +160,13 @@ fn record_business_outcome(dir: &Path, result: &scheduler::SweepResult) -> Resul
     }
     let mut settings = settings::load_settings(dir)
         .map_err(|error| format!("could not record business import status: {error}"))?;
-    if result.completed_successfully() {
+    if let Some(error) = result.business_errors.first() {
+        settings.business_last_error = error.clone();
+    } else if result.ran && result.deferred == 0 {
         settings.business_last_import = chrono::Utc::now().to_rfc3339();
         settings.business_last_error = String::new();
     } else {
-        settings.business_last_error = result
-            .errors
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "The import did not complete.".to_string());
+        settings.business_last_error = "The import did not complete.".to_string();
     }
     settings::save_settings(dir, &settings)
         .map_err(|error| format!("could not record business import status: {error}"))?;
@@ -179,15 +181,6 @@ fn record_business_error(dir: &Path, message: &str) -> Result<(), String> {
     settings.business_last_error = message.to_string();
     settings::save_settings(dir, &settings)
         .map_err(|error| format!("could not record business import status: {error}"))
-}
-
-/// The text of a panic payload (`panic!` with a literal or a formatted string).
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
-    payload
-        .downcast_ref::<&str>()
-        .map(|s| s.to_string())
-        .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "unknown panic".to_string())
 }
 
 /// Signal the active sweep to stop after the current session finishes.
@@ -275,5 +268,37 @@ mod tests {
             err.contains("could not record business import status"),
             "{err}"
         );
+    }
+
+    fn outcome_for(result: &scheduler::SweepResult) -> settings::HalluScribeSettings {
+        let dir = tempfile::tempdir().unwrap();
+        settings::save_settings(dir.path(), &settings::HalluScribeSettings::default()).unwrap();
+        record_business_outcome(dir.path(), result).unwrap();
+        settings::load_settings(dir.path()).unwrap()
+    }
+
+    #[test]
+    fn an_unrelated_source_error_is_not_the_business_error() {
+        let mut result = scheduler::SweepResult {
+            ran: true,
+            ..Default::default()
+        };
+        result.push_error("claude.jsonl: parse: bad line".to_string(), false);
+        let saved = outcome_for(&result);
+        assert_eq!(saved.business_last_error, "");
+        assert!(!saved.business_last_import.is_empty());
+    }
+
+    #[test]
+    fn a_business_error_is_recorded_even_after_an_unrelated_one() {
+        let mut result = scheduler::SweepResult {
+            ran: true,
+            ..Default::default()
+        };
+        result.push_error("claude.jsonl: parse: bad line".to_string(), false);
+        result.push_error("backup: parse: sms.db missing".to_string(), true);
+        let saved = outcome_for(&result);
+        assert_eq!(saved.business_last_error, "backup: parse: sms.db missing");
+        assert!(saved.business_last_import.is_empty());
     }
 }

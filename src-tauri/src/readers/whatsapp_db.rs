@@ -39,7 +39,8 @@ pub struct SkipCounts {
     pub group_events: u64,
     /// A `ZMESSAGETYPE == 0` (text) row whose `ZTEXT` is blank.
     pub unusable_text: u64,
-    /// A message with no `ZCHATSESSION`.
+    /// A message with no `ZCHATSESSION`, or one naming a session that is not in
+    /// `ZWACHATSESSION`.
     pub orphan_no_session: u64,
     /// A `ZMESSAGEDATE` that cannot be converted to a date.
     pub bad_date: u64,
@@ -65,7 +66,7 @@ pub fn load(conn: &Connection) -> Result<WhatsAppDb, ReaderError> {
     check_schema(conn)?;
 
     let sessions = load_sessions(conn).map_err(db_err)?;
-    let (messages, skipped) = load_messages(conn).map_err(db_err)?;
+    let (messages, skipped) = load_messages(conn, &sessions).map_err(db_err)?;
     let conversations = build_conversations(conn, &messages, &sessions).map_err(db_err)?;
     let push_names = load_push_names(conn).map_err(db_err)?;
 
@@ -151,7 +152,7 @@ fn load_sessions(conn: &Connection) -> rusqlite::Result<HashMap<i64, SessionRow>
             r.get::<_, i64>(0)?,
             r.get::<_, Option<String>>(1)?,
             r.get::<_, Option<String>>(2)?,
-            r.get::<_, i64>(3)?,
+            r.get::<_, Option<i64>>(3)?,
         ))
     })?;
     for row in rows {
@@ -161,7 +162,7 @@ fn load_sessions(conn: &Connection) -> rusqlite::Result<HashMap<i64, SessionRow>
             SessionRow {
                 contact_jid,
                 partner_name,
-                is_group: session_type == 1,
+                is_group: session_type == Some(1),
             },
         );
     }
@@ -182,7 +183,10 @@ struct MessageRow {
 
 /// Read and resolve every message row, skipping the non-text rows and counting
 /// each skip. Returns the kept messages (unsorted) plus the skip counts.
-fn load_messages(conn: &Connection) -> rusqlite::Result<(Vec<RawMessage>, SkipCounts)> {
+fn load_messages(
+    conn: &Connection,
+    sessions: &HashMap<i64, SessionRow>,
+) -> rusqlite::Result<(Vec<RawMessage>, SkipCounts)> {
     let mut messages: Vec<RawMessage> = Vec::new();
     let mut skipped = SkipCounts::default();
 
@@ -222,7 +226,8 @@ fn load_messages(conn: &Connection) -> rusqlite::Result<(Vec<RawMessage>, SkipCo
         };
 
         // Every WhatsApp message belongs to a session; a missing one is an orphan.
-        let Some(chat_session) = row.chat_session else {
+        // A session id with no `ZWACHATSESSION` row is an orphan too.
+        let Some(chat_session) = row.chat_session.filter(|pk| sessions.contains_key(pk)) else {
             skipped.orphan_no_session += 1;
             continue;
         };
@@ -290,7 +295,10 @@ fn build_conversations(
 
     let mut conversations: Vec<Conversation> = Vec::with_capacity(keys.len());
     for pk in keys {
-        let row = &sessions[&pk];
+        // `load_messages` keeps only messages whose session exists.
+        let Some(row) = sessions.get(&pk) else {
+            continue;
+        };
         let participants = if row.is_group {
             group_members(conn, pk)?
         } else {

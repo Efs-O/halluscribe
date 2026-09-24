@@ -34,13 +34,14 @@ pub fn normalize(raw: &str, default_cc: Option<&str>) -> Option<String> {
         return None;
     }
 
-    // 2. A leading `00` is the international prefix - replace it with `+`.
-    if let Some(stripped) = digits.strip_prefix("00") {
-        return finish(stripped);
-    }
-    // 3. An explicit `+` is already international - keep it as is.
+    // 2. An explicit `+` is already international - keep it as is. A `00`
+    //    after the `+` is not stripped, so `finish` rejects it (malformed).
     if has_plus {
         return finish(digits);
+    }
+    // 3. A leading `00` is the international prefix - replace it with `+`.
+    if let Some(stripped) = digits.strip_prefix("00") {
+        return finish(stripped);
     }
     // 4. Otherwise it is a national number: it needs a valid default country
     //    code, or we refuse (verbatim match only, never guess).
@@ -48,6 +49,24 @@ pub fn normalize(raw: &str, default_cc: Option<&str>) -> Option<String> {
     // Drop ONE leading trunk `0` if present, then prepend `+<cc>`.
     let national = digits.strip_prefix('0').unwrap_or(digits);
     finish(&format!("{cc}{national}"))
+}
+
+/// Read a bare digit string (no `+`, no `00`) as an already-international
+/// number: `"306912345678"` ⇒ `"+306912345678"`. This is the form WhatsApp
+/// JIDs and some Viber and address-book values use - they carry the country
+/// code but no `+`. `normalize` would treat such a value as national and
+/// prepend the default country code a second time, so callers use this as a
+/// separate, lower-priority candidate. `None` for anything else.
+pub fn bare_international(raw: &str) -> Option<String> {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '-' | '.' | '(' | ')'))
+        .collect();
+    if cleaned.starts_with("00") || !cleaned.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    finish(&cleaned)
 }
 
 /// The national (subscriber) form of an E.164 number for a given default
@@ -74,9 +93,11 @@ fn country_code(cc: &str) -> Option<&str> {
 
 /// Wrap a final international digit string (no `+`) in E.164 form, enforcing
 /// the 8..=15 digit length. This is what keeps short codes out: a 5-digit
-/// short code plus a 2-digit cc is only 7 digits, so it is rejected.
+/// short code plus a 2-digit cc is only 7 digits, so it is rejected. No
+/// country code starts with `0`, so a leading `0` here (e.g. `+0030…`) is
+/// malformed and rejected too.
 fn finish(digits: &str) -> Option<String> {
-    if (8..=15).contains(&digits.len()) {
+    if (8..=15).contains(&digits.len()) && !digits.starts_with('0') {
         Some(format!("+{digits}"))
     } else {
         None

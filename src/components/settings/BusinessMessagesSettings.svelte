@@ -114,6 +114,12 @@
     await onSave();
   }
 
+  // A stop request only applies to the sweep that was running; clear it when
+  // that sweep ends so the next one starts with a working stop button.
+  $effect(() => {
+    if (!sweepRunning) stopRequested = false;
+  });
+
   async function runImportNow() {
     if (sweepRunning || !canRun) return;
     stopRequested = false;
@@ -200,7 +206,7 @@
             onblur={onFieldChange}
             placeholder="e.g. 30"
             inputmode="numeric"
-            maxlength="3"
+            maxlength="4"
           />
         </label>
         <p class="field-note">

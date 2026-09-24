@@ -10,16 +10,27 @@
 // numbers or text are logged.
 
 use crate::apple_backup::contacts::ContactBook;
-use crate::apple_backup::phone::{national_form, normalize};
+use crate::apple_backup::phone::national_form;
 use crate::readers::apple_messages_db::{Conversation, RawMessage};
 use chrono::{DateTime, Local, Utc};
 use std::collections::HashMap;
 
-/// The number in a WhatsApp JID: the part before the first `@` (a 1:1 JID is
-/// `<number>@s.whatsapp.net`, a group JID is `<id>@g.us`). `None` when there is
-/// no `@` (the whole string is then already the number).
-fn jid_number(jid: &str) -> &str {
-    jid.split('@').next().unwrap_or(jid)
+/// The phone handle in a WhatsApp JID. A 1:1 JID is
+/// `<cc><number>@s.whatsapp.net`: always international but with no `+`, so the
+/// `+` is added here - otherwise normalization would read it as a national
+/// number and prepend the default country code a second time. Any other JID
+/// (a group `<id>@g.us`, a `@lid`) is not a phone and yields `None`. With no
+/// `@`, the whole string is the handle.
+fn jid_number(jid: &str) -> Option<String> {
+    match jid.split_once('@') {
+        None => Some(jid.to_string()),
+        Some((user, "s.whatsapp.net")) => {
+            let digits = user.strip_prefix('+').unwrap_or(user);
+            let is_phone = !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
+            is_phone.then(|| format!("+{digits}"))
+        }
+        Some(_) => None,
+    }
 }
 
 /// Resolve a JID to a display name: the push name first, then the address book
@@ -34,7 +45,7 @@ fn resolve_name(
     if let Some(name) = push_names.get(jid) {
         return name.clone();
     }
-    if let Some(contact) = book.resolve(jid_number(jid), default_cc) {
+    if let Some(contact) = jid_number(jid).and_then(|n| book.resolve(&n, default_cc)) {
         return contact.name.clone();
     }
     jid.to_string()
@@ -82,7 +93,8 @@ pub fn conversation_org(
         return None;
     }
     let jid = conv.participants.first()?;
-    book.resolve(jid_number(jid), default_cc)
+    jid_number(jid)
+        .and_then(|n| book.resolve(&n, default_cc))
         .and_then(|c| c.organization.clone())
 }
 
@@ -165,9 +177,7 @@ fn participant_label(
     book: &ContactBook,
     default_cc: Option<&str>,
 ) -> String {
-    let number = jid_number(jid);
-    if book.resolve(number, default_cc).is_some() {
-        let e164 = normalize(number, default_cc).unwrap_or_else(|| number.to_string());
+    if let Some((_, e164)) = jid_number(jid).and_then(|n| book.resolve_phone(&n, default_cc)) {
         format!(
             "{} ({})",
             resolve_name(jid, push_names, book, default_cc),
@@ -206,9 +216,7 @@ pub fn speaker_for(
         return "Unknown".to_string();
     };
     let jid = jid.trim();
-    let number = jid_number(jid);
-    if book.resolve(number, default_cc).is_some() {
-        let e164 = normalize(number, default_cc).unwrap_or_else(|| number.to_string());
+    if let Some((_, e164)) = jid_number(jid).and_then(|n| book.resolve_phone(&n, default_cc)) {
         let mut line = format!(
             "{} | {}",
             resolve_name(jid, push_names, book, default_cc),

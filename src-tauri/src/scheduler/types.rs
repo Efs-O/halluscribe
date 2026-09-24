@@ -63,9 +63,21 @@ pub struct SweepResult {
     /// already archived — the earlier copies are still on disk.
     pub superseded: u32,
     pub errors: Vec<String>,
+    /// The subset of `errors` that came from a business-messaging source or
+    /// session (or affected every source). A business import runs the full
+    /// sweep, so only these may be reported as the business import's error.
+    pub business_errors: Vec<String>,
 }
 
 impl SweepResult {
+    /// Record a sweep error; `business` also records it as a business error.
+    pub fn push_error(&mut self, message: String, business: bool) {
+        if business {
+            self.business_errors.push(message.clone());
+        }
+        self.errors.push(message);
+    }
+
     /// Daily success markers may advance only after a fully successful run.
     pub fn completed_successfully(&self) -> bool {
         self.ran && !self.busy && !self.cancelled && self.deferred == 0 && self.errors.is_empty()
